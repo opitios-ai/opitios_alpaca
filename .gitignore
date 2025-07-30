@@ -147,3 +147,15 @@ Thumbs.db
 # Application specific
 secrets.yaml
 *.secret
+
+# Docker
+docker-compose.override.yml
+
+# Temporary test files
+test_*.py
+*_test_temp.py
+
+# Coverage reports
+htmlcov/
+.coverage
+coverage.xml
