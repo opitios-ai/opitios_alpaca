@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  opitios-alpaca:
+    build: .
+    ports:
+      - "8081:8081"
+    environment:
+      - ALPACA_API_KEY=${ALPACA_API_KEY}
+      - ALPACA_SECRET_KEY=${ALPACA_SECRET_KEY}
+      - ALPACA_BASE_URL=${ALPACA_BASE_URL:-https://paper-api.alpaca.markets}
+      - ALPACA_PAPER_TRADING=${ALPACA_PAPER_TRADING:-true}
+    volumes:
+      - ./app:/app/app
+      - ./tests:/app/tests
+    command: uvicorn main:app --host 0.0.0.0 --port 8081 --reload
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Development tools container
+  dev-tools:
+    build: .
+    volumes:
+      - .:/app
+    command: tail -f /dev/null  # Keep container running
+    environment:
+      - PYTHONPATH=/app
+    profiles:
+      - dev
+
+networks:
+  default:
+    name: opitios-network
