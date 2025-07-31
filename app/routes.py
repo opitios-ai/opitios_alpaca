@@ -6,6 +6,7 @@ from app.models import (
     StockQuoteResponse, OrderResponse, PositionResponse, AccountResponse
 )
 from app.alpaca_client import AlpacaClient
+from config import settings
 from loguru import logger
 
 # Create router
@@ -18,8 +19,19 @@ def get_alpaca_client() -> AlpacaClient:
 # Health check endpoint
 @router.get("/health")
 async def health_check():
-    """Health check endpoint"""
-    return {"status": "healthy", "service": "Opitios Alpaca Trading Service"}
+    """Health check endpoint with configuration status"""
+    return {
+        "status": "healthy", 
+        "service": "Opitios Alpaca Trading Service",
+        "configuration": {
+            "real_data_only": settings.real_data_only,
+            "mock_data_enabled": settings.enable_mock_data,
+            "strict_error_handling": settings.strict_error_handling,
+            "paper_trading": settings.alpaca_paper_trading,
+            "max_option_symbols_per_request": settings.max_option_symbols_per_request
+        },
+        "data_policy": "Real Alpaca market data only - no calculated or mock data"
+    }
 
 # Connection test endpoint
 @router.get("/test-connection")
@@ -177,7 +189,11 @@ async def get_stock_bars(
 @router.post("/options/chain",
     summary="Get Options Chain",
     description="""
-    Get the options chain for an underlying stock. Returns calls and puts with different strike prices and expiration dates.
+    Get the options chain for an underlying stock using only real Alpaca market data.
+    Returns calls and puts with different strike prices and expiration dates.
+    
+    **Note:** This endpoint returns only real market data from Alpaca. Options without real quote data
+    will be included in the chain but may have missing bid/ask prices.
     
     **Example Request:**
     ```json
@@ -195,6 +211,7 @@ async def get_stock_bars(
         "underlying_price": 212.5,
         "expiration_dates": ["2024-02-16"],
         "options_count": 40,
+        "quote_failures": 5,
         "options": [
             {
                 "symbol": "AAPL240216C00190000",
@@ -202,34 +219,57 @@ async def get_stock_bars(
                 "option_type": "call",
                 "bid_price": 24.5,
                 "ask_price": 25.0,
-                "delta": 0.85,
-                "in_the_money": true
+                "last_price": 24.75,
+                "implied_volatility": 0.25
             }
         ]
     }
     ```
     """)
 async def get_options_chain(request: OptionsChainRequest, client: AlpacaClient = Depends(get_alpaca_client)):
-    """Get options chain for an underlying symbol"""
+    """Get options chain for an underlying symbol using only real market data"""
     try:
         chain_data = await client.get_options_chain(request.underlying_symbol, request.expiration_date)
         if "error" in chain_data:
-            raise HTTPException(status_code=400, detail=chain_data["error"])
+            logger.warning(f"Options chain unavailable for {request.underlying_symbol}: {chain_data['error']}")
+            raise HTTPException(
+                status_code=404, 
+                detail={
+                    "error": chain_data["error"],
+                    "error_code": "OPTIONS_CHAIN_UNAVAILABLE",
+                    "underlying_symbol": request.underlying_symbol,
+                    "expiration_date": request.expiration_date,
+                    "message": "No real options chain data available from Alpaca for this symbol"
+                }
+            )
         return chain_data
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error in get_options_chain: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error in get_options_chain for {request.underlying_symbol}: {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail={
+                "error": f"Internal server error while retrieving options chain: {str(e)}",
+                "error_code": "INTERNAL_ERROR",
+                "underlying_symbol": request.underlying_symbol,
+                "expiration_date": request.expiration_date
+            }
+        )
 
 @router.post("/options/quote",
     summary="Get Single Option Quote",
     description="""
-    Get a quote for a specific option contract.
+    Get a quote for a specific option contract using only real Alpaca market data.
     
     **Option Symbol Format:** AAPL240216C00190000
     - AAPL: Underlying symbol
     - 240216: Expiration date (YYMMDD)
     - C: Call option (P for Put)
     - 00190000: Strike price ($190.00)
+    
+    **Note:** This endpoint returns only real market data from Alpaca. If real data is not available,
+    the request will fail with an appropriate error message.
     
     **Example Request:**
     ```json
@@ -238,12 +278,11 @@ async def get_options_chain(request: OptionsChainRequest, client: AlpacaClient =
     }
     ```
     
-    **Example Response:**
+    **Example Success Response:**
     ```json
     {
         "symbol": "AAPL240216C00190000",
         "underlying_symbol": "AAPL",
-        "underlying_price": 212.5,
         "strike_price": 190.0,
         "expiration_date": "2024-02-16",
         "option_type": "call",
@@ -251,31 +290,58 @@ async def get_options_chain(request: OptionsChainRequest, client: AlpacaClient =
         "ask_price": 24.75,
         "last_price": 24.50,
         "implied_volatility": 0.25,
-        "delta": 0.85,
-        "gamma": 0.05,
-        "theta": -0.02,
-        "vega": 0.1,
-        "in_the_money": true,
-        "intrinsic_value": 22.5,
-        "time_value": 2.0
+        "timestamp": "2024-01-15T15:30:00Z"
+    }
+    ```
+    
+    **Example Error Response:**
+    ```json
+    {
+        "detail": {
+            "error": "No real market data available for option symbol: AAPL240216C00190000",
+            "error_code": "REAL_DATA_UNAVAILABLE",
+            "option_symbol": "AAPL240216C00190000",
+            "message": "This service provides only authentic market data from Alpaca. No calculated or mock data is returned."
+        }
     }
     ```
     """)
 async def get_option_quote(request: OptionQuoteRequest, client: AlpacaClient = Depends(get_alpaca_client)):
-    """Get quote for a specific option contract"""
+    """Get quote for a specific option contract using only real market data"""
     try:
         quote_data = await client.get_option_quote(request.option_symbol)
         if "error" in quote_data:
-            raise HTTPException(status_code=400, detail=quote_data["error"])
+            logger.warning(f"Real data unavailable for option {request.option_symbol}: {quote_data['error']}")
+            raise HTTPException(
+                status_code=404, 
+                detail={
+                    "error": quote_data["error"],
+                    "error_code": "REAL_DATA_UNAVAILABLE",
+                    "option_symbol": request.option_symbol,
+                    "message": "This service provides only authentic market data from Alpaca. No calculated or mock data is returned."
+                }
+            )
         return quote_data
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error in get_option_quote: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error in get_option_quote for {request.option_symbol}: {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail={
+                "error": f"Internal server error while retrieving option data: {str(e)}",
+                "error_code": "INTERNAL_ERROR",
+                "option_symbol": request.option_symbol
+            }
+        )
 
 @router.post("/options/quotes/batch",
     summary="Get Multiple Option Quotes", 
     description="""
-    Get quotes for multiple option contracts in a single request.
+    Get quotes for multiple option contracts in a single request using only real Alpaca market data.
+    
+    **Note:** This endpoint returns only real market data from Alpaca. Individual options that don't have
+    real data available will be marked with errors in the response.
     
     **Example Request:**
     ```json
@@ -299,35 +365,63 @@ async def get_option_quote(request: OptionQuoteRequest, client: AlpacaClient = D
                 "option_type": "call",
                 "bid_price": 24.25,
                 "ask_price": 24.75,
-                "delta": 0.85
+                "timestamp": "2024-01-15T15:30:00Z"
             },
             {
-                "symbol": "AAPL240216P00180000",
-                "underlying_symbol": "AAPL", 
-                "strike_price": 180.0,
-                "option_type": "put",
-                "bid_price": 2.10,
-                "ask_price": 2.35,
-                "delta": -0.15
+                "error": "No real market data available for option symbol: AAPL240216P00180000"
             }
         ],
-        "count": 2
+        "count": 2,
+        "successful_count": 1,
+        "failed_count": 1,
+        "failed_symbols": ["AAPL240216P00180000"]
     }
     ```
     """)
 async def get_multiple_option_quotes(request: MultiOptionQuoteRequest, client: AlpacaClient = Depends(get_alpaca_client)):
-    """Get quotes for multiple option contracts"""
+    """Get quotes for multiple option contracts using only real market data"""
     try:
-        if len(request.option_symbols) > 20:
-            raise HTTPException(status_code=400, detail="Maximum 20 option symbols allowed per request")
+        if len(request.option_symbols) > settings.max_option_symbols_per_request:
+            logger.warning(f"Batch request exceeded limit: {len(request.option_symbols)} symbols (max {settings.max_option_symbols_per_request})")
+            raise HTTPException(
+                status_code=400, 
+                detail={
+                    "error": f"Maximum {settings.max_option_symbols_per_request} option symbols allowed per request",
+                    "error_code": "REQUEST_LIMIT_EXCEEDED",
+                    "requested_count": len(request.option_symbols),
+                    "max_allowed": settings.max_option_symbols_per_request
+                }
+            )
             
         quotes_data = await client.get_multiple_option_quotes(request.option_symbols)
         if "error" in quotes_data:
-            raise HTTPException(status_code=400, detail=quotes_data["error"])
+            logger.error(f"Batch option quotes request failed: {quotes_data['error']}")
+            raise HTTPException(
+                status_code=500, 
+                detail={
+                    "error": quotes_data["error"],
+                    "error_code": "BATCH_REQUEST_FAILED",
+                    "requested_symbols": request.option_symbols
+                }
+            )
+        
+        # Log summary of batch request
+        success_rate = quotes_data.get('successful_count', 0) / len(request.option_symbols) * 100
+        logger.info(f"Batch option quotes: {success_rate:.1f}% success rate ({quotes_data.get('successful_count', 0)}/{len(request.option_symbols)})")
+        
         return quotes_data
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error in get_multiple_option_quotes: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500, 
+            detail={
+                "error": f"Internal server error during batch option quotes request: {str(e)}",
+                "error_code": "INTERNAL_ERROR",
+                "requested_symbols": request.option_symbols
+            }
+        )
 
 @router.get("/options/{underlying_symbol}/chain")
 async def get_options_chain_by_symbol(

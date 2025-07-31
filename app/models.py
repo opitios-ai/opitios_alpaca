@@ -72,6 +72,7 @@ class StockQuoteResponse(BaseModel):
     timestamp: datetime
 
 class OptionQuoteResponse(BaseModel):
+    """Response model for option quotes using only real market data from Alpaca"""
     symbol: str
     underlying_symbol: str
     strike_price: float
@@ -81,11 +82,27 @@ class OptionQuoteResponse(BaseModel):
     ask_price: Optional[float]
     last_price: Optional[float]
     implied_volatility: Optional[float]
-    delta: Optional[float]
-    gamma: Optional[float]
-    theta: Optional[float]
-    vega: Optional[float]
+    bid_size: Optional[int] = None
+    ask_size: Optional[int] = None
     timestamp: datetime
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "symbol": "AAPL240216C00190000",
+                "underlying_symbol": "AAPL",
+                "strike_price": 190.0,
+                "expiration_date": "2024-02-16",
+                "option_type": "call",
+                "bid_price": 24.25,
+                "ask_price": 24.75,
+                "last_price": 24.50,
+                "implied_volatility": 0.25,
+                "bid_size": 10,
+                "ask_size": 15,
+                "timestamp": "2024-01-15T15:30:00Z"
+            }
+        }
 
 class OrderResponse(BaseModel):
     id: str
@@ -117,3 +134,23 @@ class AccountResponse(BaseModel):
     last_equity: float
     multiplier: int
     pattern_day_trader: bool
+
+class ErrorResponse(BaseModel):
+    """Structured error response for API failures"""
+    error: str
+    error_code: str
+    message: Optional[str] = None
+    details: Optional[Dict[str, Any]] = None
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "error": "No real market data available for option symbol: AAPL240216C00190000",
+                "error_code": "REAL_DATA_UNAVAILABLE",
+                "message": "This service provides only authentic market data from Alpaca. No calculated or mock data is returned.",
+                "details": {
+                    "option_symbol": "AAPL240216C00190000",
+                    "service": "opitios_alpaca"
+                }
+            }
+        }

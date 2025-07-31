@@ -163,7 +163,7 @@ class AlpacaClient:
 
     # Options Methods
     async def get_options_chain(self, underlying_symbol: str, expiration_date: Optional[str] = None) -> Dict[str, Any]:
-        """Get options chain for an underlying symbol using real Alpaca data"""
+        """Get options chain for an underlying symbol using only real Alpaca market data"""
         try:
             # Use real Alpaca options chain API
             request = OptionChainRequest(underlying_symbol=underlying_symbol)
@@ -172,6 +172,7 @@ class AlpacaClient:
             if chain and hasattr(chain, 'option_contracts'):
                 options_data = []
                 exp_dates = set()
+                quote_failures = 0
                 
                 for contract in chain.option_contracts:
                     # Filter by expiration date if specified
@@ -185,11 +186,10 @@ class AlpacaClient:
                         "underlying_symbol": underlying_symbol,
                         "strike_price": float(contract.strike_price),
                         "expiration_date": str(contract.expiration_date),
-                        "option_type": contract.style.value.lower() if hasattr(contract, 'style') else "unknown",
-                        "note": "Real Alpaca options chain data"
+                        "option_type": contract.style.value.lower() if hasattr(contract, 'style') else "unknown"
                     }
                     
-                    # Try to get quote data for each contract
+                    # Try to get real quote data for each contract
                     try:
                         quote_data = await self.get_option_quote(contract.symbol)
                         if "error" not in quote_data:
@@ -197,133 +197,87 @@ class AlpacaClient:
                                 "bid_price": quote_data.get("bid_price"),
                                 "ask_price": quote_data.get("ask_price"),
                                 "bid_size": quote_data.get("bid_size"),
-                                "ask_size": quote_data.get("ask_size")
+                                "ask_size": quote_data.get("ask_size"),
+                                "last_price": quote_data.get("last_price"),
+                                "implied_volatility": quote_data.get("implied_volatility")
                             })
-                    except:
-                        pass  # Continue without quote data if it fails
+                        else:
+                            quote_failures += 1
+                            logger.warning(f"No real quote data available for option {contract.symbol}")
+                    except Exception as quote_error:
+                        quote_failures += 1
+                        logger.warning(f"Failed to get quote for option {contract.symbol}: {quote_error}")
                     
                     options_data.append(option_data)
                 
-                # Get current stock price
+                # Get current stock price for reference
                 stock_quote = await self.get_stock_quote(underlying_symbol)
                 current_price = None
                 if "error" not in stock_quote:
                     current_price = stock_quote.get("ask_price") or stock_quote.get("bid_price")
+                else:
+                    logger.warning(f"Could not get current stock price for {underlying_symbol}")
+                
+                logger.info(f"Options chain for {underlying_symbol}: {len(options_data)} contracts, {quote_failures} quote failures")
                 
                 return {
                     "underlying_symbol": underlying_symbol,
                     "underlying_price": current_price,
                     "expiration_dates": sorted(list(exp_dates)),
                     "options_count": len(options_data),
-                    "options": options_data[:100],  # Limit results
-                    "note": "Real Alpaca options chain data"
+                    "quote_failures": quote_failures,
+                    "options": options_data[:100]  # Limit results for performance
                 }
             else:
-                return {"error": f"No options chain data found for {underlying_symbol}"}
+                logger.error(f"No options chain contracts found for {underlying_symbol}")
+                return {"error": f"No real options chain data available for {underlying_symbol}"}
             
         except Exception as e:
-            logger.error(f"Error getting real options chain for {underlying_symbol}: {e}")
-            # Fallback to a simple error message
-            return {"error": f"Failed to get real options chain data: {str(e)}"}
+            logger.error(f"Error getting options chain for {underlying_symbol}: {e}")
+            return {"error": f"Failed to retrieve real options chain data for {underlying_symbol}: {str(e)}"}
 
     async def get_option_quote(self, option_symbol: str) -> Dict[str, Any]:
-        """Get quote for a specific option contract - tries real Alpaca data first, falls back to calculated pricing"""
+        """Get quote for a specific option contract using only real Alpaca market data"""
         try:
-            # First, try to get real Alpaca options data
-            try:
-                request = OptionLatestQuoteRequest(symbol_or_symbols=[option_symbol])
-                quotes = self.option_data_client.get_option_latest_quote(request)
+            # Get real Alpaca options data only
+            request = OptionLatestQuoteRequest(symbol_or_symbols=[option_symbol])
+            quotes = self.option_data_client.get_option_latest_quote(request)
+            
+            if quotes and option_symbol in quotes:
+                quote = quotes[option_symbol]
                 
-                if quotes and option_symbol in quotes:
-                    quote = quotes[option_symbol]
-                    
-                    # Parse option symbol to get components
-                    underlying, strike_price, exp_date, option_type = self._parse_option_symbol(option_symbol)
-                    
-                    return {
-                        "symbol": option_symbol,
-                        "underlying_symbol": underlying,
-                        "strike_price": strike_price,
-                        "expiration_date": exp_date,
-                        "option_type": option_type,
-                        "bid_price": float(quote.bid_price) if quote.bid_price else None,
-                        "ask_price": float(quote.ask_price) if quote.ask_price else None,
-                        "bid_size": quote.bid_size,
-                        "ask_size": quote.ask_size,
-                        "timestamp": quote.timestamp,
-                        "data_source": "Real Alpaca options market data"
-                    }
-            except Exception as e:
-                logger.warning(f"Real options data not available for {option_symbol}: {e}")
-            
-            # Fallback: Calculate realistic pricing based on real stock price
-            underlying, strike_price, exp_date, option_type = self._parse_option_symbol(option_symbol)
-            
-            if not underlying or not strike_price or not option_type:
-                return {"error": "Invalid option symbol format"}
-            
-            # Get real underlying stock price
-            stock_quote = await self.get_stock_quote(underlying)
-            if "error" in stock_quote:
-                return {"error": f"Could not get stock price for underlying {underlying}"}
-            
-            current_price = stock_quote.get("ask_price") or stock_quote.get("bid_price")
-            if not current_price:
-                return {"error": f"No valid stock price found for {underlying}"}
-            
-            # Calculate Black-Scholes approximation for realistic pricing
-            from datetime import datetime
-            try:
-                exp_datetime = datetime.strptime(exp_date, "%Y-%m-%d")
-                days_to_exp = (exp_datetime - datetime.now()).days
-                time_to_exp = max(1, days_to_exp) / 365.0
-            except:
-                time_to_exp = 0.1  # Default to ~1 month
-            
-            # Simple Black-Scholes approximation
-            if option_type == "call":
-                intrinsic = max(0, current_price - strike_price)
-                time_value = max(0.01, strike_price * 0.25 * (time_to_exp ** 0.5) * 0.5)
-                delta = 0.5 + (current_price - strike_price) / (strike_price * 2)
-                delta = max(0.01, min(0.99, delta))
-            else:  # put
-                intrinsic = max(0, strike_price - current_price)
-                time_value = max(0.01, strike_price * 0.25 * (time_to_exp ** 0.5) * 0.5)
-                delta = -0.5 + (current_price - strike_price) / (strike_price * 2)
-                delta = max(-0.99, min(-0.01, delta))
-            
-            theoretical_price = intrinsic + time_value
-            bid_price = max(0.01, theoretical_price * 0.98)
-            ask_price = theoretical_price * 1.02
-            
-            return {
-                "symbol": option_symbol,
-                "underlying_symbol": underlying,
-                "underlying_price": current_price,
-                "strike_price": strike_price,
-                "expiration_date": exp_date,
-                "option_type": option_type,
-                "bid_price": round(bid_price, 2),
-                "ask_price": round(ask_price, 2),
-                "last_price": round(theoretical_price, 2),
-                "implied_volatility": 0.25,
-                "delta": round(delta, 3),
-                "gamma": 0.05,
-                "theta": -0.02,
-                "vega": 0.1,
-                "in_the_money": (option_type == "call" and current_price > strike_price) or (option_type == "put" and current_price < strike_price),
-                "intrinsic_value": round(intrinsic, 2),
-                "time_value": round(time_value, 2),
-                "timestamp": pd.Timestamp.now(),
-                "data_source": f"Calculated pricing based on real {underlying} stock price: ${current_price}"
-            }
+                # Parse option symbol to get components
+                underlying, strike_price, exp_date, option_type = self._parse_option_symbol(option_symbol)
+                
+                # Validate that we have valid option data
+                if not underlying or not strike_price or not option_type:
+                    logger.error(f"Failed to parse option symbol: {option_symbol}")
+                    return {"error": f"Invalid option symbol format: {option_symbol}"}
+                
+                return {
+                    "symbol": option_symbol,
+                    "underlying_symbol": underlying,
+                    "strike_price": strike_price,
+                    "expiration_date": exp_date,
+                    "option_type": option_type,
+                    "bid_price": float(quote.bid_price) if quote.bid_price else None,
+                    "ask_price": float(quote.ask_price) if quote.ask_price else None,
+                    "bid_size": quote.bid_size if hasattr(quote, 'bid_size') else None,
+                    "ask_size": quote.ask_size if hasattr(quote, 'ask_size') else None,
+                    "last_price": float(quote.last_price) if hasattr(quote, 'last_price') and quote.last_price else None,
+                    "implied_volatility": float(quote.implied_volatility) if hasattr(quote, 'implied_volatility') and quote.implied_volatility else None,
+                    "timestamp": quote.timestamp
+                }
+            else:
+                logger.warning(f"No real options data available for {option_symbol}")
+                return {"error": f"No real market data available for option symbol: {option_symbol}"}
                 
         except Exception as e:
             logger.error(f"Error getting option quote for {option_symbol}: {e}")
-            return {"error": f"Failed to get option data: {str(e)}"}
+            return {"error": f"Failed to retrieve real option data for {option_symbol}: {str(e)}"}
     
     def _parse_option_symbol(self, option_symbol: str):
-        """Parse option symbol to extract components"""
+        """Parse option symbol to extract components for real data validation"""
         try:
             # Find where the date starts by looking for the first digit after letters
             underlying = ""
@@ -336,9 +290,11 @@ class AlpacaClient:
                     break
             
             if not underlying or date_start_idx == 0:
+                logger.error(f"No underlying symbol found in: {option_symbol}")
                 return None, None, None, None
             
             if len(option_symbol) < date_start_idx + 7:
+                logger.error(f"Option symbol too short: {option_symbol}")
                 return None, None, None, None
                 
             date_part = option_symbol[date_start_idx:date_start_idx+6]
@@ -356,22 +312,42 @@ class AlpacaClient:
             return None, None, None, None
 
     async def get_multiple_option_quotes(self, option_symbols: List[str]) -> Dict[str, Any]:
-        """Get quotes for multiple option contracts"""
+        """Get quotes for multiple option contracts using only real Alpaca market data"""
         try:
+            if not option_symbols or len(option_symbols) == 0:
+                logger.error("No option symbols provided for batch quote request")
+                return {"error": "No option symbols provided"}
+            
             results = []
+            successful_quotes = 0
+            failed_symbols = []
+            
             for symbol in option_symbols:
                 quote = await self.get_option_quote(symbol)
+                if "error" in quote:
+                    failed_symbols.append(symbol)
+                    logger.warning(f"Failed to get real data for option {symbol}: {quote['error']}")
+                else:
+                    successful_quotes += 1
                 results.append(quote)
+            
+            # Log summary of results
+            logger.info(f"Option quotes batch request: {successful_quotes}/{len(option_symbols)} successful")
+            if failed_symbols:
+                logger.warning(f"Failed option symbols: {failed_symbols}")
             
             return {
                 "quotes": results,
-                "count": len(results),
-                "requested_symbols": option_symbols
+                "count": len(results),  
+                "successful_count": successful_quotes,
+                "failed_count": len(failed_symbols),
+                "requested_symbols": option_symbols,
+                "failed_symbols": failed_symbols if failed_symbols else None
             }
             
         except Exception as e:
             logger.error(f"Error getting multiple option quotes: {e}")
-            return {"error": str(e)}
+            return {"error": f"Failed to process batch option quotes request: {str(e)}"}
 
     # Trading Methods
     async def place_stock_order(self, symbol: str, qty: float, side: str, order_type: str = "market", 

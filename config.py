@@ -15,6 +15,16 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8081
     
+    # Data Service Configuration
+    real_data_only: bool = True
+    enable_mock_data: bool = False
+    strict_error_handling: bool = True
+    max_option_symbols_per_request: int = 20
+    
+    # Logging Configuration
+    log_data_failures: bool = True
+    log_level: str = "INFO"
+    
     class Config:
         env_file = ".env"
         case_sensitive = False
