@@ -462,6 +462,8 @@ async def get_options_chain_by_symbol(
 @router.post("/stocks/order", 
     summary="Place Stock Order",
     description="""
+    🔐 **JWT AUTHENTICATION REQUIRED** - Protected endpoint
+    
     Place a stock order with various order types and time in force options.
     
     **Order Types:**
@@ -513,8 +515,10 @@ async def get_options_chain_by_symbol(
     }
     ```
     """,
-    response_model=OrderResponse)
-async def place_stock_order(request: StockOrderRequest, client: AlpacaClient = Depends(get_alpaca_client)):
+    response_model=OrderResponse,
+    dependencies=[Depends(get_current_user)],
+    security=[{"BearerAuth": []}])
+async def place_stock_order(request: StockOrderRequest, client: AlpacaClient = Depends(get_alpaca_client_for_user)):
     """Place a stock order"""
     try:
         order_data = await client.place_stock_order(
@@ -533,8 +537,12 @@ async def place_stock_order(request: StockOrderRequest, client: AlpacaClient = D
         logger.error(f"Error in place_stock_order: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/options/order")
-async def place_option_order(request: OptionOrderRequest, client: AlpacaClient = Depends(get_alpaca_client)):
+@router.post("/options/order",
+    summary="Place Options Order",
+    description="🔐 **JWT AUTHENTICATION REQUIRED** - Place an options order",
+    dependencies=[Depends(get_current_user)],
+    security=[{"BearerAuth": []}])
+async def place_option_order(request: OptionOrderRequest, client: AlpacaClient = Depends(get_alpaca_client_for_user)):
     """Place an options order"""
     try:
         order_data = await client.place_option_order(
@@ -553,11 +561,16 @@ async def place_option_order(request: OptionOrderRequest, client: AlpacaClient =
         raise HTTPException(status_code=500, detail=str(e))
 
 # Order management endpoints
-@router.get("/orders", response_model=List[OrderResponse])
+@router.get("/orders", 
+    summary="Get Orders",
+    description="🔐 **JWT AUTHENTICATION REQUIRED** - Get user's orders",
+    response_model=List[OrderResponse],
+    dependencies=[Depends(get_current_user)],
+    security=[{"BearerAuth": []}])
 async def get_orders(
     status: Optional[str] = None, 
     limit: int = 100,
-    client: AlpacaClient = Depends(get_alpaca_client)
+    client: AlpacaClient = Depends(get_alpaca_client_for_user)
 ):
     """Get orders"""
     try:
@@ -569,8 +582,12 @@ async def get_orders(
         logger.error(f"Error in get_orders: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("/orders/{order_id}")
-async def cancel_order(order_id: str, client: AlpacaClient = Depends(get_alpaca_client)):
+@router.delete("/orders/{order_id}",
+    summary="Cancel Order", 
+    description="🔐 **JWT AUTHENTICATION REQUIRED** - Cancel an order",
+    dependencies=[Depends(get_current_user)],
+    security=[{"BearerAuth": []}])
+async def cancel_order(order_id: str, client: AlpacaClient = Depends(get_alpaca_client_for_user)):
     """Cancel an order"""
     try:
         result = await client.cancel_order(order_id)
@@ -582,13 +599,17 @@ async def cancel_order(order_id: str, client: AlpacaClient = Depends(get_alpaca_
         raise HTTPException(status_code=500, detail=str(e))
 
 # Quick trading endpoints for convenience
-@router.post("/stocks/{symbol}/buy")
+@router.post("/stocks/{symbol}/buy",
+    summary="Quick Buy Stock",
+    description="🔐 **JWT AUTHENTICATION REQUIRED** - Quick buy stock order",
+    dependencies=[Depends(get_current_user)],
+    security=[{"BearerAuth": []}])
 async def buy_stock(
     symbol: str,
     qty: float,
     order_type: str = "market",
     limit_price: Optional[float] = None,
-    client: AlpacaClient = Depends(get_alpaca_client)
+    client: AlpacaClient = Depends(get_alpaca_client_for_user)
 ):
     """Quick buy stock endpoint"""
     try:
@@ -606,13 +627,17 @@ async def buy_stock(
         logger.error(f"Error in buy_stock: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/stocks/{symbol}/sell")
+@router.post("/stocks/{symbol}/sell",
+    summary="Quick Sell Stock", 
+    description="🔐 **JWT AUTHENTICATION REQUIRED** - Quick sell stock order",
+    dependencies=[Depends(get_current_user)],
+    security=[{"BearerAuth": []}])
 async def sell_stock(
     symbol: str,
     qty: float,
     order_type: str = "market",
     limit_price: Optional[float] = None,
-    client: AlpacaClient = Depends(get_alpaca_client)
+    client: AlpacaClient = Depends(get_alpaca_client_for_user)
 ):
     """Quick sell stock endpoint"""
     try:

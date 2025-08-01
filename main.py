@@ -18,8 +18,7 @@ app = FastAPI(
     description="Alpaca Trading API Service for stock and options trading",
     version="1.0.0",
     debug=settings.debug,
-    # Add JWT security scheme for Swagger UI
-    security=[{"BearerAuth": []}],
+    # Don't apply global security - we'll apply it per endpoint
     # Define security schemes
     openapi_tags=[
         {
