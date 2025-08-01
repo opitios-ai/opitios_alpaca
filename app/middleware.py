@@ -64,7 +64,7 @@ initialize_redis()
 
 def get_redis_client():
     """获取Redis客户端，如果不可用则返回None"""
-    global redis_client, redis_available
+    global redis_available
     if not redis_available:
         return None
     
