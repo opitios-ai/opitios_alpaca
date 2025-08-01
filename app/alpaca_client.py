@@ -1,5 +1,6 @@
 from alpaca.trading.client import TradingClient
-from alpaca.data.historical import StockHistoricalDataClient, OptionHistoricalDataClient
+from alpaca.data.historical import StockHistoricalDataClient
+from alpaca.data.historical.option import OptionHistoricalDataClient
 from alpaca.trading.requests import MarketOrderRequest, LimitOrderRequest, StopOrderRequest, GetOrdersRequest
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderType
 from alpaca.data.requests import StockLatestQuoteRequest, StockBarsRequest, OptionLatestQuoteRequest, OptionChainRequest
@@ -11,11 +12,16 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 class AlpacaClient:
-    def __init__(self):
-        self.api_key = settings.alpaca_api_key
-        self.secret_key = settings.alpaca_secret_key
+    def __init__(self, api_key: Optional[str] = None, secret_key: Optional[str] = None, paper_trading: Optional[bool] = None):
+        # Use provided credentials or fall back to settings
+        self.api_key = api_key or settings.alpaca_api_key
+        self.secret_key = secret_key or settings.alpaca_secret_key
         self.base_url = settings.alpaca_base_url
-        self.paper_trading = settings.alpaca_paper_trading
+        self.paper_trading = paper_trading if paper_trading is not None else settings.alpaca_paper_trading
+        
+        # Validate credentials
+        if not self.api_key or not self.secret_key:
+            raise ValueError("Alpaca API credentials are required")
         
         # Initialize trading client
         self.trading_client = TradingClient(

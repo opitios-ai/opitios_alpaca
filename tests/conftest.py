@@ -5,12 +5,17 @@ Pytest configuration and shared fixtures for Alpaca service tests
 import pytest
 import os
 import sys
+import asyncio
 from unittest.mock import Mock, patch
 from datetime import datetime, timedelta
-
+from typing import Generator, Dict, Any
+from fastapi.testclient import TestClient
 
 # Add the app directory to the Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+from main import app
+from app.middleware import create_jwt_token, UserContext, user_manager
 
 
 @pytest.fixture(scope="session")
@@ -150,3 +155,81 @@ def pytest_runtest_setup(item):
     if "performance" in item.keywords:
         if os.getenv("SKIP_PERFORMANCE_TESTS"):
             pytest.skip("Performance tests skipped in CI")
+
+
+# Additional fixtures for comprehensive testing
+@pytest.fixture(scope="session")
+def event_loop():
+    """Create an instance of the default event loop for the test session."""
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    yield loop
+    loop.close()
+
+
+@pytest.fixture
+def client() -> TestClient:
+    """Create a test client for the FastAPI application"""
+    return TestClient(app)
+
+
+@pytest.fixture
+def test_user_data() -> Dict[str, Any]:
+    """Provide test user data"""
+    return {
+        "user_id": "test_user_123",
+        "username": "testuser",
+        "email": "test@example.com",
+        "permissions": ["trading", "market_data"],
+        "rate_limits": {
+            "requests_per_minute": 120,
+            "orders_per_minute": 10
+        },
+        "alpaca_credentials": {
+            "api_key": "test_api_key",
+            "secret_key": "test_secret_key",
+            "paper_trading": True
+        }
+    }
+
+
+@pytest.fixture
+def jwt_token(test_user_data) -> str:
+    """Create a JWT token for testing"""
+    return create_jwt_token({
+        "user_id": test_user_data["user_id"],
+        "permissions": test_user_data["permissions"]
+    })
+
+
+@pytest.fixture
+def auth_headers(jwt_token) -> Dict[str, str]:
+    """Create authorization headers with JWT token"""
+    return {"Authorization": f"Bearer {jwt_token}"}
+
+
+@pytest.fixture
+def user_context(test_user_data) -> Generator[UserContext, None, None]:
+    """Create a user context for testing"""
+    context = UserContext(
+        user_id=test_user_data["user_id"],
+        alpaca_credentials=test_user_data["alpaca_credentials"],
+        permissions=test_user_data["permissions"],
+        rate_limits=test_user_data["rate_limits"]
+    )
+    
+    # Add to user manager
+    user_manager.active_users[test_user_data["user_id"]] = context
+    
+    yield context
+    
+    # Cleanup
+    if test_user_data["user_id"] in user_manager.active_users:
+        del user_manager.active_users[test_user_data["user_id"]]
+
+
+@pytest.fixture(autouse=True)
+def cleanup_user_manager():
+    """Automatically cleanup user manager after each test"""
+    yield
+    # Clear all active users after each test
+    user_manager.active_users.clear()

@@ -87,7 +87,7 @@ class OptionQuoteResponse(BaseModel):
     timestamp: datetime
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "symbol": "AAPL240216C00190000",
                 "underlying_symbol": "AAPL",
@@ -143,7 +143,7 @@ class ErrorResponse(BaseModel):
     details: Optional[Dict[str, Any]] = None
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "error": "No real market data available for option symbol: AAPL240216C00190000",
                 "error_code": "REAL_DATA_UNAVAILABLE",

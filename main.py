@@ -1,31 +1,81 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer
 from app.routes import router
+from app.middleware import AuthenticationMiddleware, RateLimitMiddleware, LoggingMiddleware
+from app.logging_config import logging_config
+from app.connection_pool import connection_pool
 from config import settings
 from loguru import logger
 import uvicorn
 
-# Configure logging
-logger.add("logs/alpaca_service.log", rotation="100 MB", retention="7 days", encoding='utf-8', enqueue=True)
+# Configure enhanced logging
+logging_config.setup_logging()
 
-# Create FastAPI application
+# Create FastAPI application with JWT security scheme
 app = FastAPI(
     title=settings.app_name,
     description="Alpaca Trading API Service for stock and options trading",
     version="1.0.0",
-    debug=settings.debug
+    debug=settings.debug,
+    # Add JWT security scheme for Swagger UI
+    security=[{"BearerAuth": []}],
+    # Define security schemes
+    openapi_tags=[
+        {
+            "name": "authentication",
+            "description": "User authentication and management"
+        },
+        {
+            "name": "trading", 
+            "description": "Stock and options trading operations"
+        }
+    ]
 )
+
+# Add JWT security scheme to OpenAPI schema
+from fastapi.openapi.utils import get_openapi
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    openapi_schema["components"]["securitySchemes"] = {
+        "BearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+            "description": "Enter JWT token obtained from /api/v1/auth/login"
+        }
+    }
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi
+
+# Add middleware in order (last added = first executed)
+app.add_middleware(LoggingMiddleware)
+app.add_middleware(RateLimitMiddleware)
+app.add_middleware(AuthenticationMiddleware)
 
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure this properly for production
+    allow_origins=getattr(settings, 'allowed_origins', ["*"]),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Include routers
+from app.auth_routes import auth_router, admin_router
+app.include_router(auth_router, prefix="/api/v1")
+app.include_router(admin_router, prefix="/api/v1")
 app.include_router(router, prefix="/api/v1", tags=["trading"])
 
 @app.get("/")
@@ -57,6 +107,7 @@ async def startup_event():
 async def shutdown_event():
     """Application shutdown event"""
     logger.info(f"Shutting down {settings.app_name}")
+    await connection_pool.shutdown()
 
 if __name__ == "__main__":
     uvicorn.run(
