@@ -6,13 +6,28 @@ from app.models import (
     StockQuoteResponse, OrderResponse, PositionResponse, AccountResponse
 )
 from app.alpaca_client import AlpacaClient
+from app.middleware import get_current_user, UserContext
 from config import settings
 from loguru import logger
 
 # Create router
 router = APIRouter()
 
-# Dependency to get Alpaca client
+# Dependency to get Alpaca client with user context
+async def get_alpaca_client_for_user(current_user: UserContext = Depends(get_current_user)) -> AlpacaClient:
+    """Get Alpaca client configured for current authenticated user"""
+    try:
+        alpaca_credentials = current_user.get_alpaca_credentials()
+        return AlpacaClient(
+            api_key=alpaca_credentials['api_key'],
+            secret_key=alpaca_credentials['secret_key'],
+            paper_trading=alpaca_credentials['paper_trading']
+        )
+    except Exception as e:
+        logger.error(f"Failed to create Alpaca client for user {current_user.user_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to initialize trading client")
+
+# Dependency to get Alpaca client (for compatibility with non-authenticated endpoints)
 def get_alpaca_client() -> AlpacaClient:
     return AlpacaClient()
 
@@ -69,8 +84,10 @@ async def get_positions(client: AlpacaClient = Depends(get_alpaca_client)):
 
 # Stock quote endpoints
 @router.post("/stocks/quote", 
-    summary="Get Single Stock Quote",
+    summary="Get Single Stock Quote - 🔓 NO AUTH REQUIRED",
     description="""
+    🔓 **NO AUTHENTICATION REQUIRED** - Public endpoint
+    
     Get the latest quote for a single stock.
     
     **Example Request:**
@@ -156,9 +173,11 @@ async def get_multiple_stock_quotes(request: MultiStockQuoteRequest, client: Alp
         logger.error(f"Error in get_multiple_stock_quotes: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/stocks/{symbol}/quote")
+@router.get("/stocks/{symbol}/quote", 
+    summary="Get Stock Quote by Symbol - 🔓 NO AUTH REQUIRED",
+    description="🔓 **NO AUTHENTICATION REQUIRED** - Get latest quote for a stock by symbol")
 async def get_stock_quote_by_symbol(symbol: str, client: AlpacaClient = Depends(get_alpaca_client)):
-    """Get latest quote for a stock by symbol"""
+    """Get latest quote for a stock by symbol - NO AUTH REQUIRED"""
     try:
         quote_data = await client.get_stock_quote(symbol.upper())
         if "error" in quote_data:

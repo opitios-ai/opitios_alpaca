@@ -25,6 +25,24 @@ class Settings(BaseSettings):
     log_data_failures: bool = True
     log_level: str = "INFO"
     
+    # JWT Configuration
+    jwt_secret: str = "your-secret-key-change-in-production"
+    jwt_algorithm: str = "HS256"
+    jwt_expiration_hours: int = 24
+    
+    # Redis Configuration
+    redis_host: str = "localhost"
+    redis_port: int = 6379
+    redis_db: int = 0
+    redis_password: Optional[str] = None
+    
+    # CORS Configuration
+    allowed_origins: list = ["*"]
+    
+    # Rate Limiting Configuration
+    default_rate_limit: int = 120
+    rate_limit_window: int = 60
+    
     class Config:
         env_file = ".env"
         case_sensitive = False
