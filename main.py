@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
+from fastapi.staticfiles import StaticFiles
 from app.routes import router
 from app.middleware import AuthenticationMiddleware, RateLimitMiddleware, LoggingMiddleware
 from app.logging_config import logging_config
@@ -73,9 +74,14 @@ app.add_middleware(
 
 # Include routers
 from app.auth_routes import auth_router, admin_router
+from app.websocket_routes import ws_router
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
 app.include_router(router, prefix="/api/v1", tags=["trading"])
+app.include_router(ws_router, prefix="/api/v1", tags=["websocket"])
+
+# Mount static files
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/")
 async def root():

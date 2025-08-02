@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Opitios Alpaca WebSocket 实时测试</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: #fff;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .subtitle {
+            font-size: 1.2em;
+            opacity: 0.8;
+            margin-bottom: 20px;
+        }
+        
+        .status-panel {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+        }
+        
+        .status-item {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .status-label {
+            font-size: 0.9em;
+            opacity: 0.7;
+            margin-bottom: 5px;
+        }
+        
+        .status-value {
+            font-size: 1.3em;
+            font-weight: bold;
+        }
+        
+        .status-online { color: #4CAF50; }
+        .status-offline { color: #f44336; }
+        .status-connecting { color: #ff9800; }
+        
+        .data-panel {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .data-section {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .section-title {
+            font-size: 1.4em;
+            margin-bottom: 15px;
+            text-align: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+            padding-bottom: 10px;
+        }
+        
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        
+        .data-table th,
+        .data-table td {
+            padding: 8px 12px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .data-table th {
+            background: rgba(0, 0, 0, 0.2);
+            font-weight: bold;
+            font-size: 0.9em;
+        }
+        
+        .data-table td {
+            font-family: 'Monaco', monospace;
+            font-size: 0.85em;
+        }
+        
+        .symbol {
+            font-weight: bold;
+            color: #64B5F6;
+        }
+        
+        .price-up {
+            color: #4CAF50;
+        }
+        
+        .price-down {
+            color: #f44336;
+        }
+        
+        .control-panel {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            margin-bottom: 20px;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: all 0.3s;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }
+        
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .logs-panel {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .logs-container {
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 6px;
+            padding: 15px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: 'Monaco', monospace;
+            font-size: 0.85em;
+            line-height: 1.4;
+        }
+        
+        .log-entry {
+            margin-bottom: 5px;
+            padding: 3px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        
+        .log-timestamp {
+            color: #888;
+            margin-right: 10px;
+        }
+        
+        .log-info { color: #64B5F6; }
+        .log-success { color: #4CAF50; }
+        .log-warning { color: #ff9800; }
+        .log-error { color: #f44336; }
+        
+        .info-panel {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            margin-top: 20px;
+        }
+        
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        
+        .info-item h3 {
+            color: #64B5F6;
+            margin-bottom: 10px;
+        }
+        
+        .info-item ul {
+            list-style: none;
+            padding-left: 20px;
+        }
+        
+        .info-item li {
+            margin-bottom: 5px;
+            position: relative;
+        }
+        
+        .info-item li:before {
+            content: "•";
+            color: #4CAF50;
+            font-weight: bold;
+            position: absolute;
+            left: -15px;
+        }
+        
+        @media (max-width: 768px) {
+            .data-panel {
+                grid-template-columns: 1fr;
+            }
+            
+            .button-group {
+                flex-direction: column;
+            }
+            
+            button {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 Opitios Alpaca WebSocket</h1>
+            <div class="subtitle">实时股票和期权数据流测试</div>
+            <div class="subtitle">✅ Alpaca Paper Trading API - IEX Real-time Data</div>
+        </div>
+        
+        <!-- 连接状态面板 -->
+        <div class="status-panel">
+            <div class="status-grid">
+                <div class="status-item">
+                    <div class="status-label">WebSocket连接</div>
+                    <div class="status-value" id="connection-status">未连接</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">接收消息数</div>
+                    <div class="status-value" id="message-count">0</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">订阅股票数</div>
+                    <div class="status-value" id="stock-count">0</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">订阅期权数</div>
+                    <div class="status-value" id="option-count">0</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">最后更新</div>
+                    <div class="status-value" id="last-update">-</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">数据源</div>
+                    <div class="status-value">Alpaca IEX</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 控制面板 -->
+        <div class="control-panel">
+            <div class="button-group">
+                <button id="connect-btn" onclick="connectWebSocket()">连接 WebSocket</button>
+                <button id="disconnect-btn" onclick="disconnectWebSocket()" disabled>断开连接</button>
+                <button onclick="clearLogs()">清空日志</button>
+                <button onclick="sendPing()">发送心跳</button>
+                <button onclick="getJWTToken()">获取演示JWT</button>
+            </div>
+        </div>
+        
+        <!-- 数据显示面板 -->
+        <div class="data-panel">
+            <!-- 股票数据 -->
+            <div class="data-section">
+                <div class="section-title">📈 实时股票数据</div>
+                <div style="font-size: 0.9em; opacity: 0.8; margin-bottom: 10px;">
+                    默认股票: AAPL, TSLA, GOOGL, MSFT, AMZN, NVDA, META, SPY
+                </div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>股票代码</th>
+                            <th>买价</th>
+                            <th>卖价</th>
+                            <th>最新价</th>
+                            <th>更新时间</th>
+                        </tr>
+                    </thead>
+                    <tbody id="stock-data">
+                        <tr>
+                            <td colspan="5" style="text-align: center; opacity: 0.6;">等待连接WebSocket...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- 期权数据 -->
+            <div class="data-section">
+                <div class="section-title">📊 实时期权数据</div>
+                <div style="font-size: 0.9em; opacity: 0.8; margin-bottom: 10px;">
+                    默认期权: AAPL/TSLA/SPY 看涨/看跌期权
+                </div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>期权代码</th>
+                            <th>买价</th>
+                            <th>卖价</th>
+                            <th>类型</th>
+                            <th>更新时间</th>
+                        </tr>
+                    </thead>
+                    <tbody id="option-data">
+                        <tr>
+                            <td colspan="5" style="text-align: center; opacity: 0.6;">等待连接WebSocket...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <!-- 日志面板 -->
+        <div class="logs-panel">
+            <div class="section-title">📋 实时日志</div>
+            <div class="logs-container" id="logs"></div>
+        </div>
+        
+        <!-- 信息面板 -->
+        <div class="info-panel">
+            <div class="info-grid">
+                <div class="info-item">
+                    <h3>WebSocket 功能确认</h3>
+                    <ul>
+                        <li>✅ Alpaca Paper Trading 完全支持 WebSocket</li>
+                        <li>✅ 实时IEX交易所数据流</li>
+                        <li>✅ 股票报价和交易数据</li>
+                        <li>✅ 期权数据 (如果Alpaca支持)</li>
+                        <li>⚠️ 免费版限制: 30个股票代码</li>
+                        <li>⚠️ 单连接限制</li>
+                    </ul>
+                </div>
+                <div class="info-item">
+                    <h3>技术规格</h3>
+                    <ul>
+                        <li>协议: WebSocket over WSS</li>
+                        <li>数据格式: JSON</li>
+                        <li>更新频率: 实时</li>
+                        <li>数据源: Alpaca IEX Feed</li>
+                        <li>认证: API Key</li>
+                        <li>无Mock数据，真实市场数据</li>
+                    </ul>
+                </div>
+                <div class="info-item">
+                    <h3>默认测试数据</h3>
+                    <ul>
+                        <li>股票: AAPL, TSLA, GOOGL, MSFT等</li>
+                        <li>AAPL 期权: $230 Call, $220 Put</li>
+                        <li>TSLA 期权: $300 Call, $280 Put</li>
+                        <li>SPY 期权: $580 Call, $570 Put</li>
+                        <li>到期日: 2025-01-17</li>
+                        <li>自动订阅，实时更新</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let websocket = null;
+        let messageCount = 0;
+        let stockData = {};
+        let optionData = {};
+        let jwtToken = null;
+        
+        const wsUrl = `ws://${window.location.host}/api/v1/ws/market-data`;
+        
+        function connectWebSocket() {
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                log('warning', 'WebSocket已经连接');
+                return;
+            }
+            
+            log('info', `正在连接到: ${wsUrl}`);
+            updateConnectionStatus('connecting');
+            
+            websocket = new WebSocket(wsUrl);
+            
+            websocket.onopen = function(event) {
+                log('success', 'WebSocket连接成功!');
+                updateConnectionStatus('online');
+                document.getElementById('connect-btn').disabled = true;
+                document.getElementById('disconnect-btn').disabled = false;
+            };
+            
+            websocket.onmessage = function(event) {
+                messageCount++;
+                document.getElementById('message-count').textContent = messageCount;
+                
+                try {
+                    const data = JSON.parse(event.data);
+                    handleWebSocketMessage(data);
+                } catch (e) {
+                    log('error', `解析消息失败: ${e.message}`);
+                }
+            };
+            
+            websocket.onclose = function(event) {
+                log('warning', `WebSocket连接关闭: ${event.code} - ${event.reason}`);
+                updateConnectionStatus('offline');
+                document.getElementById('connect-btn').disabled = false;
+                document.getElementById('disconnect-btn').disabled = true;
+            };
+            
+            websocket.onerror = function(error) {
+                log('error', `WebSocket错误: ${error}`);
+                updateConnectionStatus('offline');
+            };
+        }
+        
+        function disconnectWebSocket() {
+            if (websocket) {
+                websocket.close();
+                log('info', 'WebSocket连接已断开');
+            }
+        }
+        
+        function handleWebSocketMessage(data) {
+            document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
+            
+            switch (data.type) {
+                case 'welcome':
+                    log('success', `欢迎消息: ${data.message}`);
+                    log('info', `默认股票: ${data.default_stocks.join(', ')}`);
+                    log('info', `默认期权: ${data.default_options.join(', ')}`);
+                    break;
+                    
+                case 'subscription':
+                    log('info', `订阅确认: ${data.message}`);
+                    updateSubscriptionCounts(data.subscribed_symbols);
+                    break;
+                    
+                case 'quote':
+                    handleQuoteData(data);
+                    break;
+                    
+                case 'trade':
+                    handleTradeData(data);
+                    break;
+                    
+                case 'pong':
+                    log('info', `心跳响应: ${data.timestamp}`);
+                    break;
+                    
+                default:
+                    log('info', `收到消息: ${JSON.stringify(data)}`);
+            }
+        }
+        
+        function handleQuoteData(data) {
+            const symbol = data.symbol;
+            const isOption = symbol.length > 10;
+            
+            if (isOption) {
+                optionData[symbol] = data;
+                updateOptionTable();
+                log('info', `期权报价 ${symbol}: Bid=${data.bid_price}, Ask=${data.ask_price}`);
+            } else {
+                stockData[symbol] = data;
+                updateStockTable();
+                log('info', `股票报价 ${symbol}: Bid=${data.bid_price}, Ask=${data.ask_price}`);
+            }
+        }
+        
+        function handleTradeData(data) {
+            const symbol = data.symbol;
+            log('success', `交易数据 ${symbol}: Price=${data.price}, Size=${data.size}`);
+            
+            // 更新最新价格
+            if (stockData[symbol]) {
+                stockData[symbol].last_price = data.price;
+                updateStockTable();
+            }
+        }
+        
+        function updateStockTable() {
+            const tbody = document.getElementById('stock-data');
+            const rows = Object.entries(stockData).map(([symbol, data]) => {
+                const time = new Date(data.timestamp).toLocaleTimeString();
+                return `
+                    <tr>
+                        <td class="symbol">${symbol}</td>
+                        <td class="price-up">${data.bid_price || '-'}</td>
+                        <td class="price-down">${data.ask_price || '-'}</td>
+                        <td>${data.last_price || '-'}</td>
+                        <td>${time}</td>
+                    </tr>
+                `;
+            });
+            
+            tbody.innerHTML = rows.length > 0 ? rows.join('') : 
+                '<tr><td colspan="5" style="text-align: center; opacity: 0.6;">暂无股票数据</td></tr>';
+        }
+        
+        function updateOptionTable() {
+            const tbody = document.getElementById('option-data');
+            const rows = Object.entries(optionData).map(([symbol, data]) => {
+                const time = new Date(data.timestamp).toLocaleTimeString();
+                const optionType = symbol.includes('C') ? 'Call' : 'Put';
+                return `
+                    <tr>
+                        <td class="symbol">${symbol}</td>
+                        <td class="price-up">${data.bid_price || '-'}</td>
+                        <td class="price-down">${data.ask_price || '-'}</td>
+                        <td>${optionType}</td>
+                        <td>${time}</td>
+                    </tr>
+                `;
+            });
+            
+            tbody.innerHTML = rows.length > 0 ? rows.join('') : 
+                '<tr><td colspan="5" style="text-align: center; opacity: 0.6;">暂无期权数据</td></tr>';
+        }
+        
+        function updateSubscriptionCounts(symbols) {
+            const stocks = symbols.filter(s => s.length <= 10);
+            const options = symbols.filter(s => s.length > 10);
+            
+            document.getElementById('stock-count').textContent = stocks.length;
+            document.getElementById('option-count').textContent = options.length;
+        }
+        
+        function updateConnectionStatus(status) {
+            const element = document.getElementById('connection-status');
+            element.className = `status-value status-${status}`;
+            
+            switch (status) {
+                case 'online':
+                    element.textContent = '已连接';
+                    break;
+                case 'offline':
+                    element.textContent = '未连接';
+                    break;
+                case 'connecting':
+                    element.textContent = '连接中...';
+                    break;
+            }
+        }
+        
+        function sendPing() {
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                const message = { type: 'ping', timestamp: new Date().toISOString() };
+                websocket.send(JSON.stringify(message));
+                log('info', '发送心跳包');
+            } else {
+                log('warning', 'WebSocket未连接，无法发送心跳');
+            }
+        }
+        
+        async function getJWTToken() {
+            try {
+                log('info', '正在获取演示JWT Token...');
+                const response = await fetch('/api/v1/auth/demo-token');
+                const data = await response.json();
+                
+                if (response.ok) {
+                    jwtToken = data.access_token;
+                    log('success', `JWT Token获取成功: ${jwtToken.substring(0, 50)}...`);
+                    log('info', `Token有效期: ${data.expires_in / 3600} 小时`);
+                    log('info', `演示用户: ${data.demo_user.username} (${data.demo_user.email})`);
+                    
+                    // 复制到剪贴板
+                    if (navigator.clipboard) {
+                        await navigator.clipboard.writeText(jwtToken);
+                        log('success', 'JWT Token已复制到剪贴板!');
+                    }
+                } else {
+                    log('error', `获取JWT Token失败: ${data.detail}`);
+                }
+            } catch (error) {
+                log('error', `获取JWT Token错误: ${error.message}`);
+            }
+        }
+        
+        function clearLogs() {
+            document.getElementById('logs').innerHTML = '';
+            messageCount = 0;
+            document.getElementById('message-count').textContent = '0';
+        }
+        
+        function log(type, message) {
+            const logs = document.getElementById('logs');
+            const timestamp = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            entry.innerHTML = `<span class="log-timestamp">[${timestamp}]</span>${message}`;
+            
+            logs.appendChild(entry);
+            logs.scrollTop = logs.scrollHeight;
+            
+            // 限制日志条数
+            const entries = logs.querySelectorAll('.log-entry');
+            if (entries.length > 100) {
+                entries[0].remove();
+            }
+        }
+        
+        // 页面加载完成后显示初始信息
+        document.addEventListener('DOMContentLoaded', function() {
+            log('info', '🚀 Opitios Alpaca WebSocket 测试页面已加载');
+            log('info', '✅ 确认: Alpaca Paper Trading 支持 WebSocket');
+            log('info', '📊 数据源: IEX 实时市场数据 (无Mock数据)');
+            log('info', '🔧 点击"连接 WebSocket"开始接收实时数据');
+            log('info', '🔑 点击"获取演示JWT"获取API测试token');
+        });
+    </script>
+</body>
+</html>

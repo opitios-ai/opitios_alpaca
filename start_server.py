@@ -12,11 +12,11 @@ import uvicorn
 
 def start_server():
     """Start the FastAPI server"""
-    uvicorn.run(app, host="0.0.0.0", port=8081)
+    uvicorn.run(app, host="0.0.0.0", port=8090)
 
 def test_server_endpoints():
     """Test server endpoints"""
-    base_url = "http://localhost:8081"
+    base_url = "http://localhost:8090"
     
     # Wait for server to start
     print("Waiting for server to start...")

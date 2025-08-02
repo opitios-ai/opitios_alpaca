@@ -144,9 +144,22 @@ logs/*.log
 .DS_Store
 Thumbs.db
 
-# Application specific
+# Application specific  
+secrets.yml
 secrets.yaml
 *.secret
+config_local.py
+.env.*
+!.env.example
+
+# Database files
+users.db
+*.db
+*.sqlite*
+
+# Log directories
+logs/
+log/
 
 # Docker
 docker-compose.override.yml

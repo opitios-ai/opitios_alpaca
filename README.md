@@ -11,16 +11,6 @@ A multi-user, production-ready trading API service built on FastAPI with real-ti
 - **Comprehensive API**: 20+ endpoints with complete OpenAPI documentation
 - **Production Ready**: Rate limiting, logging, error handling, and security middleware
 
-## 🌐 Alpaca WebSocket Support
-
-✅ **Alpaca Paper Trading (Free) fully supports WebSocket**
-- **Real-time Streaming**: Stock and options market data
-- **Limitations**: IEX exchange data only, 30 symbol limit for stocks, 200 quotes for options
-- **Endpoints**: 
-  - Account updates: `wss://paper-api.alpaca.markets/stream`
-  - Market data: `wss://stream.data.alpaca.markets/v2/iex`
-- **Authentication**: API key-based, single connection per user
-
 ## 📋 System Requirements
 
 - Python 3.9+
@@ -40,50 +30,30 @@ pip install -r requirements.txt
 ```
 
 ### 2. Configuration
+
+Copy the secrets template and configure your API keys:
 ```bash
-# Set environment variables
-export ALPACA_API_KEY="your_paper_trading_api_key"
-export ALPACA_SECRET_KEY="your_paper_trading_secret_key"
-export ALPACA_BASE_URL="https://paper-api.alpaca.markets"
-export ALPACA_PAPER_TRADING="true"
+cp secrets.example.yml secrets.yml
+# Edit secrets.yml and add your Alpaca API keys
 ```
+
+**🔑 Get Your API Keys:**
+1. Visit [Alpaca Markets](https://alpaca.markets/)
+2. Create a free account
+3. Enable Paper Trading mode  
+4. Generate API keys in your dashboard
 
 ### 3. Start Server
 ```bash
 python main.py
-# or
-uvicorn main:app --host 0.0.0.0 --port 8081 --reload
+# Service runs on port 8090
 ```
-
-## 🚀 API Endpoints
-
-### Public Endpoints (No Authentication)
-- `GET /` - Service info
-- `GET /api/v1/health` - Health check
-- `GET /api/v1/test-connection` - Test Alpaca connection
-- `POST /api/v1/stocks/quote` - Get stock quote
-- `GET /api/v1/stocks/{symbol}/quote` - Get stock quote by symbol
-- `POST /api/v1/stocks/quotes/batch` - Batch stock quotes
-- `GET /api/v1/account` - Account info (demo)
-- `GET /api/v1/positions` - Positions (demo)
-
-### Authentication Endpoints
-- `POST /api/v1/auth/register` - User registration
-- `POST /api/v1/auth/login` - User login (get JWT token)
-
-### Protected Endpoints (JWT Required)
-- `POST /api/v1/stocks/order` - Place stock order
-- `POST /api/v1/options/order` - Place options order
-- `GET /api/v1/orders` - Get orders
-- `DELETE /api/v1/orders/{id}` - Cancel order
-- `POST /api/v1/stocks/{symbol}/buy` - Quick buy
-- `POST /api/v1/stocks/{symbol}/sell` - Quick sell
 
 ## 📚 API Documentation
 
-- **Swagger UI**: http://localhost:8081/docs
-- **ReDoc**: http://localhost:8081/redoc
-- **OpenAPI Spec**: http://localhost:8081/openapi.json
+- **Swagger UI**: http://localhost:8090/docs
+- **ReDoc**: http://localhost:8090/redoc
+- **OpenAPI Spec**: http://localhost:8090/openapi.json
 
 ### JWT Authentication in Swagger
 1. Register/Login to get JWT token
@@ -105,29 +75,20 @@ pytest -v
 pytest --cov=app --cov-report=html
 ```
 
-### Manual API Testing
-See [API_TEST_COMMANDS.md](API_TEST_COMMANDS.md) for complete curl command examples.
-
-### Quick Test
+### Quick Health Check
 ```bash
-# Health check
-curl http://localhost:8081/api/v1/health
-
-# Stock quote
-curl http://localhost:8081/api/v1/stocks/AAPL/quote
-
-# Register user
-curl -X POST http://localhost:8081/api/v1/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "testuser",
-    "email": "test@example.com", 
-    "password": "TestPassword123!",
-    "alpaca_api_key": "YOUR_KEY",
-    "alpaca_secret_key": "YOUR_SECRET",
-    "alpaca_paper_trading": true
-  }'
+curl http://localhost:8090/api/v1/health
 ```
+
+## 📖 Documentation
+
+Complete documentation is available in the `/docs` folder:
+
+- **[Quick Start Guide](docs/QUICKSTART.md)** - Get up and running quickly
+- **[Setup Instructions](docs/SETUP.md)** - Detailed installation guide
+- **[API Test Commands](docs/API_TEST_COMMANDS.md)** - Complete curl examples
+- **[Testing Guide](docs/TESTING.md)** - Testing framework and procedures
+- **[Real Data Requirements](docs/requirements-real-data-only.md)** - Production data setup
 
 ## 🏗 Architecture
 
@@ -136,12 +97,6 @@ curl -X POST http://localhost:8081/api/v1/auth/register \
 - **Authentication**: JWT tokens with role-based permissions
 - **User Isolation**: Each user has isolated trading sessions and data
 - **Connection Pooling**: Efficient Alpaca API connection management
-
-### Middleware Stack
-1. **Authentication Middleware**: JWT validation and user context
-2. **Rate Limiting Middleware**: User-level request throttling
-3. **Logging Middleware**: Structured request/response logging
-4. **CORS Middleware**: Cross-origin resource sharing
 
 ### Security Features
 - Encrypted Alpaca API credentials storage
@@ -152,28 +107,17 @@ curl -X POST http://localhost:8081/api/v1/auth/register \
 
 ## 🔧 Configuration
 
-### Environment Variables
-```bash
-# Required
-ALPACA_API_KEY=your_paper_api_key
-ALPACA_SECRET_KEY=your_paper_secret_key
+The system uses `secrets.yml` for all sensitive configuration. See `secrets.example.yml` for the template.
 
-# Optional
-ALPACA_BASE_URL=https://paper-api.alpaca.markets
-ALPACA_PAPER_TRADING=true
-JWT_SECRET=your-jwt-secret-key
-REDIS_HOST=localhost
-REDIS_PORT=6379
-LOG_LEVEL=INFO
-```
+### Required Configuration
+- Alpaca API credentials
+- JWT secret key
+- Application settings
 
-### Database Configuration
-The system uses SQLite by default for user data storage. For production, configure MySQL:
-
-```python
-# config.py
-database_url = "mysql://user:password@localhost/opitios_alpaca"
-```
+### Optional Configuration
+- Redis settings (for distributed caching)
+- Rate limiting parameters
+- CORS allowed origins
 
 ## 📊 Monitoring
 
@@ -184,12 +128,6 @@ database_url = "mysql://user:password@localhost/opitios_alpaca"
 - **Security audit**: `logs/security/security_audit.jsonl`
 - **Performance metrics**: `logs/performance/performance.jsonl`
 
-### Metrics
-- Request rate per user
-- API response times
-- Error rates by endpoint
-- User session activity
-
 ## 🚢 Production Deployment
 
 ### Docker Deployment
@@ -197,11 +135,10 @@ database_url = "mysql://user:password@localhost/opitios_alpaca"
 # Build image
 docker build -t opitios-alpaca .
 
-# Run container
+# Run container with secrets
 docker run -d \
-  -p 8081:8081 \
-  -e ALPACA_API_KEY=your_key \
-  -e ALPACA_SECRET_KEY=your_secret \
+  -p 8090:8090 \
+  -v $(pwd)/secrets.yml:/app/secrets.yml \
   opitios-alpaca
 ```
 
@@ -217,28 +154,27 @@ docker run -d \
 
 ### Common Issues
 
-**1. JWT Authentication Fails in Swagger**
-- Ensure you're using `Bearer TOKEN_HERE` format
-- Check token hasn't expired (24 hour default)
-- Verify user exists and credentials are correct
+**1. Configuration Errors**
+- Ensure `secrets.yml` exists and is properly formatted
+- Verify all required fields are configured
+- Check file permissions for secrets.yml
 
 **2. Alpaca API Connection Errors**
 - Verify Paper Trading API keys are correct
 - Check Alpaca service status
 - Ensure network connectivity to Alpaca endpoints
 
-**3. WebSocket Connection Issues**
-- Free accounts limited to single WebSocket connection
-- Check API key permissions for market data
-- Verify IEX data feed access
+**3. Port Conflicts**
+- Service runs on port 8090 (fixed)
+- Ensure port is available and not blocked by firewall
 
 ### Debug Mode
 ```bash
 # Start in debug mode
-uvicorn main:app --reload --log-level debug
+uvicorn main:app --reload --log-level debug --port 8090
 
 # Check system health
-curl http://localhost:8081/api/v1/health
+curl http://localhost:8090/api/v1/health
 ```
 
 ## 📄 License
@@ -259,4 +195,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 For issues and questions:
 - Create an issue in the GitHub repository
 - Check the API documentation at `/docs`
-- Review the test commands in `API_TEST_COMMANDS.md`
+- Review the documentation in the `docs/` folder
