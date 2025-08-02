@@ -11,10 +11,10 @@ def load_secrets():
             with open(secrets_file, 'r', encoding='utf-8') as f:
                 return yaml.safe_load(f)
         except Exception as e:
-            print(f"❌ 加载 secrets.yml 时出错: {e}")
+            print(f"Error loading secrets.yml: {e}")
             return {}
     else:
-        print("⚠️  未找到 secrets.yml 文件，使用默认配置。请复制 secrets.example.yml 为 secrets.yml 并配置您的密钥。")
+        print("Warning: secrets.yml not found. Please copy secrets.example.yml to secrets.yml and configure your API keys.")
         return {}
 
 # Load secrets at module level
@@ -68,16 +68,8 @@ class Settings(BaseSettings):
 # 创建设置实例
 settings = Settings()
 
-# 尝试导入本地配置覆盖（保持向后兼容性）
-try:
-    from config_local import settings as local_settings
-    settings = local_settings
-    print("✅ 已加载本地配置文件: config_local.py（警告：建议迁移到 secrets.yml）")
-except ImportError:
-    if secrets:
-        print("✅ 已加载配置文件: secrets.yml")
-    else:
-        print("⚠️  未找到配置文件，使用默认配置。")
-except Exception as e:
-    print(f"❌ 加载本地配置时出错: {e}")
-    print("使用 secrets.yml 配置...")
+# 配置加载状态反馈
+if secrets:
+    print("Loaded configuration from: secrets.yml")
+else:
+    print("Warning: secrets.yml not found, using default configuration.")

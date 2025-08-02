@@ -129,7 +129,7 @@ ALPACA_PAPER_TRADING=true
 APP_NAME=Opitios Alpaca Trading Service
 DEBUG=true
 HOST=0.0.0.0
-PORT=8081
+PORT=8090
 
 # JWT Configuration
 JWT_SECRET=your-jwt-secret-key-change-in-production-{os.urandom(16).hex()}
@@ -252,7 +252,7 @@ Type=simple
 User=alpaca
 WorkingDirectory={os.getcwd()}
 Environment=PATH={os.environ.get('PATH', '')}
-ExecStart={sys.executable} -m uvicorn main:app --host 0.0.0.0 --port 8081
+ExecStart={sys.executable} -m uvicorn main:app --host 0.0.0.0 --port 8090
 Restart=always
 RestartSec=3
 
@@ -279,10 +279,10 @@ def print_post_install_instructions():
     print("1. Update .env file with your Alpaca API credentials")
     print("2. (Optional) Install and configure Redis for distributed rate limiting")
     print("3. Start the development server:")
-    print("   uvicorn main:app --host 0.0.0.0 --port 8081 --reload")
+    print("   uvicorn main:app --host 0.0.0.0 --port 8090 --reload")
     print()
     print(f"{Colors.BOLD}API Documentation:{Colors.END}")
-    print("   http://localhost:8081/docs")
+    print("   http://localhost:8090/docs")
     print()
     print(f"{Colors.BOLD}Testing:{Colors.END}")
     print("   python -m pytest tests/ -v")
