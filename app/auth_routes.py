@@ -14,6 +14,7 @@ from app.user_manager import (
 from app.middleware import create_jwt_token, get_current_user, UserContext
 from app.logging_config import UserLogger
 from app.connection_pool import get_connection_pool, ConnectionPool
+from app.demo_jwt import generate_demo_jwt_token, get_demo_user_info
 
 # 创建认证路由
 auth_router = APIRouter(prefix="/auth", tags=["authentication"])
@@ -273,4 +274,27 @@ async def get_system_stats(
             "active_users": pool_stats["total_users"],
             "total_connections": pool_stats["total_connections"]
         }
+    }
+
+
+# 演示JWT端点
+@auth_router.get("/demo-token")
+async def get_demo_jwt_token():
+    """获取演示JWT Token - 用于Swagger UI快速测试"""
+    token = generate_demo_jwt_token(expire_hours=168)  # 7天有效期
+    user_info = get_demo_user_info()
+    
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "expires_in": 168 * 3600,  # 7天转换为秒
+        "demo_user": user_info,
+        "usage_instructions": [
+            "1. 复制 access_token 的值",
+            "2. 点击 Swagger UI 右上角的 'Authorize' 按钮",
+            "3. 输入: Bearer 后面跟上token (例如: Bearer eyJ0eXAiOiJKV1Q...)",
+            "4. 点击 'Authorize' 按钮",
+            "5. 现在可以测试所有需要JWT认证的端点"
+        ],
+        "note": "这是一个演示token，仅用于测试目的。实际使用中请通过正常的注册/登录流程获取token。"
     }

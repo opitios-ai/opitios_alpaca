@@ -516,8 +516,7 @@ async def get_options_chain_by_symbol(
     ```
     """,
     response_model=OrderResponse,
-    dependencies=[Depends(get_current_user)],
-    security=[{"BearerAuth": []}])
+    dependencies=[Depends(get_current_user)])
 async def place_stock_order(request: StockOrderRequest, client: AlpacaClient = Depends(get_alpaca_client_for_user)):
     """Place a stock order"""
     try:
@@ -540,8 +539,7 @@ async def place_stock_order(request: StockOrderRequest, client: AlpacaClient = D
 @router.post("/options/order",
     summary="Place Options Order",
     description="🔐 **JWT AUTHENTICATION REQUIRED** - Place an options order",
-    dependencies=[Depends(get_current_user)],
-    security=[{"BearerAuth": []}])
+    dependencies=[Depends(get_current_user)])
 async def place_option_order(request: OptionOrderRequest, client: AlpacaClient = Depends(get_alpaca_client_for_user)):
     """Place an options order"""
     try:
@@ -565,8 +563,7 @@ async def place_option_order(request: OptionOrderRequest, client: AlpacaClient =
     summary="Get Orders",
     description="🔐 **JWT AUTHENTICATION REQUIRED** - Get user's orders",
     response_model=List[OrderResponse],
-    dependencies=[Depends(get_current_user)],
-    security=[{"BearerAuth": []}])
+    dependencies=[Depends(get_current_user)])
 async def get_orders(
     status: Optional[str] = None, 
     limit: int = 100,
@@ -585,8 +582,7 @@ async def get_orders(
 @router.delete("/orders/{order_id}",
     summary="Cancel Order", 
     description="🔐 **JWT AUTHENTICATION REQUIRED** - Cancel an order",
-    dependencies=[Depends(get_current_user)],
-    security=[{"BearerAuth": []}])
+    dependencies=[Depends(get_current_user)])
 async def cancel_order(order_id: str, client: AlpacaClient = Depends(get_alpaca_client_for_user)):
     """Cancel an order"""
     try:
@@ -602,8 +598,7 @@ async def cancel_order(order_id: str, client: AlpacaClient = Depends(get_alpaca_
 @router.post("/stocks/{symbol}/buy",
     summary="Quick Buy Stock",
     description="🔐 **JWT AUTHENTICATION REQUIRED** - Quick buy stock order",
-    dependencies=[Depends(get_current_user)],
-    security=[{"BearerAuth": []}])
+    dependencies=[Depends(get_current_user)])
 async def buy_stock(
     symbol: str,
     qty: float,
@@ -630,8 +625,7 @@ async def buy_stock(
 @router.post("/stocks/{symbol}/sell",
     summary="Quick Sell Stock", 
     description="🔐 **JWT AUTHENTICATION REQUIRED** - Quick sell stock order",
-    dependencies=[Depends(get_current_user)],
-    security=[{"BearerAuth": []}])
+    dependencies=[Depends(get_current_user)])
 async def sell_stock(
     symbol: str,
     qty: float,
