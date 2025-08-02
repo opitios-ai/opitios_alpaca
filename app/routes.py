@@ -83,42 +83,7 @@ async def get_positions(client: AlpacaClient = Depends(get_alpaca_client)):
         raise HTTPException(status_code=500, detail=str(e))
 
 # Stock quote endpoints
-@router.post("/stocks/quote", 
-    summary="Get Single Stock Quote - 🔓 NO AUTH REQUIRED",
-    description="""
-    🔓 **NO AUTHENTICATION REQUIRED** - Public endpoint
-    
-    Get the latest quote for a single stock.
-    
-    **Example Request:**
-    ```json
-    {
-        "symbol": "AAPL"
-    }
-    ```
-    
-    **Example Response:**
-    ```json
-    {
-        "symbol": "AAPL",
-        "bid_price": 210.1,
-        "ask_price": 214.3,
-        "bid_size": 100,
-        "ask_size": 200,
-        "timestamp": "2024-01-15T15:30:00Z"
-    }
-    ```
-    """)
-async def get_stock_quote(request: StockQuoteRequest, client: AlpacaClient = Depends(get_alpaca_client)):
-    """Get latest quote for a stock"""
-    try:
-        quote_data = await client.get_stock_quote(request.symbol)
-        if "error" in quote_data:
-            raise HTTPException(status_code=400, detail=quote_data["error"])
-        return quote_data
-    except Exception as e:
-        logger.error(f"Error in get_stock_quote: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+# Removed duplicate POST endpoint - use GET endpoint instead
 
 @router.post("/stocks/quotes/batch",
     summary="Get Multiple Stock Quotes",
@@ -174,9 +139,25 @@ async def get_multiple_stock_quotes(request: MultiStockQuoteRequest, client: Alp
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/stocks/{symbol}/quote", 
-    summary="Get Stock Quote by Symbol - 🔓 NO AUTH REQUIRED",
-    description="🔓 **NO AUTHENTICATION REQUIRED** - Get latest quote for a stock by symbol")
-async def get_stock_quote_by_symbol(symbol: str, client: AlpacaClient = Depends(get_alpaca_client)):
+    summary="Get Stock Quote - 🔓 NO AUTH REQUIRED",
+    description="""
+    🔓 **NO AUTHENTICATION REQUIRED** - Public endpoint
+    
+    Get the latest quote for a single stock by symbol.
+    
+    **Example Response:**
+    ```json
+    {
+        "symbol": "AAPL",
+        "bid_price": 210.1,
+        "ask_price": 214.3,
+        "bid_size": 100,
+        "ask_size": 200,
+        "timestamp": "2024-01-15T15:30:00Z"
+    }
+    ```
+    """)
+async def get_stock_quote(symbol: str, client: AlpacaClient = Depends(get_alpaca_client)):
     """Get latest quote for a stock by symbol - NO AUTH REQUIRED"""
     try:
         quote_data = await client.get_stock_quote(symbol.upper())
@@ -184,7 +165,7 @@ async def get_stock_quote_by_symbol(symbol: str, client: AlpacaClient = Depends(
             raise HTTPException(status_code=400, detail=quote_data["error"])
         return quote_data
     except Exception as e:
-        logger.error(f"Error in get_stock_quote_by_symbol: {e}")
+        logger.error(f"Error in get_stock_quote: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/stocks/{symbol}/bars")
