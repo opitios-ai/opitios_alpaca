@@ -9,7 +9,7 @@ import asyncio
 import random
 from datetime import datetime
 from alpaca.trading.client import TradingClient
-from alpaca.data.live import StockDataStream, OptionDataStream
+from alpaca.data.live import StockDataStream
 from alpaca.data.requests import StockBarsRequest, StockLatestQuoteRequest
 from alpaca.data.timeframe import TimeFrame
 from loguru import logger

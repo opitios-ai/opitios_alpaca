@@ -4,7 +4,7 @@ services:
   opitios-alpaca:
     build: .
     ports:
-      - "8081:8081"
+      - "8090:8090"
     environment:
       - ALPACA_API_KEY=${ALPACA_API_KEY}
       - ALPACA_SECRET_KEY=${ALPACA_SECRET_KEY}
@@ -13,10 +13,10 @@ services:
     volumes:
       - ./app:/app/app
       - ./tests:/app/tests
-    command: uvicorn main:app --host 0.0.0.0 --port 8081 --reload
+    command: uvicorn main:app --host 0.0.0.0 --port 8090 --reload
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/api/v1/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8090/api/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3
