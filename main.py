@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from app.routes import router
 from app.middleware import AuthenticationMiddleware, RateLimitMiddleware, LoggingMiddleware
 from app.logging_config import logging_config
-from app.connection_pool import connection_pool
+from app.account_pool import account_pool
 from config import settings
 from loguru import logger
 import uvicorn
@@ -103,6 +103,16 @@ async def startup_event():
     logger.info(f"Real data only mode: {settings.real_data_only}")
     logger.info(f"Mock data enabled: {settings.enable_mock_data}")
     logger.info(f"Strict error handling: {settings.strict_error_handling}")
+    
+    # Initialize account connection pool
+    try:
+        await account_pool.initialize()
+        pool_stats = account_pool.get_pool_stats()
+        logger.info(f"Account pool initialized: {pool_stats['total_accounts']} accounts, {pool_stats['total_connections']} connections")
+    except Exception as e:
+        logger.error(f"Failed to initialize account pool: {e}")
+        raise
+    
     if not settings.real_data_only or settings.enable_mock_data:
         logger.warning("ALERT: Service is NOT configured for real-data-only mode!")
     else:
@@ -112,7 +122,7 @@ async def startup_event():
 async def shutdown_event():
     """Application shutdown event"""
     logger.info(f"Shutting down {settings.app_name}")
-    await connection_pool.shutdown()
+    await account_pool.shutdown()
 
 if __name__ == "__main__":
     uvicorn.run(
