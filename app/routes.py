@@ -1,25 +1,46 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import List, Optional
 from app.models import (
     StockQuoteRequest, MultiStockQuoteRequest, StockOrderRequest, 
     OptionOrderRequest, OptionsChainRequest, OptionQuoteRequest, MultiOptionQuoteRequest,
     StockQuoteResponse, OrderResponse, PositionResponse, AccountResponse
 )
-from app.alpaca_client import AlpacaClient
+from app.alpaca_client import AlpacaClient, pooled_client
+from app.middleware import get_current_context, RequestContext
+from config import settings
 from loguru import logger
 
 # Create router
 router = APIRouter()
 
-# Dependency to get Alpaca client
+# Dependency to get account routing info
+def get_routing_info(
+    account_id: Optional[str] = Query(None, description="指定账户ID进行路由"),
+    routing_key: Optional[str] = Query(None, description="路由键（如符号）用于负载均衡")
+):
+    """获取账户路由信息"""
+    return {"account_id": account_id, "routing_key": routing_key}
+
+# Dependency to get Alpaca client (for compatibility with non-authenticated endpoints)
 def get_alpaca_client() -> AlpacaClient:
     return AlpacaClient()
 
 # Health check endpoint
 @router.get("/health")
 async def health_check():
-    """Health check endpoint"""
-    return {"status": "healthy", "service": "Opitios Alpaca Trading Service"}
+    """Health check endpoint with configuration status"""
+    return {
+        "status": "healthy", 
+        "service": "Opitios Alpaca Trading Service",
+        "configuration": {
+            "real_data_only": settings.real_data_only,
+            "mock_data_enabled": settings.enable_mock_data,
+            "strict_error_handling": settings.strict_error_handling,
+            "paper_trading": settings.alpaca_paper_trading,
+            "max_option_symbols_per_request": settings.max_option_symbols_per_request
+        },
+        "data_policy": "Real Alpaca market data only - no calculated or mock data"
+    }
 
 # Connection test endpoint
 @router.get("/test-connection")
@@ -32,10 +53,13 @@ async def test_connection(client: AlpacaClient = Depends(get_alpaca_client)):
 
 # Account endpoints
 @router.get("/account", response_model=AccountResponse)
-async def get_account_info(client: AlpacaClient = Depends(get_alpaca_client)):
-    """Get account information"""
+async def get_account_info(routing_info: dict = Depends(get_routing_info)):
+    """Get account information - uses connection pool with routing"""
     try:
-        account_data = await client.get_account()
+        account_data = await pooled_client.get_account(
+            account_id=routing_info["account_id"],
+            routing_key=routing_info["routing_key"]
+        )
         if "error" in account_data:
             raise HTTPException(status_code=500, detail=account_data["error"])
         return AccountResponse(**account_data)
@@ -44,10 +68,13 @@ async def get_account_info(client: AlpacaClient = Depends(get_alpaca_client)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/positions", response_model=List[PositionResponse])
-async def get_positions(client: AlpacaClient = Depends(get_alpaca_client)):
-    """Get all positions"""
+async def get_positions(routing_info: dict = Depends(get_routing_info)):
+    """Get all positions - uses connection pool with routing"""
     try:
-        positions = await client.get_positions()
+        positions = await pooled_client.get_positions(
+            account_id=routing_info["account_id"],
+            routing_key=routing_info["routing_key"]
+        )
         if positions and "error" in positions[0]:
             raise HTTPException(status_code=500, detail=positions[0]["error"])
         return [PositionResponse(**pos) for pos in positions if "error" not in pos]
@@ -56,45 +83,13 @@ async def get_positions(client: AlpacaClient = Depends(get_alpaca_client)):
         raise HTTPException(status_code=500, detail=str(e))
 
 # Stock quote endpoints
-@router.post("/stocks/quote", 
-    summary="Get Single Stock Quote",
-    description="""
-    Get the latest quote for a single stock.
-    
-    **Example Request:**
-    ```json
-    {
-        "symbol": "AAPL"
-    }
-    ```
-    
-    **Example Response:**
-    ```json
-    {
-        "symbol": "AAPL",
-        "bid_price": 210.1,
-        "ask_price": 214.3,
-        "bid_size": 100,
-        "ask_size": 200,
-        "timestamp": "2024-01-15T15:30:00Z"
-    }
-    ```
-    """)
-async def get_stock_quote(request: StockQuoteRequest, client: AlpacaClient = Depends(get_alpaca_client)):
-    """Get latest quote for a stock"""
-    try:
-        quote_data = await client.get_stock_quote(request.symbol)
-        if "error" in quote_data:
-            raise HTTPException(status_code=400, detail=quote_data["error"])
-        return quote_data
-    except Exception as e:
-        logger.error(f"Error in get_stock_quote: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+# Removed duplicate POST endpoint - use GET endpoint instead
 
 @router.post("/stocks/quotes/batch",
     summary="Get Multiple Stock Quotes",
     description="""
     Get latest quotes for multiple stocks in a single request. Supports up to 20 symbols.
+    Uses connection pool with intelligent account routing.
     
     **Example Request:**
     ```json
@@ -102,6 +97,10 @@ async def get_stock_quote(request: StockQuoteRequest, client: AlpacaClient = Dep
         "symbols": ["AAPL", "TSLA", "GOOGL", "MSFT", "AMZN"]
     }
     ```
+    
+    **Query Parameters:**
+    - `account_id`: (Optional) Specify account ID for routing
+    - `routing_key`: (Optional) Routing key for load balancing
     
     **Example Response:**
     ```json
@@ -125,8 +124,11 @@ async def get_stock_quote(request: StockQuoteRequest, client: AlpacaClient = Dep
     }
     ```
     """)
-async def get_multiple_stock_quotes(request: MultiStockQuoteRequest, client: AlpacaClient = Depends(get_alpaca_client)):
-    """Get latest quotes for multiple stocks"""
+async def get_multiple_stock_quotes(
+    request: MultiStockQuoteRequest, 
+    routing_info: dict = Depends(get_routing_info)
+):
+    """Get latest quotes for multiple stocks - uses connection pool"""
     try:
         if not request.symbols or len(request.symbols) == 0:
             raise HTTPException(status_code=400, detail="At least one symbol is required")
@@ -134,7 +136,11 @@ async def get_multiple_stock_quotes(request: MultiStockQuoteRequest, client: Alp
         if len(request.symbols) > 20:
             raise HTTPException(status_code=400, detail="Maximum 20 symbols allowed per request")
         
-        quotes_data = await client.get_multiple_stock_quotes(request.symbols)
+        quotes_data = await pooled_client.get_multiple_stock_quotes(
+            symbols=request.symbols,
+            account_id=routing_info["account_id"],
+            routing_key=routing_info["routing_key"] or request.symbols[0]
+        )
         if "error" in quotes_data:
             raise HTTPException(status_code=400, detail=quotes_data["error"])
         return quotes_data
@@ -144,16 +150,85 @@ async def get_multiple_stock_quotes(request: MultiStockQuoteRequest, client: Alp
         logger.error(f"Error in get_multiple_stock_quotes: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/stocks/{symbol}/quote")
-async def get_stock_quote_by_symbol(symbol: str, client: AlpacaClient = Depends(get_alpaca_client)):
-    """Get latest quote for a stock by symbol"""
+@router.get("/stocks/{symbol}/quote", 
+    summary="Get Stock Quote - Uses Connection Pool",
+    description="""
+    Get the latest quote for a single stock by symbol.
+    Uses connection pool with intelligent account routing.
+    
+    **Query Parameters:**
+    - `account_id`: (Optional) Specify account ID for routing
+    - `routing_key`: (Optional) Routing key for load balancing
+    
+    **Example Response:**
+    ```json
+    {
+        "symbol": "AAPL",
+        "bid_price": 210.1,
+        "ask_price": 214.3,
+        "bid_size": 100,
+        "ask_size": 200,
+        "timestamp": "2024-01-15T15:30:00Z"
+    }
+    ```
+    """)
+async def get_stock_quote(symbol: str, routing_info: dict = Depends(get_routing_info)):
+    """Get latest quote for a stock by symbol - uses connection pool"""
     try:
-        quote_data = await client.get_stock_quote(symbol.upper())
+        quote_data = await pooled_client.get_stock_quote(
+            symbol=symbol.upper(),
+            account_id=routing_info["account_id"],
+            routing_key=routing_info["routing_key"] or symbol
+        )
         if "error" in quote_data:
             raise HTTPException(status_code=400, detail=quote_data["error"])
         return quote_data
     except Exception as e:
-        logger.error(f"Error in get_stock_quote_by_symbol: {e}")
+        logger.error(f"Error in get_stock_quote: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/stocks/quote",
+    summary="Get Single Stock Quote - POST Method",
+    description="""
+    Get the latest quote for a single stock by symbol using POST method.
+    Uses connection pool with intelligent account routing.
+    
+    **Request Body:**
+    ```json
+    {
+        "symbol": "AAPL"
+    }
+    ```
+    
+    **Query Parameters:**
+    - `account_id`: (Optional) Specify account ID for routing
+    - `routing_key`: (Optional) Routing key for load balancing
+    
+    **Example Response:**
+    ```json
+    {
+        "symbol": "AAPL",
+        "bid_price": 210.1,
+        "ask_price": 214.3,
+        "bid_size": 100,
+        "ask_size": 200,
+        "timestamp": "2024-01-15T15:30:00Z"
+    }
+    ```
+    """)
+async def post_stock_quote(request: StockQuoteRequest, routing_info: dict = Depends(get_routing_info)):
+    """Get latest quote for a stock by symbol - POST method - uses connection pool"""
+    try:
+        quote_data = await pooled_client.get_stock_quote(
+            symbol=request.symbol.upper(),
+            account_id=routing_info["account_id"],
+            routing_key=routing_info["routing_key"] or request.symbol
+        )
+        if "error" in quote_data:
+            raise HTTPException(status_code=400, detail=quote_data["error"])
+        return quote_data
+    except Exception as e:
+        logger.error(f"Error in post_stock_quote: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/stocks/{symbol}/bars")
@@ -161,11 +236,17 @@ async def get_stock_bars(
     symbol: str, 
     timeframe: str = "1Day", 
     limit: int = 100,
-    client: AlpacaClient = Depends(get_alpaca_client)
+    routing_info: dict = Depends(get_routing_info)
 ):
-    """Get historical price bars for a stock"""
+    """Get historical price bars for a stock - uses connection pool"""
     try:
-        bars_data = await client.get_stock_bars(symbol.upper(), timeframe, limit)
+        bars_data = await pooled_client.get_stock_bars(
+            symbol=symbol.upper(), 
+            timeframe=timeframe, 
+            limit=limit,
+            account_id=routing_info["account_id"],
+            routing_key=routing_info["routing_key"] or symbol
+        )
         if "error" in bars_data:
             raise HTTPException(status_code=400, detail=bars_data["error"])
         return bars_data
@@ -177,7 +258,11 @@ async def get_stock_bars(
 @router.post("/options/chain",
     summary="Get Options Chain",
     description="""
-    Get the options chain for an underlying stock. Returns calls and puts with different strike prices and expiration dates.
+    Get the options chain for an underlying stock using only real Alpaca market data.
+    Returns calls and puts with different strike prices and expiration dates.
+    
+    **Note:** This endpoint returns only real market data from Alpaca. Options without real quote data
+    will be included in the chain but may have missing bid/ask prices.
     
     **Example Request:**
     ```json
@@ -195,6 +280,7 @@ async def get_stock_bars(
         "underlying_price": 212.5,
         "expiration_dates": ["2024-02-16"],
         "options_count": 40,
+        "quote_failures": 5,
         "options": [
             {
                 "symbol": "AAPL240216C00190000",
@@ -202,34 +288,57 @@ async def get_stock_bars(
                 "option_type": "call",
                 "bid_price": 24.5,
                 "ask_price": 25.0,
-                "delta": 0.85,
-                "in_the_money": true
+                "last_price": 24.75,
+                "implied_volatility": 0.25
             }
         ]
     }
     ```
     """)
 async def get_options_chain(request: OptionsChainRequest, client: AlpacaClient = Depends(get_alpaca_client)):
-    """Get options chain for an underlying symbol"""
+    """Get options chain for an underlying symbol using only real market data"""
     try:
         chain_data = await client.get_options_chain(request.underlying_symbol, request.expiration_date)
         if "error" in chain_data:
-            raise HTTPException(status_code=400, detail=chain_data["error"])
+            logger.warning(f"Options chain unavailable for {request.underlying_symbol}: {chain_data['error']}")
+            raise HTTPException(
+                status_code=404, 
+                detail={
+                    "error": chain_data["error"],
+                    "error_code": "OPTIONS_CHAIN_UNAVAILABLE",
+                    "underlying_symbol": request.underlying_symbol,
+                    "expiration_date": request.expiration_date,
+                    "message": "No real options chain data available from Alpaca for this symbol"
+                }
+            )
         return chain_data
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error in get_options_chain: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error in get_options_chain for {request.underlying_symbol}: {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail={
+                "error": f"Internal server error while retrieving options chain: {str(e)}",
+                "error_code": "INTERNAL_ERROR",
+                "underlying_symbol": request.underlying_symbol,
+                "expiration_date": request.expiration_date
+            }
+        )
 
 @router.post("/options/quote",
     summary="Get Single Option Quote",
     description="""
-    Get a quote for a specific option contract.
+    Get a quote for a specific option contract using only real Alpaca market data.
     
     **Option Symbol Format:** AAPL240216C00190000
     - AAPL: Underlying symbol
     - 240216: Expiration date (YYMMDD)
     - C: Call option (P for Put)
     - 00190000: Strike price ($190.00)
+    
+    **Note:** This endpoint returns only real market data from Alpaca. If real data is not available,
+    the request will fail with an appropriate error message.
     
     **Example Request:**
     ```json
@@ -238,12 +347,11 @@ async def get_options_chain(request: OptionsChainRequest, client: AlpacaClient =
     }
     ```
     
-    **Example Response:**
+    **Example Success Response:**
     ```json
     {
         "symbol": "AAPL240216C00190000",
         "underlying_symbol": "AAPL",
-        "underlying_price": 212.5,
         "strike_price": 190.0,
         "expiration_date": "2024-02-16",
         "option_type": "call",
@@ -251,31 +359,58 @@ async def get_options_chain(request: OptionsChainRequest, client: AlpacaClient =
         "ask_price": 24.75,
         "last_price": 24.50,
         "implied_volatility": 0.25,
-        "delta": 0.85,
-        "gamma": 0.05,
-        "theta": -0.02,
-        "vega": 0.1,
-        "in_the_money": true,
-        "intrinsic_value": 22.5,
-        "time_value": 2.0
+        "timestamp": "2024-01-15T15:30:00Z"
+    }
+    ```
+    
+    **Example Error Response:**
+    ```json
+    {
+        "detail": {
+            "error": "No real market data available for option symbol: AAPL240216C00190000",
+            "error_code": "REAL_DATA_UNAVAILABLE",
+            "option_symbol": "AAPL240216C00190000",
+            "message": "This service provides only authentic market data from Alpaca. No calculated or mock data is returned."
+        }
     }
     ```
     """)
 async def get_option_quote(request: OptionQuoteRequest, client: AlpacaClient = Depends(get_alpaca_client)):
-    """Get quote for a specific option contract"""
+    """Get quote for a specific option contract using only real market data"""
     try:
         quote_data = await client.get_option_quote(request.option_symbol)
         if "error" in quote_data:
-            raise HTTPException(status_code=400, detail=quote_data["error"])
+            logger.warning(f"Real data unavailable for option {request.option_symbol}: {quote_data['error']}")
+            raise HTTPException(
+                status_code=404, 
+                detail={
+                    "error": quote_data["error"],
+                    "error_code": "REAL_DATA_UNAVAILABLE",
+                    "option_symbol": request.option_symbol,
+                    "message": "This service provides only authentic market data from Alpaca. No calculated or mock data is returned."
+                }
+            )
         return quote_data
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error in get_option_quote: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error in get_option_quote for {request.option_symbol}: {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail={
+                "error": f"Internal server error while retrieving option data: {str(e)}",
+                "error_code": "INTERNAL_ERROR",
+                "option_symbol": request.option_symbol
+            }
+        )
 
 @router.post("/options/quotes/batch",
     summary="Get Multiple Option Quotes", 
     description="""
-    Get quotes for multiple option contracts in a single request.
+    Get quotes for multiple option contracts in a single request using only real Alpaca market data.
+    
+    **Note:** This endpoint returns only real market data from Alpaca. Individual options that don't have
+    real data available will be marked with errors in the response.
     
     **Example Request:**
     ```json
@@ -299,35 +434,63 @@ async def get_option_quote(request: OptionQuoteRequest, client: AlpacaClient = D
                 "option_type": "call",
                 "bid_price": 24.25,
                 "ask_price": 24.75,
-                "delta": 0.85
+                "timestamp": "2024-01-15T15:30:00Z"
             },
             {
-                "symbol": "AAPL240216P00180000",
-                "underlying_symbol": "AAPL", 
-                "strike_price": 180.0,
-                "option_type": "put",
-                "bid_price": 2.10,
-                "ask_price": 2.35,
-                "delta": -0.15
+                "error": "No real market data available for option symbol: AAPL240216P00180000"
             }
         ],
-        "count": 2
+        "count": 2,
+        "successful_count": 1,
+        "failed_count": 1,
+        "failed_symbols": ["AAPL240216P00180000"]
     }
     ```
     """)
 async def get_multiple_option_quotes(request: MultiOptionQuoteRequest, client: AlpacaClient = Depends(get_alpaca_client)):
-    """Get quotes for multiple option contracts"""
+    """Get quotes for multiple option contracts using only real market data"""
     try:
-        if len(request.option_symbols) > 20:
-            raise HTTPException(status_code=400, detail="Maximum 20 option symbols allowed per request")
+        if len(request.option_symbols) > settings.max_option_symbols_per_request:
+            logger.warning(f"Batch request exceeded limit: {len(request.option_symbols)} symbols (max {settings.max_option_symbols_per_request})")
+            raise HTTPException(
+                status_code=400, 
+                detail={
+                    "error": f"Maximum {settings.max_option_symbols_per_request} option symbols allowed per request",
+                    "error_code": "REQUEST_LIMIT_EXCEEDED",
+                    "requested_count": len(request.option_symbols),
+                    "max_allowed": settings.max_option_symbols_per_request
+                }
+            )
             
         quotes_data = await client.get_multiple_option_quotes(request.option_symbols)
         if "error" in quotes_data:
-            raise HTTPException(status_code=400, detail=quotes_data["error"])
+            logger.error(f"Batch option quotes request failed: {quotes_data['error']}")
+            raise HTTPException(
+                status_code=500, 
+                detail={
+                    "error": quotes_data["error"],
+                    "error_code": "BATCH_REQUEST_FAILED",
+                    "requested_symbols": request.option_symbols
+                }
+            )
+        
+        # Log summary of batch request
+        success_rate = quotes_data.get('successful_count', 0) / len(request.option_symbols) * 100
+        logger.info(f"Batch option quotes: {success_rate:.1f}% success rate ({quotes_data.get('successful_count', 0)}/{len(request.option_symbols)})")
+        
         return quotes_data
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error in get_multiple_option_quotes: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500, 
+            detail={
+                "error": f"Internal server error during batch option quotes request: {str(e)}",
+                "error_code": "INTERNAL_ERROR",
+                "requested_symbols": request.option_symbols
+            }
+        )
 
 @router.get("/options/{underlying_symbol}/chain")
 async def get_options_chain_by_symbol(
@@ -349,6 +512,8 @@ async def get_options_chain_by_symbol(
 @router.post("/stocks/order", 
     summary="Place Stock Order",
     description="""
+    🔐 **JWT AUTHENTICATION REQUIRED** - Protected endpoint
+    
     Place a stock order with various order types and time in force options.
     
     **Order Types:**
@@ -400,18 +565,21 @@ async def get_options_chain_by_symbol(
     }
     ```
     """,
-    response_model=OrderResponse)
-async def place_stock_order(request: StockOrderRequest, client: AlpacaClient = Depends(get_alpaca_client)):
-    """Place a stock order"""
+    response_model=OrderResponse,
+    dependencies=[Depends(get_current_context)])
+async def place_stock_order(request: StockOrderRequest, routing_info: dict = Depends(get_routing_info)):
+    """Place a stock order - uses connection pool"""
     try:
-        order_data = await client.place_stock_order(
+        order_data = await pooled_client.place_stock_order(
             symbol=request.symbol.upper(),
             qty=request.qty,
             side=request.side.value,
             order_type=request.type.value,
             limit_price=request.limit_price,
             stop_price=request.stop_price,
-            time_in_force=request.time_in_force.value
+            time_in_force=request.time_in_force.value,
+            account_id=routing_info["account_id"],
+            routing_key=routing_info["routing_key"]
         )
         if "error" in order_data:
             raise HTTPException(status_code=400, detail=order_data["error"])
@@ -420,17 +588,22 @@ async def place_stock_order(request: StockOrderRequest, client: AlpacaClient = D
         logger.error(f"Error in place_stock_order: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/options/order")
-async def place_option_order(request: OptionOrderRequest, client: AlpacaClient = Depends(get_alpaca_client)):
-    """Place an options order"""
+@router.post("/options/order",
+    summary="Place Options Order",
+    description="🔐 **JWT AUTHENTICATION REQUIRED** - Place an options order",
+    dependencies=[Depends(get_current_context)])
+async def place_option_order(request: OptionOrderRequest, routing_info: dict = Depends(get_routing_info)):
+    """Place an options order - uses connection pool"""
     try:
-        order_data = await client.place_option_order(
+        order_data = await pooled_client.place_option_order(
             option_symbol=request.option_symbol.upper(),
             qty=request.qty,
             side=request.side.value,
             order_type=request.type.value,
             limit_price=request.limit_price,
-            time_in_force=request.time_in_force.value
+            time_in_force=request.time_in_force.value,
+            account_id=routing_info["account_id"],
+            routing_key=routing_info["routing_key"]
         )
         if "error" in order_data:
             raise HTTPException(status_code=400, detail=order_data["error"])
@@ -440,15 +613,24 @@ async def place_option_order(request: OptionOrderRequest, client: AlpacaClient =
         raise HTTPException(status_code=500, detail=str(e))
 
 # Order management endpoints
-@router.get("/orders", response_model=List[OrderResponse])
+@router.get("/orders", 
+    summary="Get Orders",
+    description="🔐 **JWT AUTHENTICATION REQUIRED** - Get user's orders",
+    response_model=List[OrderResponse],
+    dependencies=[Depends(get_current_context)])
 async def get_orders(
     status: Optional[str] = None, 
     limit: int = 100,
-    client: AlpacaClient = Depends(get_alpaca_client)
+    routing_info: dict = Depends(get_routing_info)
 ):
-    """Get orders"""
+    """Get orders - uses connection pool"""
     try:
-        orders = await client.get_orders(status, limit)
+        orders = await pooled_client.get_orders(
+            status=status, 
+            limit=limit,
+            account_id=routing_info["account_id"],
+            routing_key=routing_info["routing_key"]
+        )
         if orders and "error" in orders[0]:
             raise HTTPException(status_code=500, detail=orders[0]["error"])
         return [OrderResponse(**order) for order in orders if "error" not in order]
@@ -456,11 +638,18 @@ async def get_orders(
         logger.error(f"Error in get_orders: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("/orders/{order_id}")
-async def cancel_order(order_id: str, client: AlpacaClient = Depends(get_alpaca_client)):
-    """Cancel an order"""
+@router.delete("/orders/{order_id}",
+    summary="Cancel Order", 
+    description="🔐 **JWT AUTHENTICATION REQUIRED** - Cancel an order",
+    dependencies=[Depends(get_current_context)])
+async def cancel_order(order_id: str, routing_info: dict = Depends(get_routing_info)):
+    """Cancel an order - uses connection pool"""
     try:
-        result = await client.cancel_order(order_id)
+        result = await pooled_client.cancel_order(
+            order_id=order_id,
+            account_id=routing_info["account_id"],
+            routing_key=routing_info["routing_key"]
+        )
         if "error" in result:
             raise HTTPException(status_code=400, detail=result["error"])
         return result
@@ -469,22 +658,27 @@ async def cancel_order(order_id: str, client: AlpacaClient = Depends(get_alpaca_
         raise HTTPException(status_code=500, detail=str(e))
 
 # Quick trading endpoints for convenience
-@router.post("/stocks/{symbol}/buy")
+@router.post("/stocks/{symbol}/buy",
+    summary="Quick Buy Stock",
+    description="🔐 **JWT AUTHENTICATION REQUIRED** - Quick buy stock order",
+    dependencies=[Depends(get_current_context)])
 async def buy_stock(
     symbol: str,
     qty: float,
     order_type: str = "market",
     limit_price: Optional[float] = None,
-    client: AlpacaClient = Depends(get_alpaca_client)
+    routing_info: dict = Depends(get_routing_info)
 ):
-    """Quick buy stock endpoint"""
+    """Quick buy stock endpoint - uses connection pool"""
     try:
-        order_data = await client.place_stock_order(
+        order_data = await pooled_client.place_stock_order(
             symbol=symbol.upper(),
             qty=qty,
             side="buy",
             order_type=order_type,
-            limit_price=limit_price
+            limit_price=limit_price,
+            account_id=routing_info["account_id"],
+            routing_key=routing_info["routing_key"]
         )
         if "error" in order_data:
             raise HTTPException(status_code=400, detail=order_data["error"])
@@ -493,22 +687,27 @@ async def buy_stock(
         logger.error(f"Error in buy_stock: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/stocks/{symbol}/sell")
+@router.post("/stocks/{symbol}/sell",
+    summary="Quick Sell Stock", 
+    description="🔐 **JWT AUTHENTICATION REQUIRED** - Quick sell stock order",
+    dependencies=[Depends(get_current_context)])
 async def sell_stock(
     symbol: str,
     qty: float,
     order_type: str = "market",
     limit_price: Optional[float] = None,
-    client: AlpacaClient = Depends(get_alpaca_client)
+    routing_info: dict = Depends(get_routing_info)
 ):
-    """Quick sell stock endpoint"""
+    """Quick sell stock endpoint - uses connection pool"""
     try:
-        order_data = await client.place_stock_order(
+        order_data = await pooled_client.place_stock_order(
             symbol=symbol.upper(),
             qty=qty,
             side="sell",
             order_type=order_type,
-            limit_price=limit_price
+            limit_price=limit_price,
+            account_id=routing_info["account_id"],
+            routing_key=routing_info["routing_key"]
         )
         if "error" in order_data:
             raise HTTPException(status_code=400, detail=order_data["error"])
