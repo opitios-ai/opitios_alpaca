@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from main import app
-from app.middleware import create_jwt_token, UserContext, user_manager
+from app.middleware import create_jwt_token
 
 
 @pytest.fixture(scope="session")
@@ -208,28 +208,17 @@ def auth_headers(jwt_token) -> Dict[str, str]:
 
 
 @pytest.fixture
-def user_context(test_user_data) -> Generator[UserContext, None, None]:
-    """Create a user context for testing"""
-    context = UserContext(
-        user_id=test_user_data["user_id"],
-        alpaca_credentials=test_user_data["alpaca_credentials"],
-        permissions=test_user_data["permissions"],
-        rate_limits=test_user_data["rate_limits"]
-    )
-    
-    # Add to user manager
-    user_manager.active_users[test_user_data["user_id"]] = context
-    
-    yield context
-    
-    # Cleanup
-    if test_user_data["user_id"] in user_manager.active_users:
-        del user_manager.active_users[test_user_data["user_id"]]
+def test_context():
+    """Create a test context for multi-account system"""
+    return {
+        "account_id": "account_001",
+        "routing_key": "test_routing"
+    }
 
 
 @pytest.fixture(autouse=True)
-def cleanup_user_manager():
-    """Automatically cleanup user manager after each test"""
+def cleanup_connections():
+    """Automatically cleanup connections after each test"""
     yield
-    # Clear all active users after each test
-    user_manager.active_users.clear()
+    # Any cleanup needed for connection pool
+    pass

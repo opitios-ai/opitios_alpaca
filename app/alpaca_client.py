@@ -511,3 +511,108 @@ class AlpacaClient:
         except Exception as e:
             logger.error(f"Error cancelling order {order_id}: {e}")
             return {"error": str(e)}
+
+
+class PooledAlpacaClient:
+    """使用连接池的Alpaca客户端"""
+    
+    def __init__(self):
+        # 延迟加载连接池以避免循环导入
+        self._pool = None
+    
+    @property
+    def pool(self):
+        """获取连接池实例"""
+        if self._pool is None:
+            from app.account_pool import get_account_pool
+            self._pool = get_account_pool()
+        return self._pool
+    
+    async def _get_client_with_routing(self, account_id: Optional[str] = None, routing_key: Optional[str] = None):
+        """获取路由后的客户端连接"""
+        connection = await self.pool.get_connection(account_id, routing_key)
+        return connection
+    
+    async def get_stock_quote(self, symbol: str, account_id: Optional[str] = None, routing_key: Optional[str] = None) -> Dict[str, Any]:
+        """获取股票报价 - 使用连接池"""
+        async with self.pool.get_account_connection(account_id, routing_key or symbol) as connection:
+            return await connection.alpaca_client.get_stock_quote(symbol)
+    
+    async def get_multiple_stock_quotes(self, symbols: List[str], account_id: Optional[str] = None, routing_key: Optional[str] = None) -> Dict[str, Any]:
+        """获取多个股票报价 - 使用连接池"""
+        async with self.pool.get_account_connection(account_id, routing_key or symbols[0] if symbols else None) as connection:
+            return await connection.alpaca_client.get_multiple_stock_quotes(symbols)
+    
+    async def get_stock_bars(self, symbol: str, timeframe: str = "1Day", limit: int = 100, 
+                           account_id: Optional[str] = None, routing_key: Optional[str] = None) -> Dict[str, Any]:
+        """获取股票K线数据 - 使用连接池"""
+        async with self.pool.get_account_connection(account_id, routing_key or symbol) as connection:
+            return await connection.alpaca_client.get_stock_bars(symbol, timeframe, limit)
+    
+    async def get_options_chain(self, underlying_symbol: str, expiration_date: Optional[str] = None,
+                              account_id: Optional[str] = None, routing_key: Optional[str] = None) -> Dict[str, Any]:
+        """获取期权链 - 使用连接池"""
+        async with self.pool.get_account_connection(account_id, routing_key or underlying_symbol) as connection:
+            return await connection.alpaca_client.get_options_chain(underlying_symbol, expiration_date)
+    
+    async def get_option_quote(self, option_symbol: str, account_id: Optional[str] = None, 
+                             routing_key: Optional[str] = None) -> Dict[str, Any]:
+        """获取期权报价 - 使用连接池"""
+        async with self.pool.get_account_connection(account_id, routing_key or option_symbol) as connection:
+            return await connection.alpaca_client.get_option_quote(option_symbol)
+    
+    async def get_multiple_option_quotes(self, option_symbols: List[str], account_id: Optional[str] = None,
+                                       routing_key: Optional[str] = None) -> Dict[str, Any]:
+        """获取多个期权报价 - 使用连接池"""
+        async with self.pool.get_account_connection(account_id, routing_key or option_symbols[0] if option_symbols else None) as connection:
+            return await connection.alpaca_client.get_multiple_option_quotes(option_symbols)
+    
+    async def place_stock_order(self, symbol: str, qty: float, side: str, order_type: str = "market", 
+                              limit_price: Optional[float] = None, stop_price: Optional[float] = None,
+                              time_in_force: str = "day", account_id: Optional[str] = None, 
+                              routing_key: Optional[str] = None) -> Dict[str, Any]:
+        """下股票订单 - 使用连接池"""
+        async with self.pool.get_account_connection(account_id, routing_key or symbol) as connection:
+            return await connection.alpaca_client.place_stock_order(
+                symbol, qty, side, order_type, limit_price, stop_price, time_in_force
+            )
+    
+    async def place_option_order(self, option_symbol: str, qty: int, side: str, order_type: str = "market",
+                               limit_price: Optional[float] = None, time_in_force: str = "day",
+                               account_id: Optional[str] = None, routing_key: Optional[str] = None) -> Dict[str, Any]:
+        """下期权订单 - 使用连接池"""
+        async with self.pool.get_account_connection(account_id, routing_key or option_symbol) as connection:
+            return await connection.alpaca_client.place_option_order(
+                option_symbol, qty, side, order_type, limit_price, time_in_force
+            )
+    
+    async def get_account(self, account_id: Optional[str] = None, routing_key: Optional[str] = None) -> Dict[str, Any]:
+        """获取账户信息 - 使用连接池"""
+        async with self.pool.get_account_connection(account_id, routing_key) as connection:
+            return await connection.alpaca_client.get_account()
+    
+    async def get_positions(self, account_id: Optional[str] = None, routing_key: Optional[str] = None) -> List[Dict[str, Any]]:
+        """获取持仓信息 - 使用连接池"""
+        async with self.pool.get_account_connection(account_id, routing_key) as connection:
+            return await connection.alpaca_client.get_positions()
+    
+    async def get_orders(self, status: Optional[str] = None, limit: int = 100,
+                       account_id: Optional[str] = None, routing_key: Optional[str] = None) -> List[Dict[str, Any]]:
+        """获取订单信息 - 使用连接池"""
+        async with self.pool.get_account_connection(account_id, routing_key) as connection:
+            return await connection.alpaca_client.get_orders(status, limit)
+    
+    async def cancel_order(self, order_id: str, account_id: Optional[str] = None, 
+                         routing_key: Optional[str] = None) -> Dict[str, Any]:
+        """取消订单 - 使用连接池"""
+        async with self.pool.get_account_connection(account_id, routing_key or order_id) as connection:
+            return await connection.alpaca_client.cancel_order(order_id)
+    
+    async def test_connection(self, account_id: Optional[str] = None, routing_key: Optional[str] = None) -> Dict[str, Any]:
+        """测试连接 - 使用连接池"""
+        async with self.pool.get_account_connection(account_id, routing_key) as connection:
+            return await connection.alpaca_client.test_connection()
+
+
+# 全局连接池客户端实例
+pooled_client = PooledAlpacaClient()

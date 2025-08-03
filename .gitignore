@@ -156,6 +156,8 @@ config_local.py
 users.db
 *.db
 *.sqlite*
+*.sqlite3
+*.db-journal
 
 # Log directories
 logs/
@@ -164,9 +166,10 @@ log/
 # Docker
 docker-compose.override.yml
 
-# Temporary test files
-test_*.py
+# Temporary test files (root directory only)
+/test_*.py
 *_test_temp.py
+temp_*.py
 
 # Coverage reports
 htmlcov/
