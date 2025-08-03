@@ -8,10 +8,43 @@ from app.logging_config import logging_config
 from app.account_pool import account_pool
 from config import settings
 from loguru import logger
+from contextlib import asynccontextmanager
 import uvicorn
 
 # Configure enhanced logging
 logging_config.setup_logging()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan events"""
+    # Startup
+    logger.info(f"Starting {settings.app_name}")
+    logger.info(f"Environment: {'Production' if not settings.debug else 'Development'}")
+    logger.info(f"Paper trading mode: {settings.alpaca_paper_trading}")
+    logger.info(f"Alpaca base URL: {settings.alpaca_base_url}")
+    logger.info(f"Real data only mode: {settings.real_data_only}")
+    logger.info(f"Mock data enabled: {settings.enable_mock_data}")
+    logger.info(f"Strict error handling: {settings.strict_error_handling}")
+    
+    # Initialize account connection pool
+    try:
+        await account_pool.initialize()
+        pool_stats = account_pool.get_pool_stats()
+        logger.info(f"Account pool initialized: {pool_stats['total_accounts']} accounts, {pool_stats['total_connections']} connections")
+    except Exception as e:
+        logger.error(f"Failed to initialize account pool: {e}")
+        raise
+    
+    if not settings.real_data_only or settings.enable_mock_data:
+        logger.warning("ALERT: Service is NOT configured for real-data-only mode!")
+    else:
+        logger.info("✓ Service configured for real-data-only mode - no mock or calculated data will be returned")
+    
+    yield
+    
+    # Shutdown
+    logger.info(f"Shutting down {settings.app_name}")
+    await account_pool.shutdown()
 
 # Create FastAPI application with JWT security scheme
 app = FastAPI(
@@ -19,6 +52,7 @@ app = FastAPI(
     description="Alpaca Trading API Service for stock and options trading",
     version="1.0.0",
     debug=settings.debug,
+    lifespan=lifespan,
     # Don't apply global security - we'll apply it per endpoint
     # Define security schemes
     openapi_tags=[
@@ -94,35 +128,7 @@ async def root():
         "health": "/api/v1/health"
     }
 
-@app.on_event("startup")
-async def startup_event():
-    """Application startup event"""
-    logger.info(f"Starting {settings.app_name}")
-    logger.info(f"Paper trading mode: {settings.alpaca_paper_trading}")
-    logger.info(f"Alpaca base URL: {settings.alpaca_base_url}")
-    logger.info(f"Real data only mode: {settings.real_data_only}")
-    logger.info(f"Mock data enabled: {settings.enable_mock_data}")
-    logger.info(f"Strict error handling: {settings.strict_error_handling}")
-    
-    # Initialize account connection pool
-    try:
-        await account_pool.initialize()
-        pool_stats = account_pool.get_pool_stats()
-        logger.info(f"Account pool initialized: {pool_stats['total_accounts']} accounts, {pool_stats['total_connections']} connections")
-    except Exception as e:
-        logger.error(f"Failed to initialize account pool: {e}")
-        raise
-    
-    if not settings.real_data_only or settings.enable_mock_data:
-        logger.warning("ALERT: Service is NOT configured for real-data-only mode!")
-    else:
-        logger.info("✓ Service configured for real-data-only mode - no mock or calculated data will be returned")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Application shutdown event"""
-    logger.info(f"Shutting down {settings.app_name}")
-    await account_pool.shutdown()
+# Event handlers moved to lifespan context manager above
 
 if __name__ == "__main__":
     uvicorn.run(

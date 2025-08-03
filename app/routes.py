@@ -187,6 +187,50 @@ async def get_stock_quote(symbol: str, routing_info: dict = Depends(get_routing_
         logger.error(f"Error in get_stock_quote: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/stocks/quote",
+    summary="Get Single Stock Quote - POST Method",
+    description="""
+    Get the latest quote for a single stock by symbol using POST method.
+    Uses connection pool with intelligent account routing.
+    
+    **Request Body:**
+    ```json
+    {
+        "symbol": "AAPL"
+    }
+    ```
+    
+    **Query Parameters:**
+    - `account_id`: (Optional) Specify account ID for routing
+    - `routing_key`: (Optional) Routing key for load balancing
+    
+    **Example Response:**
+    ```json
+    {
+        "symbol": "AAPL",
+        "bid_price": 210.1,
+        "ask_price": 214.3,
+        "bid_size": 100,
+        "ask_size": 200,
+        "timestamp": "2024-01-15T15:30:00Z"
+    }
+    ```
+    """)
+async def post_stock_quote(request: StockQuoteRequest, routing_info: dict = Depends(get_routing_info)):
+    """Get latest quote for a stock by symbol - POST method - uses connection pool"""
+    try:
+        quote_data = await pooled_client.get_stock_quote(
+            symbol=request.symbol.upper(),
+            account_id=routing_info["account_id"],
+            routing_key=routing_info["routing_key"] or request.symbol
+        )
+        if "error" in quote_data:
+            raise HTTPException(status_code=400, detail=quote_data["error"])
+        return quote_data
+    except Exception as e:
+        logger.error(f"Error in post_stock_quote: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/stocks/{symbol}/bars")
 async def get_stock_bars(
     symbol: str, 
