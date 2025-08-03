@@ -144,6 +144,34 @@ logs/*.log
 .DS_Store
 Thumbs.db
 
-# Application specific
+# Application specific  
+secrets.yml
 secrets.yaml
 *.secret
+config_local.py
+.env.*
+!.env.example
+
+# Database files
+users.db
+*.db
+*.sqlite*
+*.sqlite3
+*.db-journal
+
+# Log directories
+logs/
+log/
+
+# Docker
+docker-compose.override.yml
+
+# Temporary test files (root directory only)
+/test_*.py
+*_test_temp.py
+temp_*.py
+
+# Coverage reports
+htmlcov/
+.coverage
+coverage.xml
