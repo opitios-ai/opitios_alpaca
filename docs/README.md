@@ -1,6 +1,6 @@
-# Opitios Alpaca Trading API
+# Opitios Alpaca Trading Service Documentation
 
-A multi-user, production-ready trading API service built on FastAPI with real-time stock and options data from Alpaca Markets. Features JWT authentication, paper trading, WebSocket support, and comprehensive REST API for stock/options trading.
+A multi-user, production-ready trading API service built on FastAPI with real-time stock and options data from Alpaca Markets. Features JWT authentication, paper trading, WebSocket support, and comprehensive bilingual documentation.
 
 ## 🔥 Key Features
 
@@ -10,15 +10,43 @@ A multi-user, production-ready trading API service built on FastAPI with real-ti
 - **Real-Time Data**: Stock quotes, options pricing, account data, and order management
 - **Comprehensive API**: 20+ endpoints with complete OpenAPI documentation
 - **Production Ready**: Rate limiting, logging, error handling, and security middleware
+- **Bilingual Documentation**: Complete English and Chinese documentation with interactive tools
 
-## 📋 System Requirements
+## 📚 Documentation Structure
 
-- Python 3.9+
-- Redis Server (optional, for distributed rate limiting)
-- SQLite/MySQL (user data storage)
-- Alpaca Paper Trading Account (free)
+### English Documentation
+- **[Quick Start Guide](en/quickstart.md)** - Get up and running in minutes
+- **[API Examples](en/api-examples.md)** - Comprehensive API usage examples  
+- **[Troubleshooting Guide](en/troubleshooting.md)** - Common issues and solutions
+- **[Setup Validation](en/setup-validation.md)** - Interactive setup verification
 
-## 🛠 Quick Setup
+### Chinese Documentation (中文文档)
+- **[快速开始指南](zh/快速开始指南.md)** - 快速上手指南
+- **[API 使用示例](zh/API使用示例.md)** - 完整的API使用例子
+- **[故障排除指南](zh/故障排除指南.md)** - 常见问题和解决方案
+- **[安装验证](zh/安装验证.md)** - 交互式安装验证
+
+## 🔧 Interactive Tools
+
+Get your system set up and validated with our interactive tools:
+
+```bash
+# Interactive setup validation (recommended for first-time users)
+python docs/scripts/setup_validator.py
+
+# System health monitoring
+python docs/scripts/health_check.py
+
+# Configuration helper
+python docs/scripts/config_helper.py
+
+# Documentation validation
+python docs/scripts/doc_validator.py
+```
+
+## 🚀 Quick Start
+
+**5-Minute Setup**: [English Guide](en/quickstart.md) | [中文指南](zh/快速开始指南.md)
 
 ### 1. Installation
 ```bash
@@ -43,11 +71,35 @@ cp secrets.example.yml secrets.yml
 3. Enable Paper Trading mode  
 4. Generate API keys in your dashboard
 
-### 3. Start Server
+### 3. Validate Setup
+```bash
+python docs/scripts/setup_validator.py
+```
+
+### 4. Start Server
 ```bash
 python main.py
 # Service runs on port 8090
+# Access API docs: http://localhost:8090/docs
 ```
+
+## 📖 Documentation Index
+
+### Core Guides
+| Document | English | Chinese | Description |
+|----------|---------|---------|-------------|
+| **Quick Start** | [📖 EN](en/quickstart.md) | [📖 中文](zh/快速开始指南.md) | Get started in 5 minutes |
+| **API Examples** | [📖 EN](en/api-examples.md) | [📖 中文](zh/API使用示例.md) | Complete API usage guide |
+| **Troubleshooting** | [📖 EN](en/troubleshooting.md) | [📖 中文](zh/故障排除指南.md) | Problem solving guide |
+| **Setup Validation** | [📖 EN](en/setup-validation.md) | [📖 中文](zh/安装验证.md) | Interactive setup checker |
+
+### Interactive Tools
+| Tool | Script | Description |
+|------|--------|-------------|
+| **Setup Validator** | `docs/scripts/setup_validator.py` | Progressive setup validation |
+| **Health Monitor** | `docs/scripts/health_check.py` | System health checking |
+| **Config Helper** | `docs/scripts/config_helper.py` | Interactive configuration |
+| **Doc Validator** | `docs/scripts/doc_validator.py` | Documentation QA |
 
 ## 📚 API Documentation
 
@@ -79,16 +131,6 @@ pytest --cov=app --cov-report=html
 ```bash
 curl http://localhost:8090/api/v1/health
 ```
-
-## 📖 Documentation
-
-Complete documentation is available in the `/docs` folder:
-
-- **[Quick Start Guide](docs/QUICKSTART.md)** - Get up and running quickly
-- **[Setup Instructions](docs/SETUP.md)** - Detailed installation guide
-- **[API Test Commands](docs/API_TEST_COMMANDS.md)** - Complete curl examples
-- **[Testing Guide](docs/TESTING.md)** - Testing framework and procedures
-- **[Real Data Requirements](docs/requirements-real-data-only.md)** - Production data setup
 
 ## 🏗 Architecture
 
@@ -128,6 +170,14 @@ The system uses `secrets.yml` for all sensitive configuration. See `secrets.exam
 - **Security audit**: `logs/security/security_audit.jsonl`
 - **Performance metrics**: `logs/performance/performance.jsonl`
 
+## 💡 Getting Help
+
+### Quick Solutions
+- **Setup Issues**: Run the [Setup Validator](scripts/setup_validator.py)
+- **API Issues**: Check [API Examples](en/api-examples.md) or [API 示例](zh/API使用示例.md)
+- **Problems**: See [Troubleshooting](en/troubleshooting.md) or [故障排除](zh/故障排除指南.md)
+- **Setup Validation**: Run the [Setup Validator](scripts/setup_validator.py)
+
 ## 🚢 Production Deployment
 
 ### Docker Deployment
@@ -150,33 +200,6 @@ docker run -d \
 - Monitor logs and metrics
 - Regular security updates
 
-## 🔍 Troubleshooting
-
-### Common Issues
-
-**1. Configuration Errors**
-- Ensure `secrets.yml` exists and is properly formatted
-- Verify all required fields are configured
-- Check file permissions for secrets.yml
-
-**2. Alpaca API Connection Errors**
-- Verify Paper Trading API keys are correct
-- Check Alpaca service status
-- Ensure network connectivity to Alpaca endpoints
-
-**3. Port Conflicts**
-- Service runs on port 8090 (fixed)
-- Ensure port is available and not blocked by firewall
-
-### Debug Mode
-```bash
-# Start in debug mode
-uvicorn main:app --reload --log-level debug --port 8090
-
-# Check system health
-curl http://localhost:8090/api/v1/health
-```
-
 ## 📄 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
@@ -196,3 +219,9 @@ For issues and questions:
 - Create an issue in the GitHub repository
 - Check the API documentation at `/docs`
 - Review the documentation in the `docs/` folder
+
+---
+
+**Documentation Version**: 1.0.0  
+**Last Updated**: January 2025  
+**Supported Languages**: English, 中文 (Chinese)
