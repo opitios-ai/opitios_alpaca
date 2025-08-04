@@ -1,292 +1,295 @@
-# 多账户零延迟交易系统 - 需求规格说明
+# Documentation Enhancement Requirements
+## Opitios Alpaca Trading System
 
-## 项目概述
+### Executive Summary
+This document outlines comprehensive requirements for enhancing the opitios_alpaca project documentation to achieve >90% setup success rate, seamless bilingual support, and improved developer experience through visual status indicators and comprehensive troubleshooting guides.
 
-**项目名称**: Opitios Alpaca Multi-Account Trading System
-**版本**: 2.0.0  
-**目标**: 构建专注于Alpaca API对接的多账户零延迟交易系统
-
-### 核心目标
-- 移除复杂的用户管理系统，简化架构
-- 实现基于JWT的外部访问控制
-- 预配置多账户连接池（支持100-1000个账户）
-- 零延迟交易架构（所有连接预先建立）
-- 主账户与交易账户职责分离
+## Project Context
+- **System**: Multi-account Alpaca trading system with FastAPI backend
+- **Current State**: Functional trading system with basic documentation
+- **Target Audience**: English and Chinese-speaking developers, traders, and system integrators
+- **Business Goal**: Improve developer onboarding and reduce support overhead
 
 ---
 
-## 利益相关者
+## Functional Requirements
 
-### 主要用户
-- **API使用者**: 通过JWT token访问交易接口的外部应用或服务
-- **交易者**: 通过API进行实际交易的个人或机构
-- **系统管理员**: 负责系统配置、监控和维护的技术人员
+### FR-001: Proper Documentation Structure Migration
+**Priority**: High  
+**Description**: Migrate all documentation to standard `docs/` folder structure per CLAUDE.md requirements
 
-### 次要用户
-- **开发者**: 集成该API的第三方开发人员
-- **监管人员**: 需要查看交易记录和系统状态的合规人员
+**Acceptance Criteria**:
+- All documentation files moved from root to `docs/` directory
+- Bilingual organization established (docs/en/ and docs/zh/)
+- Navigation links updated to reflect new structure
+- No documentation files remain in root directory
+- Cross-references updated throughout project
 
----
+**Technical Notes**:
+- Must follow CLAUDE.md standard: "All documentation files MUST be placed in the docs/ folder"
+- Maintain backward compatibility through redirect notices
+- Update CI/CD references if applicable
 
-## 功能需求
+### FR-002: Professional README Badge Integration  
+**Priority**: High  
+**Description**: Enhance README with comprehensive status badges using shields.io
 
-### FR-001: JWT Token验证系统
-**描述**: 实现无状态JWT验证机制，替代原有的用户认证系统
-**优先级**: 高
+**Acceptance Criteria**:
+- Build status badge with real-time GitHub Actions integration
+- Test coverage badge with dynamic percentage display
+- Python version compatibility badge (3.8+)
+- FastAPI version badge
+- License badge with appropriate license type
+- Last updated badge with automatic date
+- API health status badge with endpoint monitoring
 
-**验收标准**:
-- [ ] 系统接受有效的JWT token进行API访问
-- [ ] JWT token包含必要的权限和账户信息
-- [ ] 支持token过期时间配置
-- [ ] 提供token验证中间件
-- [ ] 支持不同权限级别的token
-
-**技术细节**:
-- 使用RS256或HS256算法
-- Token payload包含account_id、permissions、exp等字段
-- 无需存储token状态（无状态验证）
-
-### FR-002: 预配置多账户连接池
-**描述**: 系统启动时预先建立所有Alpaca账户连接，消除交易延迟
-**优先级**: 高
-
-**验收标准**:
-- [ ] 支持从配置文件加载100-1000个账户信息
-- [ ] 启动时自动建立所有账户的Alpaca连接
-- [ ] 连接池支持连接健康检查和自动重连
-- [ ] 提供连接池状态监控接口
-- [ ] 支持热重载新增账户
-
-**技术细节**:
-- 连接池使用asyncio进行并发管理
-- 每个账户维护独立的TradingClient和DataClient
-- 实现连接负载均衡和故障转移
-
-### FR-003: 主账户数据服务
-**描述**: 使用主账户提供市场数据查询服务，无需账户验证
-**优先级**: 高
-
-**验收标准**:
-- [ ] 提供股票实时报价接口
-- [ ] 提供期权链查询接口
-- [ ] 提供历史数据查询接口
-- [ ] 支持批量查询优化
-- [ ] 实现数据缓存机制
-
-**API端点**:
-- `GET /api/v1/stocks/quote/{symbol}`
-- `GET /api/v1/stocks/quotes` (批量查询)
-- `GET /api/v1/options/chain/{symbol}`
-- `GET /api/v1/options/quote/{option_symbol}`
-- `GET /api/v1/stocks/bars/{symbol}`
-
-### FR-004: 账户特定交易服务
-**描述**: 基于account_id进行账户特定的交易操作
-**优先级**: 高
-
-**验收标准**:
-- [ ] 支持通过account_id指定交易账户
-- [ ] 提供股票和期权下单接口
-- [ ] 提供订单查询和取消接口
-- [ ] 提供持仓查询接口
-- [ ] 提供账户信息查询接口
-
-**API端点**:
-- `POST /api/v1/accounts/{account_id}/orders/stocks`
-- `POST /api/v1/accounts/{account_id}/orders/options`
-- `GET /api/v1/accounts/{account_id}/orders`
-- `DELETE /api/v1/accounts/{account_id}/orders/{order_id}`
-- `GET /api/v1/accounts/{account_id}/positions`
-- `GET /api/v1/accounts/{account_id}/account`
-
-### FR-005: 配置管理系统
-**描述**: 通过配置文件管理所有账户信息和系统设置
-**优先级**: 中
-
-**验收标准**:
-- [ ] 支持YAML格式的账户配置文件
-- [ ] 账户信息加密存储
-- [ ] 支持环境变量覆盖配置
-- [ ] 提供配置验证机制
-- [ ] 支持配置热重载
-
-**配置结构**:
-```yaml
-master_account:
-  api_key: "..."
-  secret_key: "..."
-  paper_trading: true
-
-trading_accounts:
-  - account_id: "account_001"
-    api_key: "..."
-    secret_key: "..."
-    paper_trading: true
-  - account_id: "account_002"
-    api_key: "..."
-    secret_key: "..."
-    paper_trading: false
+**Technical Implementation**:
+```markdown
+![Build Status](https://img.shields.io/github/actions/workflow/status/owner/repo/main.yml)
+![Coverage](https://img.shields.io/codecov/c/github/owner/repo)
+![Python](https://img.shields.io/badge/python-3.8%2B-blue)
+![FastAPI](https://img.shields.io/badge/fastapi-0.104%2B-green)
+![License](https://img.shields.io/badge/license-MIT-blue)
 ```
 
-### FR-006: WebSocket实时数据流
-**描述**: 提供实时市场数据WebSocket接口
-**优先级**: 中
+### FR-003: Comprehensive Chinese Documentation Suite
+**Priority**: High  
+**Description**: Create complete Chinese translations of all core documentation
 
-**验收标准**:
-- [ ] 支持股票实时价格订阅
-- [ ] 支持期权实时价格订阅
-- [ ] 支持账户特定的订单状态更新
-- [ ] 实现连接管理和重连机制
-- [ ] 支持订阅管理（订阅/取消订阅）
+**Acceptance Criteria**:
+- Chinese README (README.zh.md) with full feature parity
+- Quick start guide (快速开始指南.md) with step-by-step instructions
+- API examples (API使用示例.md) with Chinese comments and explanations
+- Troubleshooting guide (故障排除指南.md) with localized error scenarios
+- Setup validation guide (安装验证.md) matching English version
+- Proper UTF-8 encoding for Chinese characters
+- Cultural adaptation for Chinese development practices
 
-### FR-007: 系统监控和健康检查
-**描述**: 提供系统状态监控和健康检查接口
-**优先级**: 中
+**Translation Quality Standards**:
+- Professional technical translation with consistent terminology
+- Code examples with Chinese comments where appropriate
+- Cultural context adaptation (e.g., local development tools, practices)
+- Native Chinese speaker review and validation
 
-**验收标准**:
-- [ ] 提供系统健康检查端点
-- [ ] 监控连接池状态
-- [ ] 监控API响应时间
-- [ ] 提供Prometheus格式的指标
-- [ ] 支持告警机制
+### FR-004: Interactive Setup Validation System
+**Priority**: High  
+**Description**: Implement comprehensive interactive setup validation tools
 
----
+**Acceptance Criteria**:
+- Progressive setup validation script (setup_validator.py)
+- Real-time environment checking and validation
+- Step-by-step problem resolution guidance
+- Platform-specific instructions (Windows/macOS/Linux)
+- API connectivity testing and validation
+- Detailed success/failure reporting with actionable recommendations
+- Integration with existing project structure and dependencies
 
-## 非功能需求
+**Validation Components**:
+1. Python version and virtual environment verification
+2. Dependency installation validation
+3. Configuration file presence and format checking
+4. API key validation and connectivity testing
+5. Port availability and service startup verification
 
-### NFR-001: 性能要求
-**描述**: 系统必须满足高性能交易需求
-**指标**:
-- API响应时间: < 50ms (95th percentile)
-- 交易订单延迟: < 100ms
-- 系统吞吐量: > 1000 requests/second
-- 并发连接数: > 500
+### FR-005: Enhanced Troubleshooting Documentation
+**Priority**: Medium  
+**Description**: Create comprehensive troubleshooting guides covering common scenarios
 
-### NFR-002: 可靠性要求
-**描述**: 系统必须保证高可用性和数据一致性
-**指标**:
-- 系统可用性: 99.9%
-- 连接失败自动重试: < 5秒
-- 数据一致性: 100%
-- 故障恢复时间: < 30秒
+**Acceptance Criteria**:
+- Common installation and setup issues with solutions
+- API connectivity problems and resolution steps
+- Environment-specific troubleshooting (Windows/macOS/Linux)
+- Error code reference with explanations and fixes
+- Performance optimization guidance
+- Debug mode instructions and log analysis
+- Community support and escalation procedures
 
-### NFR-003: 安全要求
-**描述**: 系统必须满足金融级安全标准
-**要求**:
-- JWT token加密存储
-- HTTPS强制加密传输
-- API密钥加密存储
-- 访问日志完整记录
-- 输入参数严格验证
+**Coverage Areas**:
+- Installation and dependency issues
+- Configuration and API key problems
+- Network connectivity and firewall issues
+- Platform-specific considerations
+- Performance and resource issues
 
-### NFR-004: 可扩展性要求
-**描述**: 系统必须支持水平扩展
-**要求**:
-- 支持多实例部署
-- 无状态服务设计
-- 数据库连接池优化
-- 缓存机制实现
-- 负载均衡支持
+### FR-006: Automated Quality Assurance
+**Priority**: Medium  
+**Description**: Implement automated documentation quality assurance systems
 
-### NFR-005: 可观测性要求
-**描述**: 系统必须提供完整的可观测性
-**要求**:
-- 结构化日志记录
-- 指标收集和监控
-- 分布式链路追踪
-- 错误报告和告警
-- 性能分析工具
+**Acceptance Criteria**:
+- Link validation for internal and external references
+- Markdown syntax validation and consistency checking
+- Translation consistency verification
+- Badge status monitoring and validation
+- Documentation freshness tracking and alerts
+- Automated spell checking and grammar validation
 
----
-
-## 约束条件
-
-### 技术约束
-- **编程语言**: Python 3.8+
-- **Web框架**: FastAPI
-- **数据库**: 可选（主要使用配置文件）
-- **缓存**: Redis（可选）
-- **部署**: Docker容器化
-
-### 业务约束
-- **监管合规**: 必须符合金融交易监管要求
-- **数据保护**: 用户交易数据隐私保护
-- **审计要求**: 完整的交易审计日志
-- **风险控制**: 实时风险监控和限制
-
-### 外部依赖
-- **Alpaca API**: 依赖Alpaca交易和数据API
-- **网络连接**: 稳定的互联网连接
-- **时间同步**: 精确的系统时间同步
+**Quality Metrics**:
+- 100% functional internal links
+- 95% functional external links
+- Consistent markdown formatting
+- Translation coverage >90% for core documents
 
 ---
 
-## 假设条件
+## Non-Functional Requirements
 
-1. **Alpaca API稳定性**: 假设Alpaca API服务稳定可靠
-2. **网络环境**: 假设部署环境网络稳定，延迟低
-3. **配置管理**: 假设账户配置由运维人员统一管理
-4. **JWT签发**: 假设JWT token由外部授权服务签发
-5. **监控基础设施**: 假设存在完善的监控和告警基础设施
+### NFR-001: Accessibility and Usability
+**Priority**: High  
+**Description**: Ensure documentation is accessible to diverse audiences
+
+**Requirements**:
+- Mobile-responsive markdown formatting
+- Screen reader compatibility
+- Clear visual hierarchy and navigation
+- Multi-language support with easy switching
+- Offline documentation capabilities
+- Fast loading and navigation
+
+### NFR-002: Maintainability
+**Priority**: Medium  
+**Description**: Establish sustainable documentation maintenance processes
+
+**Requirements**:
+- Version control integration with change tracking
+- Automated quality assurance and validation
+- Clear contribution guidelines and review processes
+- Translation workflow management
+- Badge and status monitoring automation
+- Regular freshness audits and updates
+
+### NFR-003: Performance
+**Priority**: Medium  
+**Description**: Optimize documentation for fast access and usability
+
+**Requirements**:
+- Page loading time <2 seconds
+- Interactive script execution time <5 seconds
+- Efficient badge loading and caching
+- Optimized image and asset delivery
+- Responsive design for all devices
 
 ---
 
-## 范围外内容
+## User Stories
 
-以下功能明确不在本项目范围内：
+### Epic 1: Seamless Bilingual Experience
 
-1. **用户注册和管理**: 不提供用户注册、登录、权限管理等功能
-2. **JWT签发服务**: 不提供JWT token生成和管理功能
-3. **账户开通**: 不提供Alpaca账户申请和开通功能
-4. **风险管理策略**: 不实现复杂的交易风险管理规则
-5. **交易策略**: 不提供量化交易策略和算法
-6. **数据分析**: 不提供复杂的数据分析和报表功能
-7. **图表界面**: 不提供前端交易界面
-8. **支付处理**: 不处理资金充值和提现
+**Story US-001**: As a Chinese-speaking developer, I want complete Chinese documentation so I can understand and implement the trading system without language barriers.
+
+**Story US-002**: As a developer, I want consistent navigation between English and Chinese versions so I can easily switch languages while maintaining context.
+
+### Epic 2: Professional Project Presentation  
+
+**Story US-003**: As a potential user, I want to see project health indicators so I can assess system reliability and maintenance quality.
+
+**Story US-004**: As a developer, I want clear visual status indicators so I can quickly understand project status and compatibility.
+
+### Epic 3: Friction-Free Setup Experience
+
+**Story US-005**: As a new user, I want interactive setup validation so I can identify and resolve issues before they become blocking problems.
+
+**Story US-006**: As a developer, I want platform-specific setup instructions so I can follow the correct process for my operating system.
+
+### Epic 4: Comprehensive Problem Resolution
+
+**Story US-007**: As a user experiencing issues, I want detailed troubleshooting guides so I can resolve problems independently.
+
+**Story US-008**: As a support engineer, I want common error scenarios documented so I can efficiently help users resolve issues.
 
 ---
 
-## 优先级定义
+## Success Metrics
 
-- **高优先级**: 核心交易功能，必须在第一阶段完成
-- **中优先级**: 重要的辅助功能，第二阶段完成
-- **低优先级**: 优化和增强功能，后续版本考虑
+### Primary Metrics
+- **Setup Success Rate**: >90% of new users complete setup without manual intervention
+- **Documentation Coverage**: 100% of API endpoints documented in both languages  
+- **Translation Completeness**: >95% of core documentation available in Chinese
+- **Badge Accuracy**: 100% of status badges reflect real-time accurate information
+
+### Secondary Metrics
+- **User Satisfaction**: >4.5/5 rating for documentation quality
+- **Support Ticket Reduction**: 50% decrease in setup-related support requests
+- **Time to First Success**: <10 minutes average setup time for new users
+- **Documentation Freshness**: <7 days average age for critical documentation updates
+
+### Quality Metrics
+- **Link Validation**: >95% of links functional and current
+- **Content Accuracy**: Zero critical factual errors in setup instructions
+- **Cross-Platform Compatibility**: 100% success rate across Windows/macOS/Linux
+- **Mobile Usability**: >80% usability score on mobile devices
 
 ---
 
-## 验收准则
+## Technical Constraints
 
-### 功能验收
-- 所有API端点正常工作且响应格式正确
-- JWT验证机制有效且安全
-- 连接池正常建立且连接稳定
-- 交易功能完整且数据准确
+### Platform Requirements
+- **Documentation Format**: GitHub-flavored Markdown
+- **Character Encoding**: UTF-8 for Chinese character support
+- **Image Formats**: PNG, SVG for diagrams and badges
+- **Script Compatibility**: Python 3.8+ for interactive tools
+- **Repository Structure**: Must comply with CLAUDE.md requirements
 
-### 性能验收
-- 满足所有性能指标要求
-- 压力测试通过
-- 内存和CPU使用率在可接受范围内
+### Integration Requirements  
+- **Version Control**: Git-based workflow with change tracking
+- **CI/CD Integration**: GitHub Actions for automated badge updates
+- **External Services**: shields.io for badge generation and monitoring
+- **Dependency Management**: Integration with existing requirements.txt
 
-### 安全验收
-- 通过安全扫描和渗透测试
-- 敏感数据加密存储
-- 访问控制有效
-- 审计日志完整
+### Compliance Requirements
+- **CLAUDE.md Adherence**: All documentation in docs/ folder structure
+- **No Root Documentation**: Prohibition on creating root-level .md files
+- **Virtual Environment**: Strict venv requirement compliance
+- **Security**: No secrets or sensitive information in documentation
 
-## 风险评估
+---
 
-### 高风险
-- **Alpaca API变更**: API接口变更可能影响系统功能
-- **网络延迟**: 网络问题可能影响交易时效性
-- **账户安全**: 大量账户密钥管理安全风险
+## Implementation Approach
 
-### 中风险
-- **性能瓶颈**: 高并发情况下的性能问题
-- **数据一致性**: 多账户并发操作的数据一致性
-- **错误处理**: 异常情况的处理机制
+### Phase 1: Foundation (Week 1-2)
+1. **Structure Migration**: Move all documentation to docs/ structure
+2. **Badge Integration**: Implement comprehensive README badges
+3. **Basic Chinese Translation**: Core README and quick start guide
 
-### 缓解措施
-- 实现全面的错误处理和重试机制
-- 建立完善的监控和告警系统
-- 定期进行压力测试和安全审计
-- 制定详细的运维手册和应急预案
+### Phase 2: Enhancement (Week 3-4)  
+1. **Interactive Tools**: Setup validation and health checking scripts
+2. **Complete Translation**: All major documentation in Chinese
+3. **Troubleshooting Guides**: Comprehensive problem resolution documentation
+
+### Phase 3: Optimization (Week 5-6)
+1. **Quality Assurance**: Automated validation and quality checking
+2. **Testing and Validation**: User acceptance testing and refinement
+3. **Community Integration**: Feedback collection and improvement processes
+
+---
+
+## Risk Assessment
+
+### High-Risk Items
+- **Translation Quality**: Risk of poor technical translation affecting usability
+- **Badge Reliability**: External service dependencies for real-time status
+- **Platform Compatibility**: Interactive scripts working across all target platforms
+
+### Mitigation Strategies
+- **Professional Translation Review**: Native Chinese speaker validation
+- **Fallback Badge Strategy**: Local badge generation as backup
+- **Comprehensive Testing**: Multi-platform testing and validation
+- **Progressive Enhancement**: Core functionality independent of advanced features
+
+---
+
+## Validation and Testing
+
+### User Acceptance Testing
+1. **New User Onboarding**: Fresh environment setup simulation
+2. **Cross-Platform Testing**: Windows, macOS, Linux validation
+3. **Bilingual Navigation**: Language switching and content consistency
+4. **Interactive Tool Testing**: Setup validation and troubleshooting workflows
+5. **Accessibility Testing**: Screen readers and mobile device compatibility
+
+### Review Process
+1. **Technical Review**: Code and documentation accuracy
+2. **Language Review**: Professional Chinese translation review  
+3. **UX Review**: User experience and workflow validation
+4. **Community Review**: Feedback from existing project contributors
+
+This comprehensive requirements document provides the foundation for transforming the opitios_alpaca documentation into a world-class, bilingual resource that ensures developer success and project adoption.
