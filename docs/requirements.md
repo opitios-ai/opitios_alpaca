@@ -6,325 +6,289 @@ This document outlines comprehensive requirements for enhancing the opitios_alpa
 
 ## Project Context
 - **System**: Multi-account Alpaca trading system with FastAPI backend
-- **Current State**: Good foundational documentation but lacks Chinese support, visual indicators, and comprehensive troubleshooting
-- **Target Users**: Chinese and English-speaking developers, traders, and system administrators
+- **Current State**: Functional trading system with basic documentation
+- **Target Audience**: English and Chinese-speaking developers, traders, and system integrators
+- **Business Goal**: Improve developer onboarding and reduce support overhead
 
-## Stakeholders
-
-### Primary Users
-- **Chinese-speaking Developers**: Need comprehensive Chinese documentation for setup and API usage
-- **English-speaking Developers**: Require enhanced setup guidance and troubleshooting resources
-- **Trading System Operators**: Need operational guides and debugging resources
-
-### Secondary Users
-- **System Administrators**: Deployment and maintenance documentation
-- **QA Engineers**: Testing and validation procedures
-- **Business Users**: High-level feature overview and capabilities
-
-## Current Documentation Assessment
-
-### Existing Documentation Analysis
-**Strengths:**
-- ✅ Comprehensive API examples (COMPLETE_API_EXAMPLES.md)
-- ✅ Quick start guide with clear steps (QUICKSTART.md)
-- ✅ Detailed README with feature overview
-- ✅ Deployment success documentation with Chinese elements (DEPLOYMENT_SUCCESS.md)
-- ✅ Complete API endpoint coverage
-- ✅ Working code examples and curl commands
-
-**Critical Gaps Identified:**
-- ❌ No formal docs/ folder structure (violates project standards)
-- ❌ Mixed language content without proper organization
-- ❌ No README status badges for project health
-- ❌ Limited troubleshooting and debugging guides
-- ❌ No comprehensive Chinese documentation set
-- ❌ Missing developer onboarding workflow
-- ❌ No visual setup validation checkpoints
+---
 
 ## Functional Requirements
 
-### FR-001: Bilingual Documentation Framework
-**Description**: Implement comprehensive Chinese and English documentation structure
-**Priority**: High
-**Acceptance Criteria**:
-- [ ] Create docs/ folder with proper structure following project standards
-- [ ] Implement parallel Chinese (docs/zh/) and English (docs/en/) documentation trees
-- [ ] Maintain content parity between languages with cultural adaptations
-- [ ] Include navigation system for language switching
+### FR-001: Proper Documentation Structure Migration
+**Priority**: High  
+**Description**: Migrate all documentation to standard `docs/` folder structure per CLAUDE.md requirements
 
-### FR-002: Enhanced README with Status Badges
-**Description**: Upgrade README with visual project health indicators and improved structure
-**Priority**: High
 **Acceptance Criteria**:
-- [ ] Add build status badge (GitHub Actions or similar)
-- [ ] Include test coverage badge with minimum 80% threshold
-- [ ] Add license badge and version information
-- [ ] Include Python version compatibility badge
-- [ ] Add API documentation status indicator
-- [ ] Implement "last updated" timestamp
+- All documentation files moved from root to `docs/` directory
+- Bilingual organization established (docs/en/ and docs/zh/)
+- Navigation links updated to reflect new structure
+- No documentation files remain in root directory
+- Cross-references updated throughout project
 
-### FR-003: Comprehensive Setup Validation System
-**Description**: Create step-by-step setup process with validation checkpoints
-**Priority**: High
-**Acceptance Criteria**:
-- [ ] Interactive setup script with progress indicators
-- [ ] Automated environment validation (Python version, dependencies)
-- [ ] API connectivity test with clear pass/fail indicators
-- [ ] Configuration validation with specific error messages
-- [ ] Success confirmation with next steps guidance
+**Technical Notes**:
+- Must follow CLAUDE.md standard: "All documentation files MUST be placed in the docs/ folder"
+- Maintain backward compatibility through redirect notices
+- Update CI/CD references if applicable
 
-### FR-004: Advanced Troubleshooting Guide
-**Description**: Develop comprehensive debugging and problem resolution documentation
-**Priority**: High
-**Acceptance Criteria**:
-- [ ] Common error scenarios with specific solutions
-- [ ] Environment-specific troubleshooting (Windows/Linux/Mac)
-- [ ] API connectivity issues and resolutions
-- [ ] Virtual environment problems and fixes
-- [ ] Logging and diagnostic procedures
+### FR-002: Professional README Badge Integration  
+**Priority**: High  
+**Description**: Enhance README with comprehensive status badges using shields.io
 
-### FR-005: Developer Onboarding Workflow
-**Description**: Create structured onboarding experience for new developers
-**Priority**: Medium
 **Acceptance Criteria**:
-- [ ] Progressive learning path from basic to advanced features
-- [ ] Hands-on tutorials with expected outcomes
-- [ ] Code walkthrough documentation
-- [ ] Architecture overview with diagrams
-- [ ] Contributing guidelines and development workflow
+- Build status badge with real-time GitHub Actions integration
+- Test coverage badge with dynamic percentage display
+- Python version compatibility badge (3.8+)
+- FastAPI version badge
+- License badge with appropriate license type
+- Last updated badge with automatic date
+- API health status badge with endpoint monitoring
+
+**Technical Implementation**:
+```markdown
+![Build Status](https://img.shields.io/github/actions/workflow/status/owner/repo/main.yml)
+![Coverage](https://img.shields.io/codecov/c/github/owner/repo)
+![Python](https://img.shields.io/badge/python-3.8%2B-blue)
+![FastAPI](https://img.shields.io/badge/fastapi-0.104%2B-green)
+![License](https://img.shields.io/badge/license-MIT-blue)
+```
+
+### FR-003: Comprehensive Chinese Documentation Suite
+**Priority**: High  
+**Description**: Create complete Chinese translations of all core documentation
+
+**Acceptance Criteria**:
+- Chinese README (README.zh.md) with full feature parity
+- Quick start guide (快速开始指南.md) with step-by-step instructions
+- API examples (API使用示例.md) with Chinese comments and explanations
+- Troubleshooting guide (故障排除指南.md) with localized error scenarios
+- Setup validation guide (安装验证.md) matching English version
+- Proper UTF-8 encoding for Chinese characters
+- Cultural adaptation for Chinese development practices
+
+**Translation Quality Standards**:
+- Professional technical translation with consistent terminology
+- Code examples with Chinese comments where appropriate
+- Cultural context adaptation (e.g., local development tools, practices)
+- Native Chinese speaker review and validation
+
+### FR-004: Interactive Setup Validation System
+**Priority**: High  
+**Description**: Implement comprehensive interactive setup validation tools
+
+**Acceptance Criteria**:
+- Progressive setup validation script (setup_validator.py)
+- Real-time environment checking and validation
+- Step-by-step problem resolution guidance
+- Platform-specific instructions (Windows/macOS/Linux)
+- API connectivity testing and validation
+- Detailed success/failure reporting with actionable recommendations
+- Integration with existing project structure and dependencies
+
+**Validation Components**:
+1. Python version and virtual environment verification
+2. Dependency installation validation
+3. Configuration file presence and format checking
+4. API key validation and connectivity testing
+5. Port availability and service startup verification
+
+### FR-005: Enhanced Troubleshooting Documentation
+**Priority**: Medium  
+**Description**: Create comprehensive troubleshooting guides covering common scenarios
+
+**Acceptance Criteria**:
+- Common installation and setup issues with solutions
+- API connectivity problems and resolution steps
+- Environment-specific troubleshooting (Windows/macOS/Linux)
+- Error code reference with explanations and fixes
+- Performance optimization guidance
+- Debug mode instructions and log analysis
+- Community support and escalation procedures
+
+**Coverage Areas**:
+- Installation and dependency issues
+- Configuration and API key problems
+- Network connectivity and firewall issues
+- Platform-specific considerations
+- Performance and resource issues
+
+### FR-006: Automated Quality Assurance
+**Priority**: Medium  
+**Description**: Implement automated documentation quality assurance systems
+
+**Acceptance Criteria**:
+- Link validation for internal and external references
+- Markdown syntax validation and consistency checking
+- Translation consistency verification
+- Badge status monitoring and validation
+- Documentation freshness tracking and alerts
+- Automated spell checking and grammar validation
+
+**Quality Metrics**:
+- 100% functional internal links
+- 95% functional external links
+- Consistent markdown formatting
+- Translation coverage >90% for core documents
+
+---
 
 ## Non-Functional Requirements
 
-### NFR-001: Documentation Accessibility
-**Description**: Ensure documentation is accessible and user-friendly
-**Metrics**:
-- Setup completion rate > 90%
-- Average setup time < 10 minutes
-- Documentation readability score > 80
-- Language consistency across all documents
+### NFR-001: Accessibility and Usability
+**Priority**: High  
+**Description**: Ensure documentation is accessible to diverse audiences
 
-### NFR-002: Maintenance and Updates
-**Description**: Sustainable documentation maintenance system
-**Standards**:
-- Automated documentation validation
-- Version synchronization between languages
-- Regular content review schedule
-- Community contribution workflow
-
-### NFR-003: Performance and Usability
-**Description**: Fast, searchable, and navigable documentation
 **Requirements**:
-- Document loading time < 2 seconds
-- Search functionality across all documents
-- Mobile-responsive design for web-based docs
-- Offline accessibility for critical setup guides
+- Mobile-responsive markdown formatting
+- Screen reader compatibility
+- Clear visual hierarchy and navigation
+- Multi-language support with easy switching
+- Offline documentation capabilities
+- Fast loading and navigation
 
-## Chinese Documentation Requirements
+### NFR-002: Maintainability
+**Priority**: Medium  
+**Description**: Establish sustainable documentation maintenance processes
 
-### Cultural and Technical Adaptations
-**Translation Scope:**
-1. **Complete Translation Priority:**
-   - README.md → README_zh.md
-   - QUICKSTART.md → 快速开始.md
-   - COMPLETE_API_EXAMPLES.md → API使用示例.md
-   - New troubleshooting guide → 故障排除指南.md
+**Requirements**:
+- Version control integration with change tracking
+- Automated quality assurance and validation
+- Clear contribution guidelines and review processes
+- Translation workflow management
+- Badge and status monitoring automation
+- Regular freshness audits and updates
 
-2. **Cultural Adaptations:**
-   - Chinese financial market contexts where applicable
-   - Local development tool preferences (vs code extensions, etc.)
-   - Chinese developer community resource links
-   - Simplified setup commands for Chinese development environments
+### NFR-003: Performance
+**Priority**: Medium  
+**Description**: Optimize documentation for fast access and usability
 
-3. **Technical Considerations:**
-   - UTF-8 encoding for all Chinese documents
-   - Proper font rendering guidelines
-   - Chinese technical terminology standardization
-   - Code comments in Chinese for key examples
+**Requirements**:
+- Page loading time <2 seconds
+- Interactive script execution time <5 seconds
+- Efficient badge loading and caching
+- Optimized image and asset delivery
+- Responsive design for all devices
 
-### Bilingual Content Organization
-```
-docs/
-├── en/                     # English documentation
-│   ├── README.md
-│   ├── quickstart.md
-│   ├── api-examples.md
-│   ├── troubleshooting.md
-│   └── developer-guide.md
-├── zh/                     # Chinese documentation
-│   ├── README.md           # 中文概述
-│   ├── quickstart.md       # 快速开始
-│   ├── api-examples.md     # API使用示例
-│   ├── troubleshooting.md  # 故障排除
-│   └── developer-guide.md  # 开发者指南
-└── diagrams/               # Shared visual assets
-    ├── architecture.png
-    ├── setup-flow.png
-    └── api-workflow.png
-```
-
-## Technical Constraints
-
-### System Requirements
-- Must maintain compatibility with existing project structure
-- No breaking changes to current API or functionality
-- Documentation must be version-controlled with main codebase
-- Support for both Windows and Unix-style path handling
-
-### Technology Stack Constraints
-- Documentation format: Markdown for compatibility
-- Badge generation: shields.io or similar service
-- Chinese font support: System-default Chinese fonts
-- File encoding: UTF-8 for all text files
-
-### Integration Requirements
-- GitHub Actions integration for automated badge updates
-- Pytest integration for coverage badge generation
-- Alpaca API status monitoring for service badges
-- Virtual environment detection for setup validation
-
-## Success Metrics and Validation Criteria
-
-### Quantitative Metrics
-| Metric | Target | Measurement Method |
-|--------|---------|-------------------|
-| Setup Success Rate | >90% | User testing with 20+ developers |
-| Setup Time (First-time) | <10 minutes | Timed user sessions |
-| Setup Time (Repeat) | <3 minutes | Automated testing |
-| Documentation Coverage | 100% API endpoints | Automated audit |
-| Chinese Translation Accuracy | >95% | Native speaker review |
-| Badge Update Frequency | <5 minutes delay | Automated monitoring |
-
-### Qualitative Success Indicators
-- [ ] Positive feedback from Chinese-speaking developers
-- [ ] Reduced support ticket volume for setup issues
-- [ ] Increased community contributions
-- [ ] Improved GitHub repository metrics (stars, forks)
-- [ ] Enhanced professional appearance and credibility
+---
 
 ## User Stories
 
-### Epic: Seamless Developer Onboarding
+### Epic 1: Seamless Bilingual Experience
 
-#### Story: DOC-001 - Quick Chinese Setup
-**As a** Chinese-speaking developer  
-**I want** comprehensive Chinese setup documentation  
-**So that** I can configure the system without language barriers
+**Story US-001**: As a Chinese-speaking developer, I want complete Chinese documentation so I can understand and implement the trading system without language barriers.
 
-**Acceptance Criteria** (EARS format):
-- **WHEN** I access the Chinese documentation **THEN** all setup steps are clearly explained in Chinese
-- **IF** I encounter errors during setup **THEN** Chinese error messages and solutions are provided
-- **FOR** all API examples **VERIFY** Chinese comments and explanations are included
+**Story US-002**: As a developer, I want consistent navigation between English and Chinese versions so I can easily switch languages while maintaining context.
 
-**Story Points**: 8
-**Priority**: High
+### Epic 2: Professional Project Presentation  
 
-#### Story: DOC-002 - Visual Project Health
-**As a** developer evaluating this project  
-**I want** immediate visual indicators of project health  
-**So that** I can quickly assess stability and maintenance status
+**Story US-003**: As a potential user, I want to see project health indicators so I can assess system reliability and maintenance quality.
 
-**Acceptance Criteria**:
-- **WHEN** I view the README **THEN** I see current build status, test coverage, and version badges
-- **IF** tests are failing **THEN** the badge clearly indicates failure with red color
-- **FOR** all badge updates **VERIFY** they refresh within 5 minutes of changes
+**Story US-004**: As a developer, I want clear visual status indicators so I can quickly understand project status and compatibility.
 
-**Story Points**: 5
-**Priority**: High
+### Epic 3: Friction-Free Setup Experience
 
-#### Story: DOC-003 - Guided Troubleshooting
-**As a** developer experiencing setup issues  
-**I want** step-by-step troubleshooting guidance  
-**So that** I can resolve problems independently without external support
+**Story US-005**: As a new user, I want interactive setup validation so I can identify and resolve issues before they become blocking problems.
 
-**Acceptance Criteria**:
-- **WHEN** I encounter common errors **THEN** specific solutions are provided with exact commands
-- **IF** my environment differs (Windows/Mac/Linux) **THEN** platform-specific instructions are available
-- **FOR** API connectivity issues **VERIFY** diagnostic steps help identify the root cause
+**Story US-006**: As a developer, I want platform-specific setup instructions so I can follow the correct process for my operating system.
 
-**Story Points**: 8
-**Priority**: High
+### Epic 4: Comprehensive Problem Resolution
 
-### Epic: Enhanced User Experience
+**Story US-007**: As a user experiencing issues, I want detailed troubleshooting guides so I can resolve problems independently.
 
-#### Story: DOC-004 - Interactive Setup Validation
-**As a** new user setting up the system  
-**I want** automated validation of each setup step  
-**So that** I can be confident my configuration is correct before proceeding
+**Story US-008**: As a support engineer, I want common error scenarios documented so I can efficiently help users resolve issues.
 
-**Acceptance Criteria**:
-- **WHEN** I complete each setup step **THEN** a validation script confirms success
-- **IF** validation fails **THEN** specific error messages guide me to the solution
-- **FOR** final setup **VERIFY** all services are running and accessible
+---
 
-**Story Points**: 13
-**Priority**: Medium
+## Success Metrics
 
-## Assumptions
+### Primary Metrics
+- **Setup Success Rate**: >90% of new users complete setup without manual intervention
+- **Documentation Coverage**: 100% of API endpoints documented in both languages  
+- **Translation Completeness**: >95% of core documentation available in Chinese
+- **Badge Accuracy**: 100% of status badges reflect real-time accurate information
 
-### Technical Assumptions
-- Developers have basic command line familiarity
-- Internet connectivity available for API key setup
-- GitHub repository will remain primary documentation host
-- Markdown format suitable for all documentation needs
+### Secondary Metrics
+- **User Satisfaction**: >4.5/5 rating for documentation quality
+- **Support Ticket Reduction**: 50% decrease in setup-related support requests
+- **Time to First Success**: <10 minutes average setup time for new users
+- **Documentation Freshness**: <7 days average age for critical documentation updates
 
-### Business Assumptions
-- Chinese market expansion is a business priority
-- Documentation maintenance resources will be allocated
-- Community contributions will supplement core documentation
-- Badge services (shields.io) will remain available and reliable
+### Quality Metrics
+- **Link Validation**: >95% of links functional and current
+- **Content Accuracy**: Zero critical factual errors in setup instructions
+- **Cross-Platform Compatibility**: 100% success rate across Windows/macOS/Linux
+- **Mobile Usability**: >80% usability score on mobile devices
 
-## Out of Scope
+---
 
-### Explicitly Excluded
-- Video tutorial creation (documentation only)
-- Real-time chat support integration
-- Multi-language support beyond Chinese and English
-- Documentation hosting outside of GitHub repository
-- Custom documentation website development
-- Integration with external documentation platforms (GitBook, etc.)
+## Technical Constraints
 
-## Implementation Priority Matrix
+### Platform Requirements
+- **Documentation Format**: GitHub-flavored Markdown
+- **Character Encoding**: UTF-8 for Chinese character support
+- **Image Formats**: PNG, SVG for diagrams and badges
+- **Script Compatibility**: Python 3.8+ for interactive tools
+- **Repository Structure**: Must comply with CLAUDE.md requirements
+
+### Integration Requirements  
+- **Version Control**: Git-based workflow with change tracking
+- **CI/CD Integration**: GitHub Actions for automated badge updates
+- **External Services**: shields.io for badge generation and monitoring
+- **Dependency Management**: Integration with existing requirements.txt
+
+### Compliance Requirements
+- **CLAUDE.md Adherence**: All documentation in docs/ folder structure
+- **No Root Documentation**: Prohibition on creating root-level .md files
+- **Virtual Environment**: Strict venv requirement compliance
+- **Security**: No secrets or sensitive information in documentation
+
+---
+
+## Implementation Approach
 
 ### Phase 1: Foundation (Week 1-2)
-- **High Priority:**
-  - Create docs/ folder structure
-  - Add README status badges
-  - Basic Chinese translations of core documents
+1. **Structure Migration**: Move all documentation to docs/ structure
+2. **Badge Integration**: Implement comprehensive README badges
+3. **Basic Chinese Translation**: Core README and quick start guide
 
-### Phase 2: Enhancement (Week 3-4)
-- **Medium Priority:**
-  - Comprehensive troubleshooting guide
-  - Interactive setup validation
-  - Developer onboarding workflow
+### Phase 2: Enhancement (Week 3-4)  
+1. **Interactive Tools**: Setup validation and health checking scripts
+2. **Complete Translation**: All major documentation in Chinese
+3. **Troubleshooting Guides**: Comprehensive problem resolution documentation
 
 ### Phase 3: Optimization (Week 5-6)
-- **Low Priority:**
-  - Advanced Chinese cultural adaptations
-  - Community contribution guidelines
-  - Documentation maintenance automation
+1. **Quality Assurance**: Automated validation and quality checking
+2. **Testing and Validation**: User acceptance testing and refinement
+3. **Community Integration**: Feedback collection and improvement processes
 
-## Risk Assessment and Mitigation
+---
 
-| Risk | Impact | Probability | Mitigation Strategy |
-|------|--------|-------------|-------------------|
-| Chinese translation quality issues | High | Medium | Native speaker review process |
-| Badge service downtime | Medium | Low | Multiple badge provider options |
-| Documentation maintenance overhead | High | Medium | Automated validation and update systems |
-| User adoption of new documentation | Medium | Medium | Gradual rollout with feedback collection |
-| Platform-specific setup variations | High | High | Comprehensive testing on all platforms |
+## Risk Assessment
 
-## Success Validation Plan
+### High-Risk Items
+- **Translation Quality**: Risk of poor technical translation affecting usability
+- **Badge Reliability**: External service dependencies for real-time status
+- **Platform Compatibility**: Interactive scripts working across all target platforms
 
-### Testing Strategy
-1. **User Acceptance Testing**: 20+ developers from different backgrounds
-2. **Platform Testing**: Windows 10/11, macOS, Ubuntu Linux
-3. **Language Testing**: Native Chinese and English speakers
-4. **Performance Testing**: Documentation loading times and badge refresh rates
+### Mitigation Strategies
+- **Professional Translation Review**: Native Chinese speaker validation
+- **Fallback Badge Strategy**: Local badge generation as backup
+- **Comprehensive Testing**: Multi-platform testing and validation
+- **Progressive Enhancement**: Core functionality independent of advanced features
+
+---
+
+## Validation and Testing
+
+### User Acceptance Testing
+1. **New User Onboarding**: Fresh environment setup simulation
+2. **Cross-Platform Testing**: Windows, macOS, Linux validation
+3. **Bilingual Navigation**: Language switching and content consistency
+4. **Interactive Tool Testing**: Setup validation and troubleshooting workflows
 5. **Accessibility Testing**: Screen readers and mobile device compatibility
 
 ### Review Process
 1. **Technical Review**: Code and documentation accuracy
-2. **Language Review**: Professional Chinese translation review
+2. **Language Review**: Professional Chinese translation review  
 3. **UX Review**: User experience and workflow validation
 4. **Community Review**: Feedback from existing project contributors
 
