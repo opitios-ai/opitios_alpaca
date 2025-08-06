@@ -61,19 +61,19 @@ python main.py
 python start_server.py
 ```
 
-**Server will be available at:** `http://localhost:8091`
+**Server will be available at:** `http://localhost:8090`
 
 ## 🌐 WebSocket Streaming
 
 ### Access the Interactive WebSocket Test Interface
 
-**URL:** `http://localhost:8091/static/websocket_test.html`
+**URL:** `http://localhost:8090/static/websocket_test.html`
 
 ### WebSocket Endpoints
 
 | Endpoint | Type | Data Format | Purpose |
 |----------|------|-------------|---------|
-| `ws://localhost:8091/api/v1/ws/market-data` | Production | JSON | Local real-time stock data |
+| `ws://localhost:8090/api/v1/ws/market-data` | Production | JSON | Local real-time stock data |
 | `wss://stream.data.alpaca.markets/v2/test` | Test | JSON | Alpaca test data (FAKEPACA) |
 | `wss://stream.data.alpaca.markets/v1beta1/indicative` | Options | **MsgPack** | Real-time option data |
 
@@ -138,10 +138,10 @@ python run_tests.py
 python main.py
 
 # Check server health
-curl http://localhost:8091/api/v1/health
+curl http://localhost:8090/api/v1/health
 
 # Get API credentials endpoint
-curl http://localhost:8091/api/v1/auth/alpaca-credentials
+curl http://localhost:8090/api/v1/auth/alpaca-credentials
 ```
 
 ## 🐳 Docker Deployment
@@ -163,7 +163,7 @@ docker-compose up -d
 docker build -t opitios-alpaca .
 
 # Run container
-docker run -p 8091:8091 \
+docker run -p 8090:8090 \
   -v $(pwd)/secrets.yml:/app/secrets.yml:ro \
   opitios-alpaca
 ```
@@ -174,7 +174,7 @@ docker run -p 8091:8091 \
 
 1. **Server Requirements:**
    - Python 3.8+
-   - Port 8091 accessible
+   - Port 8090 accessible
    - SSL certificate (for WSS endpoints)
 
 2. **Environment Setup:**
@@ -235,7 +235,7 @@ server {
     server_name your-domain.com;
 
     location / {
-        proxy_pass http://127.0.0.1:8091;
+        proxy_pass http://127.0.0.1:8090;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -247,7 +247,7 @@ server {
 
     # WebSocket proxy
     location /api/v1/ws/ {
-        proxy_pass http://127.0.0.1:8091;
+        proxy_pass http://127.0.0.1:8090;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -308,7 +308,7 @@ services:
   environment_slug: python
   instance_count: 1
   instance_size_slug: basic-xxs
-  http_port: 8091
+  http_port: 8090
   env:
   - key: ALPACA_API_KEY
     value: your_api_key_here
@@ -325,7 +325,7 @@ ALPACA_API_KEY=your_api_key
 ALPACA_SECRET_KEY=your_secret_key
 ALPACA_PAPER_TRADING=true
 SERVER_HOST=0.0.0.0
-SERVER_PORT=8091
+SERVER_PORT=8090
 ```
 
 ### secrets.yml Configuration
@@ -338,15 +338,15 @@ alpaca:
   
 server:
   host: "0.0.0.0"
-  port: 8091
+  port: 8090
   real_data_only: true
 ```
 
 ## 📚 API Documentation
 
 ### Interactive API Docs
-- **Swagger UI:** `http://localhost:8091/docs`
-- **ReDoc:** `http://localhost:8091/redoc`
+- **Swagger UI:** `http://localhost:8090/docs`
+- **ReDoc:** `http://localhost:8090/redoc`
 
 ### Key API Endpoints
 
@@ -365,10 +365,10 @@ server:
 #### WebSocket Connection Failed
 ```bash
 # Check server is running
-curl http://localhost:8091/api/v1/health
+curl http://localhost:8090/api/v1/health
 
 # Check port availability
-netstat -an | grep 8091
+netstat -an | grep 8090
 ```
 
 #### MsgPack Library Not Loading
@@ -396,7 +396,7 @@ grep "WebSocket" logs/app.log
 htop
 
 # Check WebSocket connections
-ss -tuln | grep 8091
+ss -tuln | grep 8090
 ```
 
 ## 📈 Features Roadmap
@@ -460,7 +460,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 python main.py
 
 # Test WebSocket
-open http://localhost:8091/static/websocket_test.html
+open http://localhost:8090/static/websocket_test.html
 
 # Run tests  
 python tests/test_msgpack_ascii.py
@@ -469,7 +469,7 @@ python tests/test_msgpack_ascii.py
 docker-compose up --build
 
 # Check health
-curl http://localhost:8091/api/v1/health
+curl http://localhost:8090/api/v1/health
 ```
 
 **Ready to trade with real-time data!** 🚀📊

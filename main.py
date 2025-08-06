@@ -10,9 +10,79 @@ from config import settings
 from loguru import logger
 from contextlib import asynccontextmanager
 import uvicorn
+import subprocess
+import sys
+import time
+import os
 
 # Configure enhanced logging
 logging_config.setup_logging()
+
+def clear_port_8090():
+    """Clear any processes using port 8090"""
+    logger.info("Checking for processes using port 8090...")
+    
+    try:
+        if os.name == 'nt':  # Windows
+            # Find processes using port 8090
+            result = subprocess.run(
+                ['netstat', '-ano', '-p', 'TCP'], 
+                capture_output=True, text=True, check=False
+            )
+            
+            lines = result.stdout.split('\n')
+            pids_to_kill = []
+            
+            for line in lines:
+                if ':8090' in line and 'LISTENING' in line:
+                    parts = line.split()
+                    if len(parts) >= 5:
+                        pid = parts[-1]
+                        if pid.isdigit():
+                            pids_to_kill.append(pid)
+                            logger.warning(f"Found process PID {pid} using port 8090")
+            
+            # Kill the processes
+            for pid in pids_to_kill:
+                try:
+                    subprocess.run(['taskkill', '/F', '/PID', pid], check=True)
+                    logger.success(f"Killed process PID {pid}")
+                except subprocess.CalledProcessError as e:
+                    logger.error(f"Failed to kill PID {pid}: {e}")
+                    
+        else:  # Linux/Mac
+            try:
+                result = subprocess.run(
+                    ['lsof', '-ti:8090'], 
+                    capture_output=True, text=True, check=False
+                )
+                
+                if result.stdout.strip():
+                    pids = result.stdout.strip().split('\n')
+                    for pid in pids:
+                        if pid.strip():
+                            try:
+                                subprocess.run(['kill', '-9', pid.strip()], check=True)
+                                logger.success(f"Killed process PID {pid.strip()}")
+                            except subprocess.CalledProcessError as e:
+                                logger.error(f"Failed to kill PID {pid.strip()}: {e}")
+                else:
+                    logger.info("No processes found using port 8090")
+                    
+            except FileNotFoundError:
+                logger.info("lsof command not found, trying alternative method...")
+                try:
+                    subprocess.run(['fuser', '-k', '8090/tcp'], check=True)
+                    logger.success("Killed processes using port 8090 with fuser")
+                except (subprocess.CalledProcessError, FileNotFoundError):
+                    logger.warning("Could not kill processes automatically")
+        
+        # Wait for processes to close
+        time.sleep(2)
+        logger.info("Port 8090 cleanup completed")
+        
+    except Exception as e:
+        logger.error(f"Error while cleaning port 8090: {e}")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -131,6 +201,10 @@ async def root():
 # Event handlers moved to lifespan context manager above
 
 if __name__ == "__main__":
+    # Clear port 8090 before starting server
+    logger.info(f"Starting {settings.app_name} on port {settings.port}")
+    clear_port_8090()
+    
     uvicorn.run(
         "main:app",
         host=settings.host,
