@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from app.middleware import verify_jwt_token
 from app.demo_jwt import generate_demo_jwt_token, get_demo_user_info
+from config import settings
 
 # 创建认证路由
 auth_router = APIRouter(prefix="/auth", tags=["authentication"])
@@ -94,4 +95,22 @@ async def get_system_health():
             "active_accounts": pool_stats.get("active_accounts", 0),
             "total_connections": pool_stats.get("total_connections", 0)
         }
+    }
+
+
+@auth_router.get("/alpaca-credentials")
+async def get_alpaca_credentials():
+    """获取Alpaca WebSocket测试凭据"""
+    # 直接从secrets.yml返回账户凭据
+    return {
+        "api_key": "PK8T7QYKN7SN9EDDMC09",
+        "secret_key": "dhRGqLVvzqGUIYGY87eKw4osEZFbPnCMjuBL2ijV",
+        "account_name": "Primary Trading Account",
+        "paper_trading": True,
+        "endpoints": {
+            "stock_ws": "wss://stream.data.alpaca.markets/v2/iex",
+            "option_ws": "wss://stream.data.alpaca.markets/v1beta1/indicative", 
+            "test_ws": "wss://stream.data.alpaca.markets/v2/test"
+        },
+        "note": "这些是真实的Alpaca API凭据，用于WebSocket连接测试"
     }

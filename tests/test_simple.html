@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Test</title>
+</head>
+<body>
+    <h1>WebSocket Test</h1>
+    <button onclick="testProduction()">Test Production</button>
+    <button onclick="testAlpaca()">Test Alpaca</button>
+    <div id="log"></div>
+
+    <script>
+    function log(msg) {
+        document.getElementById('log').innerHTML += '<br>' + new Date().toLocaleTimeString() + ': ' + msg;
+    }
+
+    function testProduction() {
+        log('Connecting to production WebSocket...');
+        const ws = new WebSocket('ws://localhost:8090/api/v1/ws/market-data');
+        
+        ws.onopen = () => log('Production WebSocket connected!');
+        ws.onmessage = (event) => log('Production message: ' + event.data);
+        ws.onclose = () => log('Production WebSocket closed');
+        ws.onerror = (error) => log('Production WebSocket error: ' + error);
+    }
+
+    function testAlpaca() {
+        log('Connecting to Alpaca test WebSocket...');
+        const ws = new WebSocket('wss://stream.data.alpaca.markets/v2/test');
+        
+        ws.onopen = () => {
+            log('Alpaca WebSocket connected!');
+            ws.send(JSON.stringify({
+                action: 'auth',
+                key: 'test_key',
+                secret: 'test_secret'
+            }));
+        };
+        ws.onmessage = (event) => log('Alpaca message: ' + event.data);
+        ws.onclose = () => log('Alpaca WebSocket closed');
+        ws.onerror = (error) => log('Alpaca WebSocket error: ' + error);
+    }
+    </script>
+</body>
+</html>

@@ -263,25 +263,64 @@
             }
         }
     </style>
+    <!-- Add MsgPack library for binary data decoding -->
+    <script crossorigin src="https://unpkg.com/@msgpack/msgpack" 
+            onload="window.msgpackLoaded = true; console.log('MsgPack library loaded successfully');"
+            onerror="window.msgpackLoadError = true; console.error('Failed to load MsgPack library from unpkg'); loadMsgPackFallback();"></script>
+    <script>
+        // Fallback CDN loader for MsgPack
+        function loadMsgPackFallback() {
+            console.log('Loading MsgPack from fallback CDN...');
+            const script = document.createElement('script');
+            script.crossOrigin = 'anonymous';
+            script.src = 'https://cdn.jsdelivr.net/npm/@msgpack/msgpack@latest/dist.umd/msgpack.min.js';
+            script.onload = function() {
+                window.msgpackLoaded = true;
+                window.msgpackLoadError = false;
+                console.log('MsgPack library loaded successfully from fallback CDN (jsDelivr)');
+            };
+            script.onerror = function() {
+                console.error('Failed to load MsgPack library from fallback CDN (jsDelivr)');
+                window.msgpackLoadError = true;
+            };
+            document.head.appendChild(script);
+        }
+    </script>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <h1>🚀 Opitios Alpaca WebSocket</h1>
             <div class="subtitle">实时股票和期权数据流测试</div>
-            <div class="subtitle">✅ Alpaca Paper Trading API - IEX Real-time Data</div>
+            <div class="subtitle">✅ Alpaca 真实数据流 - 无模拟数据</div>
         </div>
         
         <!-- 连接状态面板 -->
         <div class="status-panel">
             <div class="status-grid">
                 <div class="status-item">
-                    <div class="status-label">WebSocket连接</div>
-                    <div class="status-value" id="connection-status">未连接</div>
+                    <div class="status-label">生产端点连接</div>
+                    <div class="status-value" id="production-status">未连接</div>
                 </div>
                 <div class="status-item">
-                    <div class="status-label">接收消息数</div>
-                    <div class="status-value" id="message-count">0</div>
+                    <div class="status-label">测试端点连接</div>
+                    <div class="status-value" id="test-status">未连接</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">期权端点连接</div>
+                    <div class="status-value" id="option-status">未连接</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">生产消息数</div>
+                    <div class="status-value" id="production-message-count">0</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">测试消息数</div>
+                    <div class="status-value" id="test-message-count">0</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">期权消息数</div>
+                    <div class="status-value" id="option-message-count">0</div>
                 </div>
                 <div class="status-item">
                     <div class="status-label">订阅股票数</div>
@@ -296,8 +335,8 @@
                     <div class="status-value" id="last-update">-</div>
                 </div>
                 <div class="status-item">
-                    <div class="status-label">数据源</div>
-                    <div class="status-value">Alpaca IEX</div>
+                    <div class="status-label">数据源对比</div>
+                    <div class="status-value">生产 vs 测试</div>
                 </div>
             </div>
         </div>
@@ -305,21 +344,28 @@
         <!-- 控制面板 -->
         <div class="control-panel">
             <div class="button-group">
-                <button id="connect-btn" onclick="connectWebSocket()">连接 WebSocket</button>
-                <button id="disconnect-btn" onclick="disconnectWebSocket()" disabled>断开连接</button>
+                <button id="connect-production-btn" onclick="connectProductionWebSocket()">连接生产端点</button>
+                <button id="connect-test-btn" onclick="connectTestWebSocket()">连接测试端点</button>
+                <button id="connect-option-btn" onclick="connectOptionWebSocket()">连接期权端点</button>
+                <button id="connect-all-btn" onclick="connectAllWebSockets()">连接所有端点</button>
+                <button id="disconnect-production-btn" onclick="disconnectProductionWebSocket()" disabled>断开生产连接</button>
+                <button id="disconnect-test-btn" onclick="disconnectTestWebSocket()" disabled>断开测试连接</button>
+                <button id="disconnect-option-btn" onclick="disconnectOptionWebSocket()" disabled>断开期权连接</button>
                 <button onclick="clearLogs()">清空日志</button>
-                <button onclick="sendPing()">发送心跳</button>
+                <button onclick="sendPing()">发送心跳包</button>
                 <button onclick="getJWTToken()">获取演示JWT</button>
+                <button onclick="testMsgPackFunctionality()">测试MsgPack</button>
+                <button onclick="checkMsgPackAvailability()">检查MsgPack状态</button>
             </div>
         </div>
         
         <!-- 数据显示面板 -->
         <div class="data-panel">
-            <!-- 股票数据 -->
+            <!-- 生产端点股票数据 -->
             <div class="data-section">
-                <div class="section-title">📈 实时股票数据</div>
+                <div class="section-title">📈 生产端点股票数据</div>
                 <div style="font-size: 0.9em; opacity: 0.8; margin-bottom: 10px;">
-                    默认股票: AAPL, TSLA, GOOGL, MSFT, AMZN, NVDA, META, SPY
+                    来源: 本地生产服务器 (localhost:8091)
                 </div>
                 <table class="data-table">
                     <thead>
@@ -331,19 +377,86 @@
                             <th>更新时间</th>
                         </tr>
                     </thead>
-                    <tbody id="stock-data">
+                    <tbody id="production-stock-data">
                         <tr>
-                            <td colspan="5" style="text-align: center; opacity: 0.6;">等待连接WebSocket...</td>
+                            <td colspan="5" style="text-align: center; opacity: 0.6;">等待连接生产端点...</td>
                         </tr>
                     </tbody>
                 </table>
             </div>
             
-            <!-- 期权数据 -->
+            <!-- 测试端点股票数据 -->
             <div class="data-section">
-                <div class="section-title">📊 实时期权数据</div>
+                <div class="section-title">🧪 测试端点股票数据</div>
                 <div style="font-size: 0.9em; opacity: 0.8; margin-bottom: 10px;">
-                    默认期权: AAPL/TSLA/SPY 看涨/看跌期权
+                    来源: Alpaca 官方测试端点 (stream.data.alpaca.markets)
+                </div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>股票代码</th>
+                            <th>买价</th>
+                            <th>卖价</th>
+                            <th>最新价</th>
+                            <th>更新时间</th>
+                        </tr>
+                    </thead>
+                    <tbody id="test-stock-data">
+                        <tr>
+                            <td colspan="5" style="text-align: center; opacity: 0.6;">等待连接测试端点...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- 期权端点数据 -->
+            <div class="data-section">
+                <div class="section-title">📊 期权端点数据</div>
+                <div style="font-size: 0.9em; opacity: 0.8; margin-bottom: 10px;">
+                    来源: Alpaca 期权数据流 (v1beta1/indicative)
+                </div>
+                
+                <!-- 期权订阅管理 -->
+                <div style="margin-bottom: 15px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 5px;">
+                    <div style="margin-bottom: 10px;">
+                        <strong>订阅管理:</strong>
+                        <input type="text" id="new-option-symbol" placeholder="输入期权代码 (如: AAPL250808C00210000)" 
+                               style="margin-left: 10px; padding: 5px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); color: white; border-radius: 3px;">
+                        <button onclick="addOptionSubscription()" style="margin-left: 5px; padding: 5px 10px;">添加订阅</button>
+                    </div>
+                    <div>
+                        <strong>当前订阅:</strong> <span id="current-option-subscriptions">未连接</span>
+                    </div>
+                </div>
+                
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>期权代码</th>
+                            <th>类型</th>
+                            <th>买价</th>
+                            <th>卖价</th>
+                            <th>最新成交价</th>
+                            <th>更新时间</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="option-data">
+                        <tr>
+                            <td colspan="7" style="text-align: center; opacity: 0.6;">等待连接期权端点...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <!-- 期权数据对比面板 -->
+        <div class="data-panel">
+            <!-- 生产端点期权数据 -->
+            <div class="data-section">
+                <div class="section-title">📊 生产端点期权数据</div>
+                <div style="font-size: 0.9em; opacity: 0.8; margin-bottom: 10px;">
+                    来源: 本地生产服务器期权数据
                 </div>
                 <table class="data-table">
                     <thead>
@@ -355,9 +468,33 @@
                             <th>更新时间</th>
                         </tr>
                     </thead>
-                    <tbody id="option-data">
+                    <tbody id="production-option-data">
                         <tr>
-                            <td colspan="5" style="text-align: center; opacity: 0.6;">等待连接WebSocket...</td>
+                            <td colspan="5" style="text-align: center; opacity: 0.6;">等待连接生产端点...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- 测试端点期权数据 -->
+            <div class="data-section">
+                <div class="section-title">🧪 测试端点期权数据</div>
+                <div style="font-size: 0.9em; opacity: 0.8; margin-bottom: 10px;">
+                    来源: Alpaca 官方测试端点期权数据
+                </div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>期权代码</th>
+                            <th>买价</th>
+                            <th>卖价</th>
+                            <th>类型</th>
+                            <th>更新时间</th>
+                        </tr>
+                    </thead>
+                    <tbody id="test-option-data">
+                        <tr>
+                            <td colspan="5" style="text-align: center; opacity: 0.6;">等待连接测试端点...</td>
                         </tr>
                     </tbody>
                 </table>
@@ -388,7 +525,8 @@
                     <h3>技术规格</h3>
                     <ul>
                         <li>协议: WebSocket over WSS</li>
-                        <li>数据格式: JSON</li>
+                        <li>股票数据格式: JSON</li>
+                        <li>期权数据格式: MsgPack (二进制)</li>
                         <li>更新频率: 实时</li>
                         <li>数据源: Alpaca IEX Feed</li>
                         <li>认证: API Key</li>
@@ -398,12 +536,18 @@
                 <div class="info-item">
                     <h3>默认测试数据</h3>
                     <ul>
-                        <li>股票: AAPL, TSLA, GOOGL, MSFT等</li>
-                        <li>AAPL 期权: $230 Call, $220 Put</li>
-                        <li>TSLA 期权: $300 Call, $280 Put</li>
-                        <li>SPY 期权: $580 Call, $570 Put</li>
-                        <li>到期日: 2025-01-17</li>
-                        <li>自动订阅，实时更新</li>
+                        <li><strong>测试端点股票:</strong> FAKEPACA (测试专用)</li>
+                        <li><strong>生产端点股票:</strong> AAPL, TSLA, NVDA, MRVL, PLTR等</li>
+                        <li><strong>默认期权代码:</strong></li>
+                        <li style="margin-left: 20px;">UNIT250815C00007000, TSLA250808C00310000</li>
+                        <li style="margin-left: 20px;">TSLA260918C00750000, CRWV250808C00125000</li>
+                        <li style="margin-left: 20px;">MRVL250808C00080000, NVDA250808C00180000</li>
+                        <li style="margin-left: 20px;">BRBR250815C00035000, PLTR250808P00170000</li>
+                        <li style="margin-left: 20px;">TSLA250808P00300000, FSLR250808P00182500</li>
+                        <li style="margin-left: 20px;">AAPL250808C00210000, NVDA250808P00170000</li>
+                        <li><strong>期权WebSocket:</strong> wss://stream.data.alpaca.markets/v1beta1/indicative</li>
+                        <li><strong>期权数据格式:</strong> MsgPack (二进制) ✅ 已支持</li>
+                        <li><strong>MsgPack库状态:</strong> <span id="msgpack-status">检测中...</span></li>
                     </ul>
                 </div>
             </div>
@@ -411,125 +555,776 @@
     </div>
 
     <script>
-        let websocket = null;
-        let messageCount = 0;
-        let stockData = {};
+        let productionWebSocket = null;
+        let testWebSocket = null;
+        let optionWebSocket = null;
+        let productionMessageCount = 0;
+        let testMessageCount = 0;
+        let optionMessageCount = 0;
+        let productionStockData = {};
+        let productionOptionData = {};
+        let testStockData = {};
+        let testOptionData = {};
         let optionData = {};
+        
+        // 默认期权订阅列表
+        let defaultOptionSymbols = [
+            'UNIT250815C00007000',
+            'TSLA250808C00310000', 
+            'TSLA260918C00750000',
+            'CRWV250808C00125000',
+            'MRVL250808C00080000',
+            'NVDA250808C00180000',
+            'BRBR250815C00035000',
+            'PLTR250808P00170000',
+            'TSLA250808P00300000',
+            'FSLR250808P00182500',
+            'AAPL250808C00210000',
+            'NVDA250808P00170000'
+        ];
+        let subscribedOptionSymbols = [...defaultOptionSymbols];
         let jwtToken = null;
+        let msgpackAvailable = false;
         
-        const wsUrl = `ws://${window.location.host}/api/v1/ws/market-data`;
+        // Check MsgPack library availability
+        function checkMsgPackAvailability() {
+            try {
+                // Check if library loaded successfully
+                if (window.msgpackLoadError) {
+                    msgpackAvailable = false;
+                    document.getElementById('msgpack-status').innerHTML = '<span style="color: #f44336;">❌ CDN加载失败</span>';
+                    log('error', 'MsgPack库CDN加载失败 - 期权数据解码将失败');
+                    log('warning', '请检查网络连接或CDN可用性');
+                    return false;
+                }
+                
+                // Check for MessagePack global variable (from @msgpack/msgpack)
+                if (typeof MessagePack !== 'undefined' && MessagePack.encode && MessagePack.decode) {
+                    msgpackAvailable = true;
+                    document.getElementById('msgpack-status').innerHTML = '<span style="color: #4CAF50;">✅ 已加载 (MessagePack)</span>';
+                    log('success', 'MsgPack库加载成功 - 支持期权数据解码');
+                    log('info', `MsgPack版本: ${MessagePack.encode ? '支持编码' : ''}${MessagePack.decode ? '支持解码' : ''}`);
+                    return true;
+                }
+                
+                // Check for msgpack global variable (alternative)
+                if (typeof msgpack !== 'undefined' && msgpack.encode && msgpack.decode) {
+                    window.MessagePack = msgpack; // Create alias for consistency
+                    msgpackAvailable = true;
+                    document.getElementById('msgpack-status').innerHTML = '<span style="color: #4CAF50;">✅ 已加载 (msgpack)</span>';
+                    log('success', 'MsgPack库加载成功 (使用msgpack全局变量)');
+                    return true;
+                }
+                
+                // Check window.msgpackLoaded flag
+                if (window.msgpackLoaded) {
+                    log('warning', 'MsgPack库已标记为加载，但全局变量不可用');
+                    log('info', '可用的全局变量: ' + Object.keys(window).filter(k => k.toLowerCase().includes('msgpack')).join(', '));
+                }
+                
+            } catch (e) {
+                log('error', `MsgPack库检测失败: ${e.message}`);
+            }
+            
+            msgpackAvailable = false;
+            document.getElementById('msgpack-status').innerHTML = '<span style="color: #f44336;">❌ 未加载</span>';
+            log('error', 'MsgPack库未加载 - 期权数据解码将失败');
+            log('info', '期权WebSocket需要MsgPack库来解码二进制数据');
+            return false;
+        }
         
-        function connectWebSocket() {
-            if (websocket && websocket.readyState === WebSocket.OPEN) {
-                log('warning', 'WebSocket已经连接');
+        // WebSocket URLs  
+        const productionWsUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
+            ? 'ws://localhost:8091/api/v1/ws/market-data'
+            : `ws://${window.location.host}/api/v1/ws/market-data`;
+        
+        const testWsUrl = 'wss://stream.data.alpaca.markets/v2/test';
+        const optionWsUrl = 'wss://stream.data.alpaca.markets/v1beta1/indicative';
+        
+        function connectProductionWebSocket() {
+            if (productionWebSocket && productionWebSocket.readyState === WebSocket.OPEN) {
+                log('warning', '生产WebSocket已经连接');
                 return;
             }
             
-            log('info', `正在连接到: ${wsUrl}`);
-            updateConnectionStatus('connecting');
+            log('info', `正在连接到生产端点: ${productionWsUrl}`);
+            updateConnectionStatus('production', 'connecting');
             
-            websocket = new WebSocket(wsUrl);
+            productionWebSocket = new WebSocket(productionWsUrl);
             
-            websocket.onopen = function(event) {
-                log('success', 'WebSocket连接成功!');
-                updateConnectionStatus('online');
-                document.getElementById('connect-btn').disabled = true;
-                document.getElementById('disconnect-btn').disabled = false;
+            productionWebSocket.onopen = function(event) {
+                log('success', '生产WebSocket连接成功!');
+                updateConnectionStatus('production', 'online');
+                document.getElementById('connect-production-btn').disabled = true;
+                document.getElementById('disconnect-production-btn').disabled = false;
+                
+                // Auto-subscribe to stock data only (options use separate WebSocket)
+                setTimeout(() => {
+                    const stockSymbols = ['AAPL', 'TSLA', 'NVDA', 'MRVL', 'PLTR', 'UNIT', 'CRWV', 'BRBR', 'FSLR'];
+                    
+                    const subscribeMessage = {
+                        action: 'subscribe',
+                        symbols: stockSymbols,
+                        data_types: ['quotes', 'trades', 'bars']
+                    };
+                    
+                    productionWebSocket.send(JSON.stringify(subscribeMessage));
+                    log('info', `[生产] 发送股票订阅: ${stockSymbols.join(', ')}`);
+                }, 500);
             };
             
-            websocket.onmessage = function(event) {
-                messageCount++;
-                document.getElementById('message-count').textContent = messageCount;
+            productionWebSocket.onmessage = function(event) {
+                productionMessageCount++;
+                document.getElementById('production-message-count').textContent = productionMessageCount;
                 
                 try {
                     const data = JSON.parse(event.data);
-                    handleWebSocketMessage(data);
+                    handleProductionWebSocketMessage(data);
                 } catch (e) {
-                    log('error', `解析消息失败: ${e.message}`);
+                    log('error', `解析生产消息失败: ${e.message}`);
                 }
             };
             
-            websocket.onclose = function(event) {
-                log('warning', `WebSocket连接关闭: ${event.code} - ${event.reason}`);
-                updateConnectionStatus('offline');
-                document.getElementById('connect-btn').disabled = false;
-                document.getElementById('disconnect-btn').disabled = true;
+            productionWebSocket.onclose = function(event) {
+                log('warning', `生产WebSocket连接关闭: ${event.code} - ${event.reason}`);
+                updateConnectionStatus('production', 'offline');
+                document.getElementById('connect-production-btn').disabled = false;
+                document.getElementById('disconnect-production-btn').disabled = true;
             };
             
-            websocket.onerror = function(error) {
-                log('error', `WebSocket错误: ${error}`);
-                updateConnectionStatus('offline');
+            productionWebSocket.onerror = function(error) {
+                log('error', `生产WebSocket错误: ${error}`);
+                updateConnectionStatus('production', 'offline');
             };
         }
         
-        function disconnectWebSocket() {
-            if (websocket) {
-                websocket.close();
-                log('info', 'WebSocket连接已断开');
+        async function connectTestWebSocket() {
+            if (testWebSocket && testWebSocket.readyState === WebSocket.OPEN) {
+                log('warning', '测试WebSocket已经连接');
+                return;
+            }
+            
+            log('info', `正在连接到测试端点: ${testWsUrl}`);
+            updateConnectionStatus('test', 'connecting');
+            
+            // Get real API credentials first
+            let credentials = null;
+            try {
+                log('info', '[测试] 正在获取真实API凭据...');
+                const response = await fetch('http://localhost:8091/api/v1/auth/alpaca-credentials');
+                if (response.ok) {
+                    credentials = await response.json();
+                    log('success', `[测试] 获取到真实API凭据: ${credentials.account_name}`);
+                } else {
+                    log('error', '[测试] 获取API凭据失败，使用测试凭据');
+                }
+            } catch (error) {
+                log('error', `[测试] 获取API凭据错误: ${error.message}`);
+            }
+            
+            testWebSocket = new WebSocket(testWsUrl);
+            
+            testWebSocket.onopen = function(event) {
+                log('success', '测试WebSocket连接成功!');
+                updateConnectionStatus('test', 'online');
+                document.getElementById('connect-test-btn').disabled = true;
+                document.getElementById('disconnect-test-btn').disabled = false;
+                
+                // Send authentication to Alpaca test endpoint with real credentials
+                const authMessage = {
+                    action: 'auth',
+                    key: credentials ? credentials.api_key : 'test_api_key',
+                    secret: credentials ? credentials.secret_key : 'test_secret_key'
+                };
+                testWebSocket.send(JSON.stringify(authMessage));
+                log('info', `[测试] 发送认证消息 - 使用${credentials ? '真实' : '测试'}凭据`);
+                
+                // Subscribe to test data - MUST use FAKEPACA for test endpoint
+                setTimeout(() => {
+                    const subscribeMessage = {
+                        action: 'subscribe',
+                        trades: ['FAKEPACA'],
+                        quotes: ['FAKEPACA'],
+                        bars: ['FAKEPACA']
+                    };
+                    testWebSocket.send(JSON.stringify(subscribeMessage));
+                    log('info', '[测试] 发送订阅消息: FAKEPACA (测试端点专用股票代码)');
+                }, 1000);
+            };
+            
+            testWebSocket.onmessage = function(event) {
+                testMessageCount++;
+                document.getElementById('test-message-count').textContent = testMessageCount;
+                
+                try {
+                    const data = JSON.parse(event.data);
+                    handleTestWebSocketMessage(data);
+                } catch (e) {
+                    log('error', `解析测试消息失败: ${e.message}`);
+                }
+            };
+            
+            testWebSocket.onclose = function(event) {
+                log('warning', `测试WebSocket连接关闭: ${event.code} - ${event.reason}`);
+                updateConnectionStatus('test', 'offline');
+                document.getElementById('connect-test-btn').disabled = false;
+                document.getElementById('disconnect-test-btn').disabled = true;
+            };
+            
+            testWebSocket.onerror = function(error) {
+                log('error', `测试WebSocket错误: ${error}`);
+                updateConnectionStatus('test', 'offline');
+            };
+        }
+        
+        async function connectBothWebSockets() {
+            connectProductionWebSocket();
+            setTimeout(async () => await connectTestWebSocket(), 1000);
+        }
+        
+        function disconnectProductionWebSocket() {
+            if (productionWebSocket) {
+                productionWebSocket.close();
+                log('info', '生产WebSocket连接已断开');
             }
         }
         
-        function handleWebSocketMessage(data) {
+        function disconnectTestWebSocket() {
+            if (testWebSocket) {
+                testWebSocket.close();
+                log('info', '测试WebSocket连接已断开');
+            }
+        }
+        
+        async function connectOptionWebSocket() {
+            if (optionWebSocket && optionWebSocket.readyState === WebSocket.OPEN) {
+                log('warning', '期权WebSocket已经连接');
+                return;
+            }
+            
+            try {
+                // Get real API credentials for option WebSocket
+                const response = await fetch('/api/v1/auth/alpaca-credentials');
+                if (!response.ok) {
+                    log('error', '无法获取API凭据');
+                    return;
+                }
+                const credentials = await response.json();
+                
+                log('info', `正在连接到期权端点: ${optionWsUrl}`);
+                updateConnectionStatus('option', 'connecting');
+                
+                // Note: Option WebSocket only supports msgpack format, not JSON
+                // For demonstration, we'll show connection attempt
+                optionWebSocket = new WebSocket(optionWsUrl);
+                
+                optionWebSocket.onopen = function(event) {
+                    log('success', '期权WebSocket连接成功!');
+                    updateConnectionStatus('option', 'online');
+                    document.getElementById('connect-option-btn').disabled = true;
+                    document.getElementById('disconnect-option-btn').disabled = false;
+                    
+                    // Send authentication using MsgPack format
+                    const authMessage = {
+                        action: 'auth',
+                        key: credentials.api_key,
+                        secret: credentials.secret_key
+                    };
+                    
+                    try {
+                        if (msgpackAvailable) {
+                            const encodedAuth = MessagePack.encode(authMessage);
+                            optionWebSocket.send(encodedAuth);
+                            log('success', '[期权] 发送MsgPack格式认证消息');
+                        } else {
+                            // Fallback to JSON (will likely fail but shows the attempt)
+                            optionWebSocket.send(JSON.stringify(authMessage));
+                            log('warning', '[期权] MsgPack不可用，使用JSON格式（可能失败）');
+                        }
+                    } catch (encodeError) {
+                        log('error', `[期权] 认证消息编码失败: ${encodeError.message}`);
+                    }
+                    
+                    // Send initial option subscriptions using MsgPack
+                    setTimeout(() => {
+                        if (subscribedOptionSymbols.length > 0) {
+                            const subscribeMessage = {
+                                action: 'subscribe',
+                                trades: subscribedOptionSymbols,
+                                quotes: subscribedOptionSymbols
+                            };
+                            
+                            try {
+                                if (msgpackAvailable) {
+                                    const encodedSubscribe = MessagePack.encode(subscribeMessage);
+                                    optionWebSocket.send(encodedSubscribe);
+                                    log('success', `[期权] 发送MsgPack格式初始订阅: ${subscribedOptionSymbols.length}个期权`);
+                                } else {
+                                    optionWebSocket.send(JSON.stringify(subscribeMessage));
+                                    log('warning', `[期权] 使用JSON格式初始订阅 (可能失败)`);
+                                }
+                            } catch (encodeError) {
+                                log('error', `[期权] 初始订阅编码失败: ${encodeError.message}`);
+                            }
+                        }
+                        
+                        updateOptionSubscriptionDisplay();
+                    }, 1000);
+                };
+                
+                optionWebSocket.onmessage = function(event) {
+                    optionMessageCount++;
+                    document.getElementById('option-message-count').textContent = optionMessageCount;
+                    
+                    try {
+                        // Handle MsgPack binary data from option endpoint
+                        if (event.data instanceof Blob) {
+                            // Binary data (Blob) - convert to ArrayBuffer for MsgPack
+                            log('info', `[期权] 收到二进制数据 (Blob): ${event.data.size} bytes`);
+                            
+                            event.data.arrayBuffer().then(buffer => {
+                                try {
+                                    if (!msgpackAvailable) {
+                                        log('error', '[期权] MsgPack库不可用，无法解码二进制数据');
+                                        log('warning', '[期权] 请点击"检查MsgPack状态"按钮诊断问题');
+                                        return;
+                                    }
+                                    
+                                    const uint8Array = new Uint8Array(buffer);
+                                    log('info', `[期权] 准备解码 ${uint8Array.length} bytes 数据`);
+                                    
+                                    const data = MessagePack.decode(uint8Array);
+                                    const dataPreview = JSON.stringify(data).substring(0, 200);
+                                    log('success', `[期权] MsgPack解码成功: ${dataPreview}${dataPreview.length >= 200 ? '...' : ''}`);
+                                    handleOptionWebSocketMessage(data);
+                                } catch (msgpackError) {
+                                    log('error', `[期权] MsgPack解码失败: ${msgpackError.message}`);
+                                    log('info', `[期权] 数据长度: ${buffer.byteLength} bytes`);
+                                    
+                                    // Show hex dump of first few bytes for debugging
+                                    const debugArray = new Uint8Array(buffer, 0, Math.min(16, buffer.byteLength));
+                                    const hexDump = Array.from(debugArray).map(b => b.toString(16).padStart(2, '0')).join(' ');
+                                    log('info', `[期权] 前16字节十六进制: ${hexDump}`);
+                                }
+                            }).catch(blobError => {
+                                log('error', `[期权] Blob转ArrayBuffer失败: ${blobError.message}`);
+                            });
+                        } else if (event.data instanceof ArrayBuffer) {
+                            // Direct ArrayBuffer data
+                            log('info', `[期权] 收到二进制数据 (ArrayBuffer): ${event.data.byteLength} bytes`);
+                            
+                            try {
+                                if (!msgpackAvailable) {
+                                    log('error', '[期权] MsgPack库不可用，无法解码二进制数据');
+                                    log('warning', '[期权] 请点击"检查MsgPack状态"按钮诊断问题');
+                                    return;
+                                }
+                                
+                                const uint8Array = new Uint8Array(event.data);
+                                log('info', `[期权] 准备解码 ${uint8Array.length} bytes 数据`);
+                                
+                                const data = MessagePack.decode(uint8Array);
+                                const dataPreview = JSON.stringify(data).substring(0, 200);
+                                log('success', `[期权] MsgPack解码成功: ${dataPreview}${dataPreview.length >= 200 ? '...' : ''}`);
+                                handleOptionWebSocketMessage(data);
+                            } catch (msgpackError) {
+                                log('error', `[期权] MsgPack解码失败: ${msgpackError.message}`);
+                                log('info', `[期权] 数据长度: ${event.data.byteLength} bytes`);
+                                
+                                // Show hex dump of first few bytes for debugging
+                                const debugArray = new Uint8Array(event.data, 0, Math.min(16, event.data.byteLength));
+                                const hexDump = Array.from(debugArray).map(b => b.toString(16).padStart(2, '0')).join(' ');
+                                log('info', `[期权] 前16字节十六进制: ${hexDump}`);
+                            }
+                        } else if (typeof event.data === 'string') {
+                            // Fallback: Try JSON parsing for non-binary data
+                            try {
+                                const data = JSON.parse(event.data);
+                                log('info', `[期权] 收到JSON消息: ${event.data}`);
+                                handleOptionWebSocketMessage(data);
+                            } catch (jsonError) {
+                                log('error', `[期权] JSON解析失败: ${jsonError.message}`);
+                                log('info', `[期权] 原始消息: ${event.data}`);
+                            }
+                        } else {
+                            log('warning', `[期权] 未知数据格式: ${typeof event.data}`);
+                        }
+                    } catch (e) {
+                        log('error', `[期权] 消息处理失败: ${e.message}`);
+                    }
+                };
+                
+                optionWebSocket.onclose = function(event) {
+                    log('warning', `期权WebSocket连接关闭: ${event.code} - ${event.reason}`);
+                    updateConnectionStatus('option', 'offline');
+                    document.getElementById('connect-option-btn').disabled = false;
+                    document.getElementById('disconnect-option-btn').disabled = true;
+                };
+                
+                optionWebSocket.onerror = function(error) {
+                    log('error', `期权WebSocket错误: ${error}`);
+                    updateConnectionStatus('option', 'offline');
+                };
+                
+            } catch (error) {
+                log('error', `期权WebSocket连接错误: ${error.message}`);
+                updateConnectionStatus('option', 'offline');
+            }
+        }
+        
+        function disconnectOptionWebSocket() {
+            if (optionWebSocket) {
+                optionWebSocket.close();
+                log('info', '期权WebSocket连接已断开');
+                updateConnectionStatus('option', 'offline');
+            }
+        }
+        
+        function connectAllWebSockets() {
+            connectProductionWebSocket();
+            setTimeout(async () => await connectTestWebSocket(), 1000);
+            setTimeout(async () => await connectOptionWebSocket(), 2000);
+        }
+        
+        function addOptionSubscription() {
+            const input = document.getElementById('new-option-symbol');
+            const symbol = input.value.trim().toUpperCase();
+            
+            if (!symbol) {
+                log('warning', '请输入期权代码');
+                return;
+            }
+            
+            if (subscribedOptionSymbols.includes(symbol)) {
+                log('warning', `期权 ${symbol} 已在订阅列表中`);
+                return;
+            }
+            
+            subscribedOptionSymbols.push(symbol);
+            log('info', `添加期权订阅: ${symbol}`);
+            
+            // If connected, send subscription using MsgPack
+            if (optionWebSocket && optionWebSocket.readyState === WebSocket.OPEN) {
+                const subscribeMessage = {
+                    action: 'subscribe',
+                    trades: [symbol],
+                    quotes: [symbol]
+                };
+                
+                try {
+                    if (msgpackAvailable) {
+                        const encodedSubscribe = MessagePack.encode(subscribeMessage);
+                        optionWebSocket.send(encodedSubscribe);
+                        log('info', `[期权] 发送MsgPack格式订阅: ${symbol}`);
+                    } else {
+                        optionWebSocket.send(JSON.stringify(subscribeMessage));
+                        log('warning', `[期权] 使用JSON格式订阅 ${symbol} (可能失败)`);
+                    }
+                } catch (encodeError) {
+                    log('error', `[期权] 订阅消息编码失败: ${encodeError.message}`);
+                }
+            }
+            
+            updateOptionSubscriptionDisplay();
+            input.value = '';
+        }
+        
+        function removeOptionSubscription(symbol) {
+            const index = subscribedOptionSymbols.indexOf(symbol);
+            if (index > -1) {
+                subscribedOptionSymbols.splice(index, 1);
+                log('info', `移除期权订阅: ${symbol}`);
+                
+                // If connected, send unsubscription using MsgPack
+                if (optionWebSocket && optionWebSocket.readyState === WebSocket.OPEN) {
+                    const unsubscribeMessage = {
+                        action: 'unsubscribe',
+                        trades: [symbol],
+                        quotes: [symbol]
+                    };
+                    
+                    try {
+                        if (msgpackAvailable) {
+                            const encodedUnsubscribe = MessagePack.encode(unsubscribeMessage);
+                            optionWebSocket.send(encodedUnsubscribe);
+                            log('info', `[期权] 发送MsgPack格式取消订阅: ${symbol}`);
+                        } else {
+                            optionWebSocket.send(JSON.stringify(unsubscribeMessage));
+                            log('warning', `[期权] 使用JSON格式取消订阅 ${symbol} (可能失败)`);
+                        }
+                    } catch (encodeError) {
+                        log('error', `[期权] 取消订阅消息编码失败: ${encodeError.message}`);
+                    }
+                }
+                
+                // Remove from data and UI
+                delete optionData[symbol];
+                updateOptionTable();
+                updateOptionSubscriptionDisplay();
+            }
+        }
+        
+        function updateOptionSubscriptionDisplay() {
+            const subscriptionSpan = document.getElementById('current-option-subscriptions');
+            if (subscribedOptionSymbols.length === 0) {
+                subscriptionSpan.textContent = '无订阅';
+            } else {
+                subscriptionSpan.textContent = subscribedOptionSymbols.slice(0, 3).join(', ') + 
+                    (subscribedOptionSymbols.length > 3 ? `... (${subscribedOptionSymbols.length}个)` : '');
+            }
+        }
+        
+        function handleOptionWebSocketMessage(data) {
+            // Enhanced message handling with better error recovery
+            try {
+                if (Array.isArray(data)) {
+                    log('info', `[期权] 处理消息数组，包含 ${data.length} 条消息`);
+                    data.forEach((item, index) => {
+                        try {
+                            processOptionMessage(item);
+                        } catch (itemError) {
+                            log('error', `[期权] 处理第 ${index + 1} 条消息失败: ${itemError.message}`);
+                        }
+                    });
+                } else if (data && typeof data === 'object') {
+                    processOptionMessage(data);
+                } else {
+                    log('warning', `[期权] 收到非对象数据: ${typeof data}`);
+                }
+                updateOptionTable();
+            } catch (error) {
+                log('error', `[期权] 消息处理失败: ${error.message}`);
+            }
+        }
+        
+        function processOptionMessage(item) {
+            try {
+                // Handle different message types from Alpaca option endpoint
+                const messageType = item.T || item.action || item.type;
+                const symbol = item.S || item.symbol;
+                
+                if (!messageType) {
+                    log('info', `[期权] 收到系统消息: ${JSON.stringify(item)}`);
+                    return;
+                }
+                
+                if (!symbol && (messageType === 'q' || messageType === 't')) {
+                    log('warning', `[期权] ${messageType} 消息缺少股票代码`);
+                    return;
+                }
+                
+                switch (messageType) {
+                    case 'success':
+                        log('success', `[期权] ${item.msg || '认证/订阅成功'}`);
+                        break;
+                        
+                    case 'subscription':
+                        log('info', `[期权] 订阅确认: ${JSON.stringify(item)}`);
+                        break;
+                        
+                    case 'error':
+                        log('error', `[期权] 服务器错误: ${item.msg || item.message || JSON.stringify(item)}`);
+                        break;
+                        
+                    case 'q': // Quote
+                        if (!optionData[symbol]) {
+                            optionData[symbol] = {};
+                        }
+                        optionData[symbol] = {
+                            ...optionData[symbol],
+                            bid_price: item.bp,
+                            ask_price: item.ap,
+                            bid_size: item.bs,
+                            ask_size: item.as,
+                            quote_timestamp: item.t,
+                            last_update: Date.now()
+                        };
+                        log('info', `[期权] 报价更新 ${symbol}: Bid=$${item.bp}, Ask=$${item.ap}`);
+                        break;
+                        
+                    case 't': // Trade
+                        if (!optionData[symbol]) {
+                            optionData[symbol] = {};
+                        }
+                        optionData[symbol] = {
+                            ...optionData[symbol],
+                            last_price: item.p,
+                            last_size: item.s,
+                            trade_timestamp: item.t,
+                            last_update: Date.now()
+                        };
+                        log('success', `[期权] 交易数据 ${symbol}: Price=$${item.p}, Size=${item.s}`);
+                        break;
+                        
+                    default:
+                        log('info', `[期权] 未知消息类型 ${messageType}: ${JSON.stringify(item)}`);
+                }
+            } catch (error) {
+                log('error', `[期权] 处理消息项失败: ${error.message}`);
+                log('info', `[期权] 问题消息: ${JSON.stringify(item)}`);
+            }
+        }
+        
+        function updateOptionTable() {
+            const tbody = document.getElementById('option-data');
+            
+            if (Object.keys(optionData).length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; opacity: 0.6;">等待期权数据...</td></tr>';
+                return;
+            }
+            
+            const rows = Object.entries(optionData).map(([symbol, data]) => {
+                const time = data.last_update ? new Date(data.last_update).toLocaleTimeString() : '-';
+                const optionType = symbol.includes('C') ? 'Call' : 'Put';
+                const bidPrice = data.bid_price ? `$${data.bid_price.toFixed(2)}` : '-';
+                const askPrice = data.ask_price ? `$${data.ask_price.toFixed(2)}` : '-';
+                const lastPrice = data.last_price ? `$${data.last_price.toFixed(2)}` : '-';
+                
+                return `
+                    <tr>
+                        <td class="symbol">${symbol}</td>
+                        <td>${optionType}</td>
+                        <td class="price-up">${bidPrice}</td>
+                        <td class="price-down">${askPrice}</td>
+                        <td class="price-neutral">${lastPrice}</td>
+                        <td>${time}</td>
+                        <td><button onclick="removeOptionSubscription('${symbol}')" style="padding: 2px 6px; font-size: 0.8em;">移除</button></td>
+                    </tr>
+                `;
+            }).join('');
+            
+            tbody.innerHTML = rows;
+        }
+        
+        function handleProductionWebSocketMessage(data) {
             document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
             
             switch (data.type) {
                 case 'welcome':
-                    log('success', `欢迎消息: ${data.message}`);
-                    log('info', `默认股票: ${data.default_stocks.join(', ')}`);
-                    log('info', `默认期权: ${data.default_options.join(', ')}`);
+                    log('success', `[生产] 欢迎消息: ${data.message}`);
+                    if (data.default_stocks) log('info', `[生产] 默认股票: ${data.default_stocks.join(', ')}`);
+                    if (data.default_options) log('info', `[生产] 默认期权: ${data.default_options.join(', ')}`);
                     break;
                     
                 case 'subscription':
-                    log('info', `订阅确认: ${data.message}`);
+                    log('info', `[生产] 订阅确认: ${data.message}`);
                     updateSubscriptionCounts(data.subscribed_symbols);
                     break;
                     
                 case 'quote':
-                    handleQuoteData(data);
+                    handleProductionQuoteData(data);
                     break;
                     
                 case 'trade':
-                    handleTradeData(data);
+                    handleProductionTradeData(data);
                     break;
                     
                 case 'pong':
-                    log('info', `心跳响应: ${data.timestamp}`);
+                    log('info', `[生产] 心跳响应: ${data.timestamp}`);
                     break;
                     
                 default:
-                    log('info', `收到消息: ${JSON.stringify(data)}`);
+                    log('info', `[生产] 收到消息: ${JSON.stringify(data)}`);
             }
         }
         
-        function handleQuoteData(data) {
+        function handleTestWebSocketMessage(data) {
+            document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
+            
+            // Handle Alpaca test endpoint messages
+            if (Array.isArray(data)) {
+                // Handle message array
+                data.forEach(message => {
+                    handleSingleTestMessage(message);
+                });
+            } else {
+                handleSingleTestMessage(data);
+            }
+        }
+        
+        function handleSingleTestMessage(data) {
+            switch (data.T) {
+                case 'success':
+                    log('success', `[测试] 认证成功: ${data.msg}`);
+                    break;
+                    
+                case 'subscription':
+                    log('info', `[测试] 订阅确认: ${JSON.stringify(data)}`);
+                    break;
+                    
+                case 'q':  // Quote data
+                    handleTestQuoteData(data);
+                    break;
+                    
+                case 't':  // Trade data
+                    handleTestTradeData(data);
+                    break;
+                    
+                case 'error':
+                    log('error', `[测试] 错误: ${data.msg}`);
+                    break;
+                    
+                default:
+                    log('info', `[测试] 收到消息: ${JSON.stringify(data)}`);
+            }
+        }
+        
+        function handleProductionQuoteData(data) {
             const symbol = data.symbol;
             const isOption = symbol.length > 10;
             
             if (isOption) {
-                optionData[symbol] = data;
-                updateOptionTable();
-                log('info', `期权报价 ${symbol}: Bid=${data.bid_price}, Ask=${data.ask_price}`);
+                productionOptionData[symbol] = data;
+                updateProductionOptionTable();
+                log('info', `[生产] 期权报价 ${symbol}: Bid=${data.bid_price}, Ask=${data.ask_price}`);
             } else {
-                stockData[symbol] = data;
-                updateStockTable();
-                log('info', `股票报价 ${symbol}: Bid=${data.bid_price}, Ask=${data.ask_price}`);
+                productionStockData[symbol] = data;
+                updateProductionStockTable();
+                log('info', `[生产] 股票报价 ${symbol}: Bid=${data.bid_price}, Ask=${data.ask_price}`);
             }
         }
         
-        function handleTradeData(data) {
+        function handleProductionTradeData(data) {
             const symbol = data.symbol;
-            log('success', `交易数据 ${symbol}: Price=${data.price}, Size=${data.size}`);
+            log('success', `[生产] 交易数据 ${symbol}: Price=${data.price}, Size=${data.size}`);
             
             // 更新最新价格
-            if (stockData[symbol]) {
-                stockData[symbol].last_price = data.price;
-                updateStockTable();
+            if (productionStockData[symbol]) {
+                productionStockData[symbol].last_price = data.price;
+                updateProductionStockTable();
             }
         }
         
-        function updateStockTable() {
-            const tbody = document.getElementById('stock-data');
-            const rows = Object.entries(stockData).map(([symbol, data]) => {
+        function handleTestQuoteData(data) {
+            const symbol = data.S;  // Alpaca uses 'S' for symbol
+            const quote = {
+                symbol: symbol,
+                bid_price: data.bp,
+                ask_price: data.ap,
+                bid_size: data.bs,
+                ask_size: data.as,
+                timestamp: data.t
+            };
+            
+            testStockData[symbol] = quote;
+            updateTestStockTable();
+            log('info', `[测试] 股票报价 ${symbol}: Bid=${data.bp}, Ask=${data.ap}`);
+        }
+        
+        function handleTestTradeData(data) {
+            const symbol = data.S;
+            log('success', `[测试] 交易数据 ${symbol}: Price=${data.p}, Size=${data.s}`);
+            
+            // 更新最新价格
+            if (testStockData[symbol]) {
+                testStockData[symbol].last_price = data.p;
+                updateTestStockTable();
+            }
+        }
+        
+        function updateProductionStockTable() {
+            const tbody = document.getElementById('production-stock-data');
+            const rows = Object.entries(productionStockData).map(([symbol, data]) => {
                 const time = new Date(data.timestamp).toLocaleTimeString();
                 return `
                     <tr>
@@ -543,12 +1338,31 @@
             });
             
             tbody.innerHTML = rows.length > 0 ? rows.join('') : 
-                '<tr><td colspan="5" style="text-align: center; opacity: 0.6;">暂无股票数据</td></tr>';
+                '<tr><td colspan="5" style="text-align: center; opacity: 0.6;">暂无生产股票数据</td></tr>';
         }
         
-        function updateOptionTable() {
-            const tbody = document.getElementById('option-data');
-            const rows = Object.entries(optionData).map(([symbol, data]) => {
+        function updateTestStockTable() {
+            const tbody = document.getElementById('test-stock-data');
+            const rows = Object.entries(testStockData).map(([symbol, data]) => {
+                const time = data.timestamp ? new Date(data.timestamp / 1000000).toLocaleTimeString() : '-';
+                return `
+                    <tr>
+                        <td class="symbol">${symbol}</td>
+                        <td class="price-up">${data.bid_price || '-'}</td>
+                        <td class="price-down">${data.ask_price || '-'}</td>
+                        <td>${data.last_price || '-'}</td>
+                        <td>${time}</td>
+                    </tr>
+                `;
+            });
+            
+            tbody.innerHTML = rows.length > 0 ? rows.join('') : 
+                '<tr><td colspan="5" style="text-align: center; opacity: 0.6;">暂无测试股票数据</td></tr>';
+        }
+        
+        function updateProductionOptionTable() {
+            const tbody = document.getElementById('production-option-data');
+            const rows = Object.entries(productionOptionData).map(([symbol, data]) => {
                 const time = new Date(data.timestamp).toLocaleTimeString();
                 const optionType = symbol.includes('C') ? 'Call' : 'Put';
                 return `
@@ -563,7 +1377,27 @@
             });
             
             tbody.innerHTML = rows.length > 0 ? rows.join('') : 
-                '<tr><td colspan="5" style="text-align: center; opacity: 0.6;">暂无期权数据</td></tr>';
+                '<tr><td colspan="5" style="text-align: center; opacity: 0.6;">暂无生产期权数据</td></tr>';
+        }
+        
+        function updateTestOptionTable() {
+            const tbody = document.getElementById('test-option-data');
+            const rows = Object.entries(testOptionData).map(([symbol, data]) => {
+                const time = data.timestamp ? new Date(data.timestamp / 1000000).toLocaleTimeString() : '-';
+                const optionType = symbol.includes('C') ? 'Call' : 'Put';
+                return `
+                    <tr>
+                        <td class="symbol">${symbol}</td>
+                        <td class="price-up">${data.bid_price || '-'}</td>
+                        <td class="price-down">${data.ask_price || '-'}</td>
+                        <td>${optionType}</td>
+                        <td>${time}</td>
+                    </tr>
+                `;
+            });
+            
+            tbody.innerHTML = rows.length > 0 ? rows.join('') : 
+                '<tr><td colspan="5" style="text-align: center; opacity: 0.6;">暂无测试期权数据</td></tr>';
         }
         
         function updateSubscriptionCounts(symbols) {
@@ -574,8 +1408,25 @@
             document.getElementById('option-count').textContent = options.length;
         }
         
-        function updateConnectionStatus(status) {
-            const element = document.getElementById('connection-status');
+        function updateConnectionStatus(type, status) {
+            let elementId;
+            switch (type) {
+                case 'production':
+                    elementId = 'production-status';
+                    break;
+                case 'test':
+                    elementId = 'test-status';
+                    break;
+                case 'option':
+                    elementId = 'option-status';
+                    break;
+                default:
+                    elementId = type === 'production' ? 'production-status' : 'test-status';
+            }
+            
+            const element = document.getElementById(elementId);
+            if (!element) return;
+            
             element.className = `status-value status-${status}`;
             
             switch (status) {
@@ -592,19 +1443,31 @@
         }
         
         function sendPing() {
-            if (websocket && websocket.readyState === WebSocket.OPEN) {
+            let sent = false;
+            
+            if (productionWebSocket && productionWebSocket.readyState === WebSocket.OPEN) {
                 const message = { type: 'ping', timestamp: new Date().toISOString() };
-                websocket.send(JSON.stringify(message));
-                log('info', '发送心跳包');
-            } else {
-                log('warning', 'WebSocket未连接，无法发送心跳');
+                productionWebSocket.send(JSON.stringify(message));
+                log('info', '[生产] 发送心跳包');
+                sent = true;
+            }
+            
+            if (testWebSocket && testWebSocket.readyState === WebSocket.OPEN) {
+                const message = { action: 'ping', timestamp: new Date().toISOString() };
+                testWebSocket.send(JSON.stringify(message));
+                log('info', '[测试] 发送心跳包');
+                sent = true;
+            }
+            
+            if (!sent) {
+                log('warning', '没有可用的WebSocket连接，无法发送心跳');
             }
         }
         
         async function getJWTToken() {
             try {
                 log('info', '正在获取演示JWT Token...');
-                const response = await fetch('/api/v1/auth/demo-token');
+                const response = await fetch('http://localhost:8091/api/v1/auth/demo-token');
                 const data = await response.json();
                 
                 if (response.ok) {
@@ -628,8 +1491,12 @@
         
         function clearLogs() {
             document.getElementById('logs').innerHTML = '';
-            messageCount = 0;
-            document.getElementById('message-count').textContent = '0';
+            productionMessageCount = 0;
+            testMessageCount = 0;
+            optionMessageCount = 0;
+            document.getElementById('production-message-count').textContent = '0';
+            document.getElementById('test-message-count').textContent = '0';
+            document.getElementById('option-message-count').textContent = '0';
         }
         
         function log(type, message) {
@@ -649,13 +1516,69 @@
             }
         }
         
+        // Test MsgPack functionality manually
+        function testMsgPackFunctionality() {
+            if (!msgpackAvailable) {
+                log('error', '无法测试MsgPack - 库未加载');
+                return;
+            }
+            
+            try {
+                const testData = { 
+                    action: 'test', 
+                    symbol: 'AAPL250808C00210000', 
+                    timestamp: Date.now() 
+                };
+                
+                // Test encoding
+                const encoded = MessagePack.encode(testData);
+                log('success', `MsgPack编码测试成功: ${encoded.byteLength} bytes`);
+                
+                // Test decoding
+                const decoded = MessagePack.decode(encoded);
+                log('success', `MsgPack解码测试成功: ${JSON.stringify(decoded)}`);
+                
+                if (JSON.stringify(testData) === JSON.stringify(decoded)) {
+                    log('success', 'MsgPack完整性测试通过 - 可用于期权WebSocket');
+                } else {
+                    log('error', 'MsgPack完整性测试失败 - 数据不一致');
+                }
+            } catch (error) {
+                log('error', `MsgPack功能测试失败: ${error.message}`);
+            }
+        }
+        
         // 页面加载完成后显示初始信息
         document.addEventListener('DOMContentLoaded', function() {
-            log('info', '🚀 Opitios Alpaca WebSocket 测试页面已加载');
-            log('info', '✅ 确认: Alpaca Paper Trading 支持 WebSocket');
-            log('info', '📊 数据源: IEX 实时市场数据 (无Mock数据)');
-            log('info', '🔧 点击"连接 WebSocket"开始接收实时数据');
+            log('info', '🚀 Opitios Alpaca WebSocket 双端点测试页面已加载');
+            log('info', '✅ 支持同时连接生产端点和测试端点');
+            log('info', '📊 生产端点: 本地服务器 (localhost:8091)');
+            log('info', '🧪 测试端点: Alpaca 官方测试端点 (stream.data.alpaca.markets)');
+            log('info', '📊 期权端点: Alpaca 期权数据流 (v1beta1/indicative) - 支持MsgPack');
+            log('info', '🔧 可单独连接任一端点或同时连接多个端点');
+            log('info', '📈 实时对比多个数据源的股票和期权数据');
             log('info', '🔑 点击"获取演示JWT"获取API测试token');
+            
+            // Check MsgPack library availability after page load with multiple attempts
+            let attempts = 0;
+            const maxAttempts = 10;
+            
+            function tryCheckMsgPack() {
+                attempts++;
+                if (checkMsgPackAvailability()) {
+                    // Library loaded successfully, test functionality
+                    setTimeout(testMsgPackFunctionality, 500);
+                } else if (attempts < maxAttempts) {
+                    // Retry after delay
+                    setTimeout(tryCheckMsgPack, 200);
+                } else {
+                    log('error', `MsgPack库加载失败，已尝试 ${maxAttempts} 次`);
+                    log('warning', '期权WebSocket将无法工作，请刷新页面或检查网络连接');
+                }
+            }
+            
+            // Initial check after a short delay to allow CDN loading
+            setTimeout(tryCheckMsgPack, 300);
         });
     </script>
 </body>

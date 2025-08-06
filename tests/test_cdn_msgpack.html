@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test MsgPack CDN Loading</title>
+    <script crossorigin src="https://unpkg.com/@msgpack/msgpack" 
+            onload="window.msgpackLoaded = true; console.log('Primary CDN loaded successfully');"
+            onerror="console.error('Primary CDN failed'); loadFallback();"></script>
+    <script>
+        function loadFallback() {
+            const script = document.createElement('script');
+            script.crossOrigin = 'anonymous';
+            script.src = 'https://cdn.jsdelivr.net/npm/@msgpack/msgpack@latest/dist.umd/msgpack.min.js';
+            script.onload = () => {
+                window.msgpackLoaded = true;
+                console.log('Fallback CDN loaded successfully');
+                testMsgPack();
+            };
+            script.onerror = () => console.error('Fallback CDN also failed');
+            document.head.appendChild(script);
+        }
+
+        function testMsgPack() {
+            if (typeof MessagePack !== 'undefined') {
+                console.log('✅ MessagePack library available');
+                
+                // Test encode/decode
+                const testData = {message: "Hello Option WebSocket", type: "test"};
+                const encoded = MessagePack.encode(testData);
+                const decoded = MessagePack.decode(encoded);
+                
+                console.log('Original:', testData);
+                console.log('Encoded bytes:', encoded.length);
+                console.log('Decoded:', decoded);
+                console.log('Test result:', JSON.stringify(testData) === JSON.stringify(decoded) ? '✅ PASS' : '❌ FAIL');
+                
+                document.body.innerHTML = `
+                    <h1 style="color: green;">✅ MsgPack CDN Test Successful!</h1>
+                    <p>Library loaded and working properly</p>
+                    <p>Test data encode/decode: ${JSON.stringify(testData) === JSON.stringify(decoded) ? 'PASS' : 'FAIL'}</p>
+                    <p>Now the WebSocket page should work correctly!</p>
+                `;
+            } else {
+                console.log('❌ MessagePack library not available');
+                document.body.innerHTML = '<h1 style="color: red;">❌ MsgPack CDN Test Failed!</h1>';
+            }
+        }
+
+        window.onload = function() {
+            setTimeout(() => {
+                if (window.msgpackLoaded) {
+                    testMsgPack();
+                } else {
+                    console.log('Checking if library loaded without flag...');
+                    if (typeof MessagePack !== 'undefined') {
+                        testMsgPack();
+                    } else {
+                        document.body.innerHTML = '<h1 style="color: red;">❌ MsgPack library failed to load</h1>';
+                    }
+                }
+            }, 1000);
+        };
+    </script>
+</head>
+<body>
+    <h1>Testing MsgPack CDN Loading...</h1>
+    <p>Please check console for details</p>
+</body>
+</html>
