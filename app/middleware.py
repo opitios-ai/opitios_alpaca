@@ -241,6 +241,10 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             "/api/v1/test-connection",
             "/api/v1/auth/demo-token",
             "/api/v1/auth/verify-token",
+            "/api/v1/auth/alpaca-credentials",
+            # 静态文件路径
+            "/static",
+            "/favicon.ico",
             # 演示模式 - 部分端点公开访问
             "/api/v1/stocks/quote",
             "/api/v1/stocks/quotes/batch",
@@ -251,10 +255,9 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Callable):
         # 跳过公共路径
         path = request.url.path
-        if path in self.public_paths or any(
-            path.startswith("/api/v1/stocks/") and path.endswith("/quote") 
-            for _ in [None]
-        ):
+        if (path in self.public_paths or 
+            path.startswith("/static/") or
+            any(path.startswith("/api/v1/stocks/") and path.endswith("/quote") for _ in [None])):
             return await call_next(request)
             
         # 检查Authorization header
