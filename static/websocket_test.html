@@ -365,7 +365,7 @@
             <div class="data-section">
                 <div class="section-title">📈 生产端点股票数据</div>
                 <div style="font-size: 0.9em; opacity: 0.8; margin-bottom: 10px;">
-                    来源: 本地生产服务器 (localhost:8091)
+                    来源: 本地生产服务器 (localhost:8090)
                 </div>
                 <table class="data-table">
                     <thead>
@@ -635,7 +635,7 @@
         
         // WebSocket URLs  
         const productionWsUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
-            ? 'ws://localhost:8091/api/v1/ws/market-data'
+            ? 'ws://localhost:8090/api/v1/ws/market-data'
             : `ws://${window.location.host}/api/v1/ws/market-data`;
         
         const testWsUrl = 'wss://stream.data.alpaca.markets/v2/test';
@@ -711,7 +711,7 @@
             let credentials = null;
             try {
                 log('info', '[测试] 正在获取真实API凭据...');
-                const response = await fetch('http://localhost:8091/api/v1/auth/alpaca-credentials');
+                const response = await fetch('http://localhost:8090/api/v1/auth/alpaca-credentials');
                 if (response.ok) {
                     credentials = await response.json();
                     log('success', `[测试] 获取到真实API凭据: ${credentials.account_name}`);
@@ -1467,7 +1467,7 @@
         async function getJWTToken() {
             try {
                 log('info', '正在获取演示JWT Token...');
-                const response = await fetch('http://localhost:8091/api/v1/auth/demo-token');
+                const response = await fetch('http://localhost:8090/api/v1/auth/demo-token');
                 const data = await response.json();
                 
                 if (response.ok) {
@@ -1552,7 +1552,7 @@
         document.addEventListener('DOMContentLoaded', function() {
             log('info', '🚀 Opitios Alpaca WebSocket 双端点测试页面已加载');
             log('info', '✅ 支持同时连接生产端点和测试端点');
-            log('info', '📊 生产端点: 本地服务器 (localhost:8091)');
+            log('info', '📊 生产端点: 本地服务器 (localhost:8090)');
             log('info', '🧪 测试端点: Alpaca 官方测试端点 (stream.data.alpaca.markets)');
             log('info', '📊 期权端点: Alpaca 期权数据流 (v1beta1/indicative) - 支持MsgPack');
             log('info', '🔧 可单独连接任一端点或同时连接多个端点');
