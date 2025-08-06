@@ -1,302 +1,475 @@
-# Opitios Alpaca Trading Service
+# Opitios Alpaca WebSocket Trading Service 🚀
 
 ![Build Status](https://img.shields.io/badge/build-passing-brightgreen?style=flat-square)
-![Test Coverage](https://img.shields.io/badge/coverage-85%25-green?style=flat-square)
+![WebSocket Support](https://img.shields.io/badge/websocket-real--time-brightgreen?style=flat-square)
+![MsgPack Support](https://img.shields.io/badge/msgpack-binary--streaming-blue?style=flat-square)
 ![Python Version](https://img.shields.io/badge/python-3.8%2B-blue?style=flat-square)
 ![FastAPI Version](https://img.shields.io/badge/fastapi-0.104.1-blue?style=flat-square)
-![API Health](https://img.shields.io/badge/api-healthy-brightgreen?style=flat-square)
+![Option Trading](https://img.shields.io/badge/options-real--time-green?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
-![Last Updated](https://img.shields.io/badge/updated-January%202025-blue?style=flat-square)
+![Last Updated](https://img.shields.io/badge/updated-August%202025-blue?style=flat-square)
 
-A FastAPI-based trading service that integrates with the Alpaca API for stock and options trading. This service provides RESTful endpoints for market data retrieval, order placement, and portfolio management with comprehensive documentation in English and Chinese.
+A comprehensive FastAPI-based trading service with **real-time WebSocket streaming** for stock and options trading. Features dual WebSocket endpoints, MsgPack binary support for option data, and comprehensive market data integration with Alpaca Trading API.
+
+## ✨ Key Features
+
+- 🔄 **Real-time WebSocket Streaming** - Multi-endpoint support (production, test, options)
+- 📊 **Option WebSocket Support** - MsgPack binary format for real-time option data
+- 🔐 **Dynamic Authentication** - Real API credentials with automatic fallback
+- 🎯 **Dual Test Environment** - Production and Alpaca test endpoints
+- 📈 **Comprehensive UI** - Interactive WebSocket test interface
+- 🛡️ **Error Recovery** - Robust fallback mechanisms and error handling
+- 🌐 **Production Ready** - Docker support and deployment configurations
 
 ## 🚀 Quick Start
 
-**Get started in 5 minutes:**
+### Prerequisites
 
 ```bash
-# 1. Activate virtual environment (CRITICAL REQUIREMENT)
+# 1. Python 3.8+ with virtual environment (REQUIRED)
+python -m venv venv
 venv\Scripts\activate  # Windows
 # source venv/bin/activate  # Linux/Mac
 
 # 2. Install dependencies
 pip install -r requirements.txt
+```
 
-# 3. Configure API keys in .env file
-# 4. Start the server
+### Configuration
+
+1. **Copy and configure secrets file:**
+```bash
+cp secrets.example.yml secrets.yml
+```
+
+2. **Add your Alpaca API credentials to `secrets.yml`:**
+```yaml
+alpaca:
+  api_key: "YOUR_ALPACA_API_KEY"
+  secret_key: "YOUR_ALPACA_SECRET_KEY" 
+  paper_trading: true  # Set to false for live trading
+  account_name: "Primary Trading Account"
+```
+
+### Start the Server
+
+```bash
+# Development server
 python main.py
 
-# 5. Access API documentation
-# http://localhost:8081/docs
+# Or use the startup script
+python start_server.py
 ```
 
-**📖 Detailed Setup**: [Quick Start Guide](docs/en/quickstart.md) | [快速开始指南](docs/zh/快速开始指南.md)
+**Server will be available at:** `http://localhost:8091`
 
-## ✨ Features
+## 🌐 WebSocket Streaming
 
-- ✅ **Stock Trading**: Buy/sell stocks with market, limit, and stop orders
-- ✅ **Market Data**: Real-time quotes and historical price bars
-- ⚠️ **Options Trading**: Basic framework (requires additional Alpaca options API implementation)
-- ✅ **Portfolio Management**: Account info, positions, and order management
-- ✅ **Paper Trading**: Supports Alpaca's paper trading environment
-- ✅ **RESTful API**: Comprehensive FastAPI endpoints with automatic documentation
-- ✅ **Testing**: Unit tests with pytest
-- ✅ **Logging**: Structured logging with loguru
-- ✅ **Bilingual Documentation**: Complete English and Chinese documentation
-- ✅ **Interactive Setup**: Automated validation and diagnostics
+### Access the Interactive WebSocket Test Interface
 
-## 📚 Documentation
+**URL:** `http://localhost:8091/static/websocket_test.html`
 
-### 🇺🇸 English Documentation
-| Document | Description | Quick Link |
-|----------|-------------|------------|
-| **[Quick Start](docs/en/quickstart.md)** | Get up and running in minutes | [→ Start Here](docs/en/quickstart.md) |
-| **[API Examples](docs/en/api-examples.md)** | Comprehensive API usage examples | [→ API Guide](docs/en/api-examples.md) |
-| **[Troubleshooting](docs/en/troubleshooting.md)** | Common issues and solutions | [→ Get Help](docs/en/troubleshooting.md) |
-| **[Setup Validation](docs/en/setup-validation.md)** | Interactive setup verification | [→ Validate Setup](docs/en/setup-validation.md) |
+### WebSocket Endpoints
 
-### 🇨🇳 Chinese Documentation (中文文档)
-| 文档 | 描述 | 快速链接 |
-|------|------|----------|
-| **[快速开始指南](docs/zh/快速开始指南.md)** | 快速上手指南 | [→ 开始使用](docs/zh/快速开始指南.md) |
-| **[API 使用示例](docs/zh/API使用示例.md)** | 完整的API使用例子 | [→ API 指南](docs/zh/API使用示例.md) |
-| **[故障排除指南](docs/zh/故障排除指南.md)** | 常见问题和解决方案 | [→ 获取帮助](docs/zh/故障排除指南.md) |
-| **[安装验证](docs/zh/安装验证.md)** | 交互式安装验证 | [→ 验证安装](docs/zh/安装验证.md) |
+| Endpoint | Type | Data Format | Purpose |
+|----------|------|-------------|---------|
+| `ws://localhost:8091/api/v1/ws/market-data` | Production | JSON | Local real-time stock data |
+| `wss://stream.data.alpaca.markets/v2/test` | Test | JSON | Alpaca test data (FAKEPACA) |
+| `wss://stream.data.alpaca.markets/v1beta1/indicative` | Options | **MsgPack** | Real-time option data |
 
-**📖 Complete Documentation**: [docs/README.md](docs/README.md)
+### WebSocket Features
 
-## 🔧 Interactive Tools
+- ✅ **Simultaneous Connections** - Connect to all three endpoints at once
+- ✅ **Real-time Data Comparison** - Compare production vs test data
+- ✅ **Option Subscription Management** - Add/remove option symbols dynamically
+- ✅ **MsgPack Binary Decoding** - Automatic binary data processing
+- ✅ **Comprehensive Logging** - Real-time message logging and debugging
+- ✅ **Status Monitoring** - Connection status and message counters
 
-Validate your setup and monitor system health with our interactive tools:
+## 📊 Option WebSocket Usage
+
+### Default Option Symbols
+```javascript
+// Automatically subscribed option symbols
+[
+  'UNIT250815C00007000',  // UNIT Call $7.00 exp 08/15
+  'TSLA250808C00310000',  // TSLA Call $310.00 exp 08/08
+  'AAPL250808C00210000',  // AAPL Call $210.00 exp 08/08
+  'NVDA250808C00180000',  // NVDA Call $180.00 exp 08/08
+  // ... and more
+]
+```
+
+### Adding Custom Option Subscriptions
+1. Open WebSocket test page
+2. Connect to option endpoint
+3. Enter option symbol in format: `SYMBOL + YYMMDD + C/P + STRIKE`
+4. Example: `AAPL250815C00215000` (AAPL Call $215 exp 08/15/25)
+
+### MsgPack Binary Data
+- Option endpoint uses **MsgPack binary format** (not JSON)
+- JavaScript library automatically loaded via CDN
+- Fallback mechanisms ensure reliability
+- Real-time encode/decode validation
+
+## 🛠️ Development
+
+### Testing WebSocket Functionality
+
+**Comprehensive Test Suite:**
+```bash
+# Test all WebSocket endpoints
+python tests/test_msgpack_ascii.py
+
+# Test specific functionality
+python tests/test_final.py
+python tests/test_websocket_real_data.py
+```
+
+### Running the Full Test Suite
+```bash
+python run_tests.py
+```
+
+### Development Commands
 
 ```bash
-# Interactive setup validation (recommended for first-time users)
-python docs/scripts/setup_validator.py
+# Start development server with auto-reload
+python main.py
 
-# System health monitoring
-python docs/scripts/health_check.py
+# Check server health
+curl http://localhost:8091/api/v1/health
 
-# Basic functionality test
-python test_app.py
+# Get API credentials endpoint
+curl http://localhost:8091/api/v1/auth/alpaca-credentials
 ```
 
-## 🌐 API Endpoints
+## 🐳 Docker Deployment
 
-### Core Services
-- **Health Check**: `GET /api/v1/health`
-- **API Documentation**: http://localhost:8081/docs
-- **Account Info**: `GET /api/v1/account`
-- **Test Connection**: `GET /api/v1/test-connection`
+### Docker Compose (Recommended)
 
-### Market Data
-- **Stock Quote**: `GET /api/v1/stocks/{symbol}/quote`
-- **Batch Quotes**: `POST /api/v1/stocks/quotes/batch`
-- **Historical Data**: `GET /api/v1/stocks/{symbol}/bars`
-- **Options Chain**: `GET /api/v1/options/{symbol}/chain`
-
-### Trading
-- **Place Order**: `POST /api/v1/stocks/order`
-- **Quick Buy/Sell**: `POST /api/v1/stocks/{symbol}/buy`
-- **Order Management**: `GET /api/v1/orders`
-- **Portfolio Positions**: `GET /api/v1/positions`
-
-**📋 Complete API Reference**: [API Examples](docs/en/api-examples.md) | [API 示例](docs/zh/API使用示例.md)
-
-## 📊 System Status
-
-| Component | Status | Details |
-|-----------|--------|---------|
-| **API Server** | ![Running](https://img.shields.io/badge/status-running-green) | FastAPI 0.104.1 |
-| **Database** | ![Connected](https://img.shields.io/badge/status-connected-green) | SQLite |
-| **Alpaca API** | ![Connected](https://img.shields.io/badge/status-connected-green) | Paper Trading |
-| **Documentation** | ![Complete](https://img.shields.io/badge/status-complete-green) | EN + 中文 |
-| **Tests** | ![Passing](https://img.shields.io/badge/tests-passing-green) | 85% Coverage |
-
-**Real-time Health Check**: `python docs/scripts/health_check.py`
-
-## ⚡ Quick Examples
-
-### Get Account Information
 ```bash
-curl -X GET "http://localhost:8081/api/v1/account"
+# Build and start services
+docker-compose up --build
+
+# Run in background
+docker-compose up -d
 ```
 
-### Buy Stock (Market Order)
+### Manual Docker Build
+
 ```bash
-curl -X POST "http://localhost:8081/api/v1/stocks/AAPL/buy?qty=10"
+# Build image
+docker build -t opitios-alpaca .
+
+# Run container
+docker run -p 8091:8091 \
+  -v $(pwd)/secrets.yml:/app/secrets.yml:ro \
+  opitios-alpaca
 ```
 
-### Get Stock Quote
+## 🌐 Server Deployment
+
+### Prerequisites for Production
+
+1. **Server Requirements:**
+   - Python 3.8+
+   - Port 8091 accessible
+   - SSL certificate (for WSS endpoints)
+
+2. **Environment Setup:**
 ```bash
-curl -X GET "http://localhost:8081/api/v1/stocks/AAPL/quote"
+# Install dependencies
+pip install -r requirements.txt
+
+# Configure secrets
+cp secrets.example.yml secrets.yml
+# Edit with your production API keys
 ```
 
-### Place Limit Order
+### Production Deployment Options
+
+#### Option 1: Direct Python Deployment
 ```bash
-curl -X POST "http://localhost:8081/api/v1/stocks/order" \
-     -H "Content-Type: application/json" \
-     -d '{
-       "symbol": "AAPL",
-       "qty": 10,
-       "side": "buy",
-       "type": "limit",
-       "limit_price": 150.00,
-       "time_in_force": "day"
-     }'
+# Install dependencies
+pip install -r requirements.txt
+
+# Start production server
+python main.py
+
+# Or with process manager
+nohup python main.py > server.log 2>&1 &
 ```
 
-## 🛠️ Configuration
+#### Option 2: Systemd Service (Linux)
+Create `/etc/systemd/system/opitios-alpaca.service`:
+```ini
+[Unit]
+Description=Opitios Alpaca WebSocket Service
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/opitios-alpaca
+ExecStart=/opt/opitios-alpaca/venv/bin/python main.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+# Enable and start service
+sudo systemctl enable opitios-alpaca
+sudo systemctl start opitios-alpaca
+sudo systemctl status opitios-alpaca
+```
+
+#### Option 3: Nginx Reverse Proxy
+```nginx
+# /etc/nginx/sites-available/opitios-alpaca
+server {
+    listen 80;
+    server_name your-domain.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:8091;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # WebSocket proxy
+    location /api/v1/ws/ {
+        proxy_pass http://127.0.0.1:8091;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+```
+
+### Cloud Platform Deployment
+
+#### AWS EC2 Deployment
+```bash
+# 1. Launch EC2 instance (t3.micro or larger)
+# 2. Install Python and dependencies
+sudo apt update
+sudo apt install python3 python3-pip python3-venv
+
+# 3. Clone repository
+git clone https://github.com/yourusername/opitios_alpaca.git
+cd opitios_alpaca
+
+# 4. Setup virtual environment
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# 5. Configure secrets and start service
+cp secrets.example.yml secrets.yml
+# Edit secrets.yml with your API keys
+python main.py
+```
+
+#### Heroku Deployment
+```bash
+# 1. Install Heroku CLI
+# 2. Create Procfile
+echo "web: python main.py" > Procfile
+
+# 3. Deploy
+heroku create your-app-name
+git push heroku main
+heroku config:set ALPACA_API_KEY=your_key_here
+heroku config:set ALPACA_SECRET_KEY=your_secret_here
+```
+
+#### DigitalOcean App Platform
+```yaml
+# app.yaml
+name: opitios-alpaca
+services:
+- name: web
+  source_dir: /
+  github:
+    repo: yourusername/opitios_alpaca
+    branch: main
+  run_command: python main.py
+  environment_slug: python
+  instance_count: 1
+  instance_size_slug: basic-xxs
+  http_port: 8091
+  env:
+  - key: ALPACA_API_KEY
+    value: your_api_key_here
+  - key: ALPACA_SECRET_KEY
+    value: your_secret_key_here
+```
+
+## 🔧 Configuration
 
 ### Environment Variables
-
-| Variable | Description | Default | Required |
-|----------|-------------|---------|----------|
-| `ALPACA_API_KEY` | Your Alpaca API key | - | ✅ |
-| `ALPACA_SECRET_KEY` | Your Alpaca secret key | - | ✅ |
-| `ALPACA_BASE_URL` | Alpaca API base URL | https://paper-api.alpaca.markets | ❌ |
-| `ALPACA_PAPER_TRADING` | Enable paper trading | true | ❌ |
-| `HOST` | Server host | 0.0.0.0 | ❌ |
-| `PORT` | Server port | 8081 | ❌ |
-| `DEBUG` | Debug mode | true | ❌ |
-
-### Example .env File
-```env
-ALPACA_API_KEY=PKEIKZWFXA4BD1JMJAY3
-ALPACA_SECRET_KEY=your_secret_key_here
-ALPACA_BASE_URL=https://paper-api.alpaca.markets
+```bash
+# .env file (optional, overrides secrets.yml)
+ALPACA_API_KEY=your_api_key
+ALPACA_SECRET_KEY=your_secret_key
 ALPACA_PAPER_TRADING=true
-HOST=0.0.0.0
-PORT=8081
-DEBUG=true
+SERVER_HOST=0.0.0.0
+SERVER_PORT=8091
 ```
 
-## 🧪 Testing
-
-```bash
-# Run all tests
-pytest
-
-# Run with verbose output
-pytest -v
-
-# Run with coverage
-pytest --cov=app tests/
-
-# Quick functionality test
-python test_app.py
+### secrets.yml Configuration
+```yaml
+alpaca:
+  api_key: "YOUR_ALPACA_API_KEY"
+  secret_key: "YOUR_ALPACA_SECRET_KEY"
+  paper_trading: true
+  account_name: "Primary Trading Account"
+  
+server:
+  host: "0.0.0.0"
+  port: 8091
+  real_data_only: true
 ```
 
-## 📁 Project Structure
+## 📚 API Documentation
 
-```
-opitios_alpaca/
-├── app/
-│   ├── __init__.py
-│   ├── alpaca_client.py     # Alpaca API client wrapper
-│   ├── models.py            # Pydantic models
-│   └── routes.py            # FastAPI routes
-├── docs/                    # Complete documentation
-│   ├── en/                  # English documentation
-│   ├── zh/                  # Chinese documentation (中文文档)
-│   └── scripts/             # Interactive tools
-├── tests/
-│   ├── __init__.py
-│   ├── test_main.py         # API endpoint tests
-│   └── test_alpaca_client.py # Client tests
-├── logs/                    # Log files directory
-├── .env                     # Environment configuration
-├── config.py                # Settings management
-├── main.py                  # FastAPI application
-├── requirements.txt         # Python dependencies
-└── README.md               # This file
-```
+### Interactive API Docs
+- **Swagger UI:** `http://localhost:8091/docs`
+- **ReDoc:** `http://localhost:8091/redoc`
 
-## 🔒 Security & Production
+### Key API Endpoints
 
-### Security Best Practices
-- ✅ API keys stored in environment variables
-- ✅ CORS configuration for production
-- ✅ Input validation with Pydantic
-- ✅ Structured logging for monitoring
-- ✅ Paper trading enabled by default
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/health` | GET | Server health check |
+| `/api/v1/auth/alpaca-credentials` | GET | Get real API credentials |
+| `/api/v1/auth/demo-token` | GET | Get demo JWT token |
+| `/api/v1/ws/market-data` | WebSocket | Real-time market data |
+| `/static/websocket_test.html` | GET | WebSocket test interface |
 
-### Production Deployment
-```bash
-# Use production WSGI server
-pip install gunicorn
-gunicorn main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8081
-
-# Configure for live trading (⚠️ Use with caution)
-# Update .env:
-# ALPACA_BASE_URL=https://api.alpaca.markets
-# ALPACA_PAPER_TRADING=false
-```
-
-## 🚨 Troubleshooting
+## 🐛 Troubleshooting
 
 ### Common Issues
 
-| Issue | Solution | Guide |
-|-------|----------|-------|
-| **ModuleNotFoundError** | Activate virtual environment | [Setup Guide](docs/en/quickstart.md) |
-| **API Connection Failed** | Check API keys and network | [Troubleshooting](docs/en/troubleshooting.md) |
-| **Server Won't Start** | Check port availability | [Health Check](docs/scripts/health_check.py) |
-| **Orders Rejected** | Verify market hours and buying power | [API Examples](docs/en/api-examples.md) |
+#### WebSocket Connection Failed
+```bash
+# Check server is running
+curl http://localhost:8091/api/v1/health
 
-### Get Help
-1. **Run Diagnostics**: `python docs/scripts/setup_validator.py`
-2. **Check Health**: `python docs/scripts/health_check.py`
-3. **Review Logs**: Check `logs/alpaca_service.log`
-4. **Read Guides**: [Troubleshooting Guide](docs/en/troubleshooting.md)
+# Check port availability
+netstat -an | grep 8091
+```
+
+#### MsgPack Library Not Loading
+1. Check browser console for CDN errors
+2. Verify network connectivity
+3. Try manual refresh of WebSocket test page
+
+#### Option WebSocket Authentication Failed
+1. Verify API keys in `secrets.yml`
+2. Check Alpaca account permissions for option data
+3. Ensure paper trading is enabled
+
+### Server Logs
+```bash
+# View server logs
+tail -f logs/app.log
+
+# Check specific WebSocket activity
+grep "WebSocket" logs/app.log
+```
+
+### Performance Monitoring
+```bash
+# Monitor server resources
+htop
+
+# Check WebSocket connections
+ss -tuln | grep 8091
+```
+
+## 📈 Features Roadmap
+
+- [ ] **Real-time Portfolio Monitoring** - Live P&L tracking
+- [ ] **Advanced Order Management** - OCO, Bracket orders
+- [ ] **Options Strategy Builder** - Pre-built strategy templates
+- [ ] **Risk Management Tools** - Position sizing, stop-loss automation
+- [ ] **Historical Data Analysis** - Backtesting capabilities
+- [ ] **Mobile App Integration** - React Native companion app
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [Contributing Guide](docs/en/contributing.md) for details.
+We welcome contributions! Please see our [Contributing Guide](docs/CONTRIBUTING.md) for details.
 
 ### Development Setup
-```bash
-# Fork and clone the repository
-git clone <your-fork-url>
-cd opitios_alpaca
 
-# Setup development environment
+```bash
+# Fork the repository
+git fork https://github.com/yourusername/opitios_alpaca.git
+
+# Clone and setup
+git clone https://github.com/yourusername/opitios_alpaca.git
+cd opitios_alpaca
+python -m venv venv
 venv\Scripts\activate  # Windows
 pip install -r requirements.txt
-pip install -r requirements-dev.txt  # If available
 
 # Run tests
-pytest
-
-# Start development server
-python main.py
+python run_tests.py
 ```
 
 ## 📄 License
 
-This project is part of the Opitios trading system. See [LICENSE](LICENSE) for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🌟 Support & Community
+## 🙏 Acknowledgments
 
-- **Documentation**: [Complete Guide](docs/README.md)
-- **Issues**: [GitHub Issues](../../issues)
-- **Discussions**: [GitHub Discussions](../../discussions)
-- **Email**: support@opitios.com
+- [Alpaca Trading API](https://alpaca.markets/) for market data and trading infrastructure
+- [FastAPI](https://fastapi.tiangolo.com/) for the high-performance web framework  
+- [MsgPack](https://msgpack.org/) for efficient binary serialization
 
-## 📈 Roadmap
+## 📞 Support
 
-- [ ] **Options Trading**: Full Alpaca options API integration
-- [ ] **WebSocket Streaming**: Real-time market data feeds
-- [ ] **Advanced Orders**: Bracket orders, OCO orders
-- [ ] **Portfolio Analytics**: Performance tracking and reporting
-- [ ] **Alert System**: Price alerts and notifications
-- [ ] **Mobile API**: REST endpoints optimized for mobile apps
+- **Issues:** [GitHub Issues](https://github.com/yourusername/opitios_alpaca/issues)
+- **Discussions:** [GitHub Discussions](https://github.com/yourusername/opitios_alpaca/discussions)
+- **Documentation:** [docs/](docs/) directory
 
 ---
 
-**Made with ❤️ by the Opitios Team**
+**⚠️ Important:** This software is for educational and development purposes. Always test thoroughly in paper trading mode before using with real money. Trading involves significant risk of loss.
 
-**Last Updated**: January 2025 | **Version**: 1.0.0 | **Status**: Production Ready
+**🔐 Security:** Never commit API keys or secrets to version control. Always use environment variables or secure secret management systems in production.
 
-[![Documentation](https://img.shields.io/badge/docs-available-brightgreen?style=flat-square)](docs/README.md)
-[![API Health](https://img.shields.io/badge/api-healthy-brightgreen?style=flat-square)](http://localhost:8081/api/v1/health)
-[![Interactive Setup](https://img.shields.io/badge/setup-interactive-blue?style=flat-square)](docs/scripts/setup_validator.py)
+---
+
+## Quick Commands Reference
+
+```bash
+# Start server
+python main.py
+
+# Test WebSocket
+open http://localhost:8091/static/websocket_test.html
+
+# Run tests  
+python tests/test_msgpack_ascii.py
+
+# Docker deployment
+docker-compose up --build
+
+# Check health
+curl http://localhost:8091/api/v1/health
+```
+
+**Ready to trade with real-time data!** 🚀📊
