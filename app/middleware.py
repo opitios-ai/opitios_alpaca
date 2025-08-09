@@ -238,6 +238,12 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             "/redoc",
             "/health",
             "/api/v1/health",
+            "/api/v1/health/",
+            "/api/v1/health/comprehensive",
+            "/api/v1/health/trading-permissions",
+            "/api/v1/health/websocket-status",
+            "/api/v1/health/last-check",
+            "/api/v1/health/background-check",
             "/api/v1/test-connection",
             "/api/v1/auth/demo-token",
             "/api/v1/auth/verify-token",
@@ -257,6 +263,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         if (path in self.public_paths or 
             path.startswith("/static/") or
+            path.startswith("/api/v1/health/") or
             any(path.startswith("/api/v1/stocks/") and path.endswith("/quote") for _ in [None])):
             return await call_next(request)
             
@@ -299,7 +306,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         
     async def dispatch(self, request: Request, call_next: Callable):
         # 跳过公共路径
-        if request.url.path in ["/", "/docs", "/openapi.json", "/health"]:
+        if request.url.path in ["/", "/docs", "/openapi.json", "/health"] or \
+           request.url.path.startswith("/api/v1/health/"):
             return await call_next(request)
             
         # 获取用户/账户ID
