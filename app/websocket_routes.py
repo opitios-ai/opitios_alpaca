@@ -2,7 +2,7 @@
 WebSocket路由 - 实时市场数据流（使用官方Alpaca WebSocket端点）
 """
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from typing import Dict, List, Set, Optional, Union
 import json
 import asyncio
@@ -27,11 +27,14 @@ subscribed_symbols: Set[str] = set()
 alpaca_ws = None
 
 # 默认的测试股票和期权代码
-DEFAULT_STOCKS = ["AAPL", "TSLA", "GOOGL", "MSFT", "AMZN", "NVDA", "META", "SPY", "HOOD", "AEO"]
+DEFAULT_STOCKS = [
+    "AAPL", "TSLA", "GOOGL", "MSFT", "AMZN", "NVDA", "META", "SPY",
+    "HOOD", "AEO"
+]
 DEFAULT_OPTIONS = [
-    "TSLA250808C00307500",   # TSLA Call $307.50 2025-08-08 (from your alert)
-    "HOOD250822C00115000",   # HOOD Call $115.00 2025-08-22 (from your alert)
-    "AEO250808C00015000",    # AEO Call $15.00 2025-08-08 (from your alert)
+    "TSLA250808C00307500",   # TSLA Call $307.50 2025-08-08 (from alert)
+    "HOOD250822C00115000",   # HOOD Call $115.00 2025-08-22 (from alert)
+    "AEO250808C00015000",    # AEO Call $15.00 2025-08-08 (from alert)
     "AAPL250808C00230000",   # AAPL Call $230 2025-08-08 (current)
     "SPY250808C00580000",    # SPY Call $580 2025-08-08 (current)
     "NVDA250808C00140000"    # NVDA Call $140 2025-08-08 (current)
@@ -41,10 +44,10 @@ class AlpacaWebSocketManager:
     """Alpaca WebSocket管理器 - 使用官方WebSocket端点"""
     
     # Official Alpaca WebSocket endpoints - Use IEX for fastest pricing
-    STOCK_WS_URL = "wss://stream.data.alpaca.markets/v2/iex"  # IEX provides fastest exchange prices
+    STOCK_WS_URL = "wss://stream.data.alpaca.markets/v2/iex"
     OPTION_WS_URL = "wss://stream.data.alpaca.markets/v1beta1/indicative"
-    TEST_WS_URL = "wss://stream.data.alpaca.markets/v2/test"  # 测试端点 - 免费可用
-    TRADING_WS_URL = "wss://paper-api.alpaca.markets/stream"  # 交易更新端点
+    TEST_WS_URL = "wss://stream.data.alpaca.markets/v2/test"
+    TRADING_WS_URL = "wss://paper-api.alpaca.markets/stream"
     
     # 测试符号
     TEST_SYMBOL = "FAKEPACA"  # 官方测试股票代码
@@ -367,15 +370,26 @@ class AlpacaWebSocketManager:
             
             # 获取第一个可用账户
             if not pool.account_configs:
-                raise Exception("No account configurations found. Real data only mode requires valid API keys.")
+                raise Exception(
+                    "No account configurations found. "
+                    "Real data only mode requires valid API keys."
+                )
             
             # 获取第一个启用的账户
-            enabled_accounts = [acc for acc in pool.account_configs.values() if acc.enabled]
+            enabled_accounts = [
+                acc for acc in pool.account_configs.values() if acc.enabled
+            ]
             if not enabled_accounts:
-                raise Exception("No enabled accounts found. Real data only mode requires valid API keys.")
+                raise Exception(
+                    "No enabled accounts found. "
+                    "Real data only mode requires valid API keys."
+                )
             
             self.account_config = enabled_accounts[0]
-            logger.info(f"Using account {self.account_config.account_id} for WebSocket data stream")
+            logger.info(
+                f"Using account {self.account_config.account_id} "
+                "for WebSocket data stream"
+            )
             
             # 🧪 STEP 1: 执行WebSocket连接测试
             test_passed = await self.test_websocket_connection(

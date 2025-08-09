@@ -2,13 +2,12 @@
 健康检查路由 - Web端点版本
 """
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
-from fastapi.security import HTTPBearer
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 from typing import Dict, List, Optional
 import asyncio
 from datetime import datetime
 from alpaca.trading.client import TradingClient
-from alpaca.trading.requests import MarketOrderRequest, LimitOrderRequest
+from alpaca.trading.requests import LimitOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockLatestQuoteRequest
@@ -231,7 +230,7 @@ class WebHealthChecker:
             try:
                 trading_client.cancel_order_by_id(order.id)
                 cancel_success = True
-            except:
+            except Exception:
                 pass
             
             return {
@@ -371,7 +370,8 @@ async def health_overview():
 @health_router.get("/comprehensive")
 async def comprehensive_health_check():
     """全面健康检查"""
-    global health_check_running, health_cache
+    global health_check_running
+    global health_cache
     
     if health_check_running:
         return {
@@ -509,8 +509,6 @@ async def websocket_status_check():
 @health_router.get("/last-check")
 async def get_last_health_check():
     """获取最后一次健康检查结果"""
-    global health_cache
-    
     if not health_cache:
         return {
             "status": "no_data",
@@ -528,7 +526,8 @@ async def start_background_health_check(background_tasks: BackgroundTasks):
     """启动后台健康检查"""
     
     async def background_check():
-        global health_cache, health_check_running
+        global health_cache
+        global health_check_running
         try:
             health_check_running = True
             results = await web_checker.run_comprehensive_check()
