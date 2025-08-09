@@ -21,7 +21,10 @@ from config import settings
 
 
 # JWT配置
-JWT_SECRET = settings.jwt_secret if hasattr(settings, 'jwt_secret') else "your-secret-key"
+JWT_SECRET = (
+    settings.jwt_secret if hasattr(settings, 'jwt_secret')
+    else "your-secret-key"
+)
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = 24
 
@@ -48,7 +51,11 @@ def initialize_redis():
         redis_client.ping()
         redis_available = True
         logger.info("Redis连接成功，启用分布式rate limiting")
-    except (redis.ConnectionError, redis.TimeoutError, ConnectionRefusedError) as e:
+    except (
+        redis.ConnectionError,
+        redis.TimeoutError,
+        ConnectionRefusedError
+    ) as e:
         logger.warning(f"Redis连接失败，使用内存rate limiting: {e}")
         redis_client = None
         redis_available = False
@@ -122,11 +129,18 @@ class RateLimiter:
         
         redis_client = get_redis_client()
         if redis_client:
-            return self._redis_rate_limit(identifier, limit, window_seconds, now, redis_client)
+            return self._redis_rate_limit(
+                identifier, limit, window_seconds, now, redis_client
+            )
         else:
-            return self._memory_rate_limit(identifier, limit, window_seconds, now)
+            return self._memory_rate_limit(
+                identifier, limit, window_seconds, now
+            )
             
-    def _redis_rate_limit(self, identifier: str, limit: int, window_seconds: int, now: float, redis_client) -> tuple[bool, dict]:
+    def _redis_rate_limit(
+        self, identifier: str, limit: int, window_seconds: int,
+        now: float, redis_client
+    ) -> tuple[bool, dict]:
         """使用Redis的rate limiting"""
         try:
             key = self._get_key(identifier, str(window_seconds))
@@ -158,7 +172,9 @@ class RateLimiter:
             redis_available = False
             return self._memory_rate_limit(identifier, limit, window_seconds, now)
             
-    def _memory_rate_limit(self, identifier: str, limit: int, window_seconds: int, now: float) -> tuple[bool, dict]:
+    def _memory_rate_limit(
+        self, identifier: str, limit: int, window_seconds: int, now: float
+    ) -> tuple[bool, dict]:
         """使用内存的rate limiting"""
         requests = self.memory_store[identifier][window_seconds]
         
@@ -174,7 +190,9 @@ class RateLimiter:
             
         rate_limit_info = {
             "limit": limit,
-            "remaining": max(0, limit - current_requests - (1 if allowed else 0)),
+            "remaining": max(
+                0, limit - current_requests - (1 if allowed else 0)
+            ),
             "reset_time": int(now + window_seconds),
             "current_requests": current_requests + (1 if allowed else 0)
         }
@@ -238,6 +256,12 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             "/redoc",
             "/health",
             "/api/v1/health",
+            "/api/v1/health/",
+            "/api/v1/health/comprehensive",
+            "/api/v1/health/trading-permissions",
+            "/api/v1/health/websocket-status",
+            "/api/v1/health/last-check",
+            "/api/v1/health/background-check",
             "/api/v1/test-connection",
             "/api/v1/auth/demo-token",
             "/api/v1/auth/verify-token",
@@ -255,9 +279,20 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Callable):
         # 跳过公共路径
         path = request.url.path
+        
+        # Debug logging
+        from loguru import logger
+        logger.debug(f"AuthMiddleware checking path: {path}")
+        
+        # Check for health endpoints first
+        if path.startswith("/api/v1/health"):
+            logger.debug(f"Skipping auth for health endpoint: {path}")
+            return await call_next(request)
+            
         if (path in self.public_paths or 
             path.startswith("/static/") or
             any(path.startswith("/api/v1/stocks/") and path.endswith("/quote") for _ in [None])):
+            logger.debug(f"Skipping auth for public path: {path}")
             return await call_next(request)
             
         # 检查Authorization header
@@ -299,7 +334,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         
     async def dispatch(self, request: Request, call_next: Callable):
         # 跳过公共路径
-        if request.url.path in ["/", "/docs", "/openapi.json", "/health"]:
+        if request.url.path in ["/", "/docs", "/openapi.json", "/health"] or \
+           request.url.path.startswith("/api/v1/health/"):
             return await call_next(request)
             
         # 获取用户/账户ID

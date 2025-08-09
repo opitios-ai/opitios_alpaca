@@ -2,7 +2,7 @@
 WebSocket路由 - 实时市场数据流（使用官方Alpaca WebSocket端点）
 """
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from typing import Dict, List, Set, Optional, Union
 import json
 import asyncio
@@ -27,11 +27,14 @@ subscribed_symbols: Set[str] = set()
 alpaca_ws = None
 
 # 默认的测试股票和期权代码
-DEFAULT_STOCKS = ["AAPL", "TSLA", "GOOGL", "MSFT", "AMZN", "NVDA", "META", "SPY", "HOOD", "AEO"]
+DEFAULT_STOCKS = [
+    "AAPL", "TSLA", "GOOGL", "MSFT", "AMZN", "NVDA", "META", "SPY",
+    "HOOD", "AEO"
+]
 DEFAULT_OPTIONS = [
-    "TSLA250808C00307500",   # TSLA Call $307.50 2025-08-08 (from your alert)
-    "HOOD250822C00115000",   # HOOD Call $115.00 2025-08-22 (from your alert)
-    "AEO250808C00015000",    # AEO Call $15.00 2025-08-08 (from your alert)
+    "TSLA250808C00307500",   # TSLA Call $307.50 2025-08-08 (from alert)
+    "HOOD250822C00115000",   # HOOD Call $115.00 2025-08-22 (from alert)
+    "AEO250808C00015000",    # AEO Call $15.00 2025-08-08 (from alert)
     "AAPL250808C00230000",   # AAPL Call $230 2025-08-08 (current)
     "SPY250808C00580000",    # SPY Call $580 2025-08-08 (current)
     "NVDA250808C00140000"    # NVDA Call $140 2025-08-08 (current)
@@ -40,26 +43,11 @@ DEFAULT_OPTIONS = [
 class AlpacaWebSocketManager:
     """Alpaca WebSocket管理器 - 使用官方WebSocket端点"""
     
-    # Official Alpaca WebSocket endpoints with intelligent fallback
-    STOCK_ENDPOINTS = [
-        {
-            "name": "SIP", 
-            "url": "wss://stream.data.alpaca.markets/v2/sip",
-            "description": "SIP全市场数据 - 需要Algo Trader Plus订阅",
-            "tier_required": "premium",
-            "priority": 1
-        },
-        {
-            "name": "IEX", 
-            "url": "wss://stream.data.alpaca.markets/v2/iex",
-            "description": "IEX交易所数据 - 免费账户可用但数据有限",
-            "tier_required": "free",
-            "priority": 2
-        }
-    ]
+    # Official Alpaca WebSocket endpoints - Use IEX for fastest pricing
+    STOCK_WS_URL = "wss://stream.data.alpaca.markets/v2/iex"
     OPTION_WS_URL = "wss://stream.data.alpaca.markets/v1beta1/indicative"
-    TEST_WS_URL = "wss://stream.data.alpaca.markets/v2/test"  # 测试端点 - 免费可用
-    TRADING_WS_URL = "wss://paper-api.alpaca.markets/stream"  # 交易更新端点
+    TEST_WS_URL = "wss://stream.data.alpaca.markets/v2/test"
+    TRADING_WS_URL = "wss://paper-api.alpaca.markets/stream"
     
     # 测试符号
     TEST_SYMBOL = "FAKEPACA"  # 官方测试股票代码
@@ -382,15 +370,26 @@ class AlpacaWebSocketManager:
             
             # 获取第一个可用账户
             if not pool.account_configs:
-                raise Exception("No account configurations found. Real data only mode requires valid API keys.")
+                raise Exception(
+                    "No account configurations found. "
+                    "Real data only mode requires valid API keys."
+                )
             
             # 获取第一个启用的账户
-            enabled_accounts = [acc for acc in pool.account_configs.values() if acc.enabled]
+            enabled_accounts = [
+                acc for acc in pool.account_configs.values() if acc.enabled
+            ]
             if not enabled_accounts:
-                raise Exception("No enabled accounts found. Real data only mode requires valid API keys.")
+                raise Exception(
+                    "No enabled accounts found. "
+                    "Real data only mode requires valid API keys."
+                )
             
             self.account_config = enabled_accounts[0]
-            logger.info(f"Using account {self.account_config.account_id} for WebSocket data stream")
+            logger.info(
+                f"Using account {self.account_config.account_id} "
+                "for WebSocket data stream"
+            )
             
             # 🧪 STEP 1: 执行WebSocket连接测试
             test_passed = await self.test_websocket_connection(
@@ -412,32 +411,15 @@ class AlpacaWebSocketManager:
             account_info = test_client.get_account()
             logger.info(f"✅ API连接验证成功 - 账户: {account_info.account_number}")
             
-            # 检测可用端点并连接 - 智能回退逻辑
-            await self._detect_and_connect_stock_endpoints()
-            
+            # 检测可用端点并连接 - 直接使用IEX端点
+            logger.info("🚀 直接使用IEX端点 - 提供最快的交易所价格")
             self.connected = True
             
-            # 详细记录当前配置
-            endpoint_name = self.current_stock_endpoint["name"] if self.current_stock_endpoint else "None"
-            endpoint_desc = self.current_stock_endpoint["description"] if self.current_stock_endpoint else "No endpoint selected"
-            
-            logger.info("🚀 Alpaca WebSocket连接初始化成功 - 使用智能端点选择")
+            logger.info("🚀 Alpaca WebSocket连接初始化成功 - 使用IEX端点")
             logger.info(f"📊 账户层级: {getattr(self.account_config, 'tier', 'unknown')}")
-            logger.info(f"🔗 当前股票端点: {endpoint_name}")
-            logger.info(f"📝 端点描述: {endpoint_desc}")
+            logger.info(f"🔗 股票端点: IEX - 最快交易所价格")
             logger.info(f"🏷️ Paper Trading: {getattr(self.account_config, 'paper_trading', 'unknown')}")
             logger.info(f"🔢 连接限制: {getattr(self.account_config, 'max_connections', 'unknown')}")
-            
-            # 根据端点类型提供不同的提示
-            if self.current_stock_endpoint:
-                if self.current_stock_endpoint["name"] == "SIP":
-                    logger.info("🏆 使用SIP端点 - 全市场实时数据可用")
-                elif self.current_stock_endpoint["name"] == "IEX":
-                    logger.info("📈 使用IEX端点 - IEX交易所数据，覆盖范围有限")
-                elif self.current_stock_endpoint["name"] == "TEST":
-                    logger.warning("🧪 使用测试端点 - 仅提供模拟数据，非真实市场数据")
-            else:
-                logger.warning("⚠️ 未选择股票数据端点")
             
         except Exception as e:
             logger.error(f"Alpaca WebSocket初始化失败: {e}")
@@ -670,23 +652,13 @@ class AlpacaWebSocketManager:
             raise e
 
     async def _connect_stock_websocket(self, symbols: List[str]):
-        """连接股票WebSocket端点 - 使用智能检测的端点"""
+        """连接股票WebSocket端点 - 直接使用IEX端点获取最快价格"""
         try:
-            # 确保已检测到可用端点
-            if not self.current_stock_endpoint:
-                logger.warning("⚠️ 未检测到可用股票端点，重新检测...")
-                success = await self._detect_and_connect_stock_endpoints()
-                if not success:
-                    raise Exception("无法找到可用的股票数据端点")
-            
-            endpoint_url = self.current_stock_endpoint["url"]
-            endpoint_name = self.current_stock_endpoint["name"]
-            
-            logger.info(f"🔌 连接股票端点: {endpoint_name} ({endpoint_url})")
+            logger.info(f"🔌 连接IEX端点获取最快价格: {self.STOCK_WS_URL}")
             
             ssl_context = ssl.create_default_context()
             self.stock_ws = await websockets.connect(
-                endpoint_url,
+                self.STOCK_WS_URL,
                 ssl=ssl_context,
                 ping_interval=20,
                 ping_timeout=10,

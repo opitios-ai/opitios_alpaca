@@ -27,7 +27,9 @@ class TokenVerificationResponse(BaseModel):
 
 
 @auth_router.post("/verify-token", response_model=TokenVerificationResponse)
-async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+async def verify_token(
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
     """验证JWT Token"""
     try:
         payload = verify_jwt_token(credentials.credentials)
@@ -109,7 +111,7 @@ async def get_alpaca_credentials():
         "paper_trading": True,
         "endpoints": {
             "stock_ws": "wss://stream.data.alpaca.markets/v2/iex",
-            "option_ws": "wss://stream.data.alpaca.markets/v1beta1/indicative", 
+            "option_ws": "wss://stream.data.alpaca.markets/v1beta1/indicative",
             "test_ws": "wss://stream.data.alpaca.markets/v2/test"
         },
         "note": "这些是真实的Alpaca API凭据，用于WebSocket连接测试"

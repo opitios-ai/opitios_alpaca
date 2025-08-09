@@ -3,7 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from app.routes import router
-from app.middleware import AuthenticationMiddleware, RateLimitMiddleware, LoggingMiddleware
+from app.middleware import (
+    AuthenticationMiddleware, RateLimitMiddleware, LoggingMiddleware
+)
 from app.logging_config import logging_config
 from app.account_pool import account_pool
 from config import settings
@@ -26,7 +28,7 @@ def clear_port_8090():
         if os.name == 'nt':  # Windows
             # Find processes using port 8090
             result = subprocess.run(
-                ['netstat', '-ano', '-p', 'TCP'], 
+                ['netstat', '-ano', '-p', 'TCP'],
                 capture_output=True, text=True, check=False
             )
             
@@ -45,7 +47,9 @@ def clear_port_8090():
             # Kill the processes
             for pid in pids_to_kill:
                 try:
-                    subprocess.run(['taskkill', '/F', '/PID', pid], check=True)
+                    subprocess.run(
+                        ['taskkill', '/F', '/PID', pid], check=True
+                    )
                     logger.success(f"Killed process PID {pid}")
                 except subprocess.CalledProcessError as e:
                     logger.error(f"Failed to kill PID {pid}: {e}")
@@ -62,10 +66,16 @@ def clear_port_8090():
                     for pid in pids:
                         if pid.strip():
                             try:
-                                subprocess.run(['kill', '-9', pid.strip()], check=True)
-                                logger.success(f"Killed process PID {pid.strip()}")
+                                subprocess.run(
+                                    ['kill', '-9', pid.strip()], check=True
+                                )
+                                logger.success(
+                                    f"Killed process PID {pid.strip()}"
+                                )
                             except subprocess.CalledProcessError as e:
-                                logger.error(f"Failed to kill PID {pid.strip()}: {e}")
+                                logger.error(
+                                    f"Failed to kill PID {pid.strip()}: {e}"
+                                )
                 else:
                     logger.info("No processes found using port 8090")
                     
@@ -89,7 +99,9 @@ async def lifespan(app: FastAPI):
     """Application lifespan events"""
     # Startup
     logger.info(f"Starting {settings.app_name}")
-    logger.info(f"Environment: {'Production' if not settings.debug else 'Development'}")
+    logger.info(
+        f"Environment: {'Production' if not settings.debug else 'Development'}"
+    )
     logger.info(f"Paper trading mode: {settings.alpaca_paper_trading}")
     logger.info(f"Alpaca base URL: {settings.alpaca_base_url}")
     logger.info(f"Real data only mode: {settings.real_data_only}")
@@ -100,15 +112,23 @@ async def lifespan(app: FastAPI):
     try:
         await account_pool.initialize()
         pool_stats = account_pool.get_pool_stats()
-        logger.info(f"Account pool initialized: {pool_stats['total_accounts']} accounts, {pool_stats['total_connections']} connections")
+        logger.info(
+            f"Account pool initialized: {pool_stats['total_accounts']} "
+            f"accounts, {pool_stats['total_connections']} connections"
+        )
     except Exception as e:
         logger.error(f"Failed to initialize account pool: {e}")
         raise
     
     if not settings.real_data_only or settings.enable_mock_data:
-        logger.warning("ALERT: Service is NOT configured for real-data-only mode!")
+        logger.warning(
+            "ALERT: Service is NOT configured for real-data-only mode!"
+        )
     else:
-        logger.info("✓ Service configured for real-data-only mode - no mock or calculated data will be returned")
+        logger.info(
+            "✓ Service configured for real-data-only mode - "
+            "no mock or calculated data will be returned"
+        )
     
     yield
     
@@ -179,8 +199,10 @@ app.add_middleware(
 # Include routers
 from app.auth_routes import auth_router, admin_router
 from app.websocket_routes import ws_router
+from app.health_routes import health_router
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
+app.include_router(health_router, prefix="/api/v1")
 app.include_router(router, prefix="/api/v1", tags=["trading"])
 app.include_router(ws_router, prefix="/api/v1", tags=["websocket"])
 
