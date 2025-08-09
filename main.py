@@ -179,8 +179,10 @@ app.add_middleware(
 # Include routers
 from app.auth_routes import auth_router, admin_router
 from app.websocket_routes import ws_router
+from app.health_routes import health_router
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
+app.include_router(health_router, prefix="/api/v1")
 app.include_router(router, prefix="/api/v1", tags=["trading"])
 app.include_router(ws_router, prefix="/api/v1", tags=["websocket"])
 
