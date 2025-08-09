@@ -88,8 +88,9 @@ class AlpacaAccountConnection:
                 self.stats.last_health_check = datetime.utcnow()
                 self.stats.usage_count += 1
                 self.stats.avg_response_time = (
-                    (self.stats.avg_response_time * (self.stats.usage_count - 1) + response_time) 
-                    / self.stats.usage_count
+                    (self.stats.avg_response_time *
+                     (self.stats.usage_count - 1) + response_time) /
+                    self.stats.usage_count
                 )
                 
                 is_healthy = result.get("status") == "connected"
@@ -97,14 +98,18 @@ class AlpacaAccountConnection:
                 
                 if not is_healthy:
                     self.stats.error_count += 1
-                    logger.warning(f"账户连接不健康: {self.account_config.account_id}")
+                    logger.warning(
+                        f"账户连接不健康: {self.account_config.account_id}"
+                    )
                 
                 return is_healthy
                 
         except Exception as e:
             self.stats.error_count += 1
             self.stats.is_healthy = False
-            logger.error(f"连接测试失败 (账户: {self.account_config.account_id}): {e}")
+            logger.error(
+                f"连接测试失败 (账户: {self.account_config.account_id}): {e}"
+            )
             return False
     
     async def acquire(self):
@@ -122,18 +127,28 @@ class AlpacaAccountConnection:
     @property
     def is_available(self) -> bool:
         """检查连接是否可用"""
-        return not self._in_use and self.stats.is_healthy and self.account_config.enabled
+        return (
+            not self._in_use and
+            self.stats.is_healthy and
+            self.account_config.enabled
+        )
     
     @property
     def age_minutes(self) -> float:
         """连接年龄(分钟)"""
-        return (datetime.utcnow() - self.stats.created_at).total_seconds() / 60
+        return (
+            (datetime.utcnow() - self.stats.created_at).total_seconds() / 60
+        )
 
 
 class AccountConnectionPool:
     """账户连接池管理器"""
     
-    def __init__(self, max_connections_per_account: int = 3, health_check_interval_seconds: int = 300):
+    def __init__(
+        self,
+        max_connections_per_account: int = 3,
+        health_check_interval_seconds: int = 300
+    ):
         self.max_connections_per_account = max_connections_per_account
         self.health_check_interval_seconds = health_check_interval_seconds
         
