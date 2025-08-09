@@ -40,23 +40,8 @@ DEFAULT_OPTIONS = [
 class AlpacaWebSocketManager:
     """Alpaca WebSocket管理器 - 使用官方WebSocket端点"""
     
-    # Official Alpaca WebSocket endpoints with intelligent fallback
-    STOCK_ENDPOINTS = [
-        {
-            "name": "SIP", 
-            "url": "wss://stream.data.alpaca.markets/v2/sip",
-            "description": "SIP全市场数据 - 需要Algo Trader Plus订阅",
-            "tier_required": "premium",
-            "priority": 1
-        },
-        {
-            "name": "IEX", 
-            "url": "wss://stream.data.alpaca.markets/v2/iex",
-            "description": "IEX交易所数据 - 免费账户可用但数据有限",
-            "tier_required": "free",
-            "priority": 2
-        }
-    ]
+    # Official Alpaca WebSocket endpoints - Use IEX for fastest pricing
+    STOCK_WS_URL = "wss://stream.data.alpaca.markets/v2/iex"  # IEX provides fastest exchange prices
     OPTION_WS_URL = "wss://stream.data.alpaca.markets/v1beta1/indicative"
     TEST_WS_URL = "wss://stream.data.alpaca.markets/v2/test"  # 测试端点 - 免费可用
     TRADING_WS_URL = "wss://paper-api.alpaca.markets/stream"  # 交易更新端点
@@ -412,32 +397,15 @@ class AlpacaWebSocketManager:
             account_info = test_client.get_account()
             logger.info(f"✅ API连接验证成功 - 账户: {account_info.account_number}")
             
-            # 检测可用端点并连接 - 智能回退逻辑
-            await self._detect_and_connect_stock_endpoints()
-            
-            self.connected = True
-            
-            # 详细记录当前配置
-            endpoint_name = self.current_stock_endpoint["name"] if self.current_stock_endpoint else "None"
-            endpoint_desc = self.current_stock_endpoint["description"] if self.current_stock_endpoint else "No endpoint selected"
-            
-            logger.info("🚀 Alpaca WebSocket连接初始化成功 - 使用智能端点选择")
-            logger.info(f"📊 账户层级: {getattr(self.account_config, 'tier', 'unknown')}")
-            logger.info(f"🔗 当前股票端点: {endpoint_name}")
-            logger.info(f"📝 端点描述: {endpoint_desc}")
-            logger.info(f"🏷️ Paper Trading: {getattr(self.account_config, 'paper_trading', 'unknown')}")
-            logger.info(f"🔢 连接限制: {getattr(self.account_config, 'max_connections', 'unknown')}")
-            
-            # 根据端点类型提供不同的提示
-            if self.current_stock_endpoint:
-                if self.current_stock_endpoint["name"] == "SIP":
-                    logger.info("🏆 使用SIP端点 - 全市场实时数据可用")
-                elif self.current_stock_endpoint["name"] == "IEX":
-                    logger.info("📈 使用IEX端点 - IEX交易所数据，覆盖范围有限")
-                elif self.current_stock_endpoint["name"] == "TEST":
-                    logger.warning("🧪 使用测试端点 - 仅提供模拟数据，非真实市场数据")
-            else:
-                logger.warning("⚠️ 未选择股票数据端点")
+        # 检测可用端点并连接 - 直接使用IEX端点
+        logger.info("🚀 直接使用IEX端点 - 提供最快的交易所价格")
+        self.connected = True
+        
+        logger.info("🚀 Alpaca WebSocket连接初始化成功 - 使用IEX端点")
+        logger.info(f"📊 账户层级: {getattr(self.account_config, 'tier', 'unknown')}")
+        logger.info(f"🔗 股票端点: IEX - 最快交易所价格")
+        logger.info(f"🏷️ Paper Trading: {getattr(self.account_config, 'paper_trading', 'unknown')}")
+        logger.info(f"🔢 连接限制: {getattr(self.account_config, 'max_connections', 'unknown')}")
             
         except Exception as e:
             logger.error(f"Alpaca WebSocket初始化失败: {e}")
@@ -670,23 +638,13 @@ class AlpacaWebSocketManager:
             raise e
 
     async def _connect_stock_websocket(self, symbols: List[str]):
-        """连接股票WebSocket端点 - 使用智能检测的端点"""
+        """连接股票WebSocket端点 - 直接使用IEX端点获取最快价格"""
         try:
-            # 确保已检测到可用端点
-            if not self.current_stock_endpoint:
-                logger.warning("⚠️ 未检测到可用股票端点，重新检测...")
-                success = await self._detect_and_connect_stock_endpoints()
-                if not success:
-                    raise Exception("无法找到可用的股票数据端点")
-            
-            endpoint_url = self.current_stock_endpoint["url"]
-            endpoint_name = self.current_stock_endpoint["name"]
-            
-            logger.info(f"🔌 连接股票端点: {endpoint_name} ({endpoint_url})")
+            logger.info(f"🔌 连接IEX端点获取最快价格: {self.STOCK_WS_URL}")
             
             ssl_context = ssl.create_default_context()
             self.stock_ws = await websockets.connect(
-                endpoint_url,
+                self.STOCK_WS_URL,
                 ssl=ssl_context,
                 ping_interval=20,
                 ping_timeout=10,
