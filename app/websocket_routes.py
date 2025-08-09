@@ -397,15 +397,15 @@ class AlpacaWebSocketManager:
             account_info = test_client.get_account()
             logger.info(f"✅ API连接验证成功 - 账户: {account_info.account_number}")
             
-        # 检测可用端点并连接 - 直接使用IEX端点
-        logger.info("🚀 直接使用IEX端点 - 提供最快的交易所价格")
-        self.connected = True
-        
-        logger.info("🚀 Alpaca WebSocket连接初始化成功 - 使用IEX端点")
-        logger.info(f"📊 账户层级: {getattr(self.account_config, 'tier', 'unknown')}")
-        logger.info(f"🔗 股票端点: IEX - 最快交易所价格")
-        logger.info(f"🏷️ Paper Trading: {getattr(self.account_config, 'paper_trading', 'unknown')}")
-        logger.info(f"🔢 连接限制: {getattr(self.account_config, 'max_connections', 'unknown')}")
+            # 检测可用端点并连接 - 直接使用IEX端点
+            logger.info("🚀 直接使用IEX端点 - 提供最快的交易所价格")
+            self.connected = True
+            
+            logger.info("🚀 Alpaca WebSocket连接初始化成功 - 使用IEX端点")
+            logger.info(f"📊 账户层级: {getattr(self.account_config, 'tier', 'unknown')}")
+            logger.info(f"🔗 股票端点: IEX - 最快交易所价格")
+            logger.info(f"🏷️ Paper Trading: {getattr(self.account_config, 'paper_trading', 'unknown')}")
+            logger.info(f"🔢 连接限制: {getattr(self.account_config, 'max_connections', 'unknown')}")
             
         except Exception as e:
             logger.error(f"Alpaca WebSocket初始化失败: {e}")

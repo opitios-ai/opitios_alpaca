@@ -2,7 +2,8 @@
 健康检查路由 - Web端点版本
 """
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
+from fastapi.security import HTTPBearer
 from typing import Dict, List, Optional
 import asyncio
 from datetime import datetime
@@ -349,7 +350,7 @@ web_checker = WebHealthChecker()
 
 @health_router.get("/")
 async def health_overview():
-    """简单的健康检查概览"""
+    """简单的健康检查概览 - 无需认证"""
     return {
         "service": "Opitios Alpaca Trading Service",
         "status": "running",
@@ -370,7 +371,7 @@ async def health_overview():
 @health_router.get("/comprehensive")
 async def comprehensive_health_check():
     """全面健康检查"""
-    global health_check_running
+    global health_check_running, health_cache
     
     if health_check_running:
         return {
@@ -383,7 +384,6 @@ async def comprehensive_health_check():
         results = await web_checker.run_comprehensive_check()
         
         # 缓存结果
-        global health_cache
         health_cache = results
         
         return {
