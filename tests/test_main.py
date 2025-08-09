@@ -35,7 +35,7 @@ class TestBasicImports:
         """Test that config module can be imported."""
         try:
             import config
-            assert hasattr(config, 'Config')
+            assert hasattr(config, 'Settings')
             print("✅ Config module imported successfully")
         except ImportError as e:
             pytest.fail(f"Failed to import config module: {e}")
@@ -45,14 +45,15 @@ class TestConfiguration:
     """Test configuration loading."""
 
     def test_config_class_exists(self):
-        """Test that Config class exists and has required attributes."""
-        from config import Config
+        """Test that Settings class exists and has required attributes."""
+        from config import Settings
         
-        # Check that Config class has basic attributes
-        assert hasattr(Config, 'ALPACA_API_KEY')
-        assert hasattr(Config, 'ALPACA_SECRET_KEY')
-        assert hasattr(Config, 'PAPER_TRADING')
-        print("✅ Config class has required attributes")
+        # Create an instance to check attributes
+        settings = Settings()
+        assert hasattr(settings, 'alpaca_api_key')
+        assert hasattr(settings, 'alpaca_secret_key')
+        assert hasattr(settings, 'alpaca_paper_trading')
+        print("✅ Settings class has required attributes")
 
     def test_secrets_file_structure(self, secrets_file_path):
         """Test that secrets file has correct structure."""

@@ -51,12 +51,12 @@ jobs:
         PYTHONPATH: ${{ github.workspace }}
       run: |
         # Run only basic unit tests that don't require API credentials
-        pytest tests/test_main.py -v --tb=short
+        python -m pytest tests/test_main.py -v --tb=short --disable-warnings
     
     - name: Generate coverage report
       if: matrix.python-version == '3.11'
       run: |
-        pytest tests/test_main.py --cov=app --cov-report=xml --cov-report=html
+        python -m pytest tests/test_main.py --cov=app --cov-report=xml --cov-report=html
     
     - name: Upload coverage to Codecov
       if: matrix.python-version == '3.11'
