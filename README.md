@@ -1,5 +1,13 @@
 # Opitios Alpaca WebSocket Trading Service 🚀
 
+<div align="center">
+  <img src="https://trading.opitios.com/assets/img/brand-logos/desktop-logo.png" alt="美股智投 Opitios" height="60px">
+  <br>
+  <strong>Powered by 美股智投 (Opitios) - Professional US Stock Trading Platform</strong>
+</div>
+
+<div align="center">
+
 ![Build Status](https://img.shields.io/badge/build-passing-brightgreen?style=flat-square)
 ![WebSocket Support](https://img.shields.io/badge/websocket-real--time-brightgreen?style=flat-square)
 ![MsgPack Support](https://img.shields.io/badge/msgpack-binary--streaming-blue?style=flat-square)
@@ -9,17 +17,32 @@
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
 ![Last Updated](https://img.shields.io/badge/updated-August%202025-blue?style=flat-square)
 
-A comprehensive FastAPI-based trading service with **real-time WebSocket streaming** for stock and options trading. Features dual WebSocket endpoints, MsgPack binary support for option data, and comprehensive market data integration with Alpaca Trading API.
+</div>
+
+---
+
+## 🏢 About Opitios
+
+This open-source WebSocket trading service is developed and maintained by **美股智投 (Opitios)**, a professional US stock trading platform dedicated to providing advanced trading tools and real-time market data solutions for institutional and individual traders.
+
+**🌐 Visit:** [trading.opitios.com](https://trading.opitios.com) | **📧 Contact:** Support Team
+
+---
+
+## 📖 Project Overview
+
+A comprehensive FastAPI-based trading service with **real-time WebSocket streaming** for stock and options trading. Features intelligent endpoint detection, MsgPack binary support for option data, and comprehensive market data integration with Alpaca Trading API.
 
 ## ✨ Key Features
 
-- 🔄 **Real-time WebSocket Streaming** - Multi-endpoint support (production, test, options)
+- 🔄 **Intelligent WebSocket Streaming** - Smart endpoint detection (SIP → IEX → Test fallback)
 - 📊 **Option WebSocket Support** - MsgPack binary format for real-time option data
-- 🔐 **Dynamic Authentication** - Real API credentials with automatic fallback
-- 🎯 **Dual Test Environment** - Production and Alpaca test endpoints
+- 🔐 **Dynamic Authentication** - Real API credentials with automatic tier detection
+- 🎯 **Production-Grade Reliability** - Connection limits, error recovery, health monitoring
 - 📈 **Comprehensive UI** - Interactive WebSocket test interface
-- 🛡️ **Error Recovery** - Robust fallback mechanisms and error handling
-- 🌐 **Production Ready** - Docker support and deployment configurations
+- 🛡️ **Advanced Error Recovery** - Production-specific error handling and fallback mechanisms
+- 🌐 **Enterprise Ready** - Docker support, auto port management, and deployment configurations
+- 🚀 **Opitios Powered** - Built by professional trading platform experts
 
 ## 🚀 Quick Start
 

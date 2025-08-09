@@ -40,9 +40,23 @@ DEFAULT_OPTIONS = [
 class AlpacaWebSocketManager:
     """Alpaca WebSocket管理器 - 使用官方WebSocket端点"""
     
-    # Official Alpaca WebSocket endpoints
-    STOCK_WS_URL = "wss://stream.data.alpaca.markets/v2/iex"
-    STOCK_SIP_URL = "wss://stream.data.alpaca.markets/v2/sip"  # 需要付费订阅
+    # Official Alpaca WebSocket endpoints with intelligent fallback
+    STOCK_ENDPOINTS = [
+        {
+            "name": "SIP", 
+            "url": "wss://stream.data.alpaca.markets/v2/sip",
+            "description": "SIP全市场数据 - 需要Algo Trader Plus订阅",
+            "tier_required": "premium",
+            "priority": 1
+        },
+        {
+            "name": "IEX", 
+            "url": "wss://stream.data.alpaca.markets/v2/iex",
+            "description": "IEX交易所数据 - 免费账户可用但数据有限",
+            "tier_required": "free",
+            "priority": 2
+        }
+    ]
     OPTION_WS_URL = "wss://stream.data.alpaca.markets/v1beta1/indicative"
     TEST_WS_URL = "wss://stream.data.alpaca.markets/v2/test"  # 测试端点 - 免费可用
     TRADING_WS_URL = "wss://paper-api.alpaca.markets/stream"  # 交易更新端点
@@ -50,17 +64,58 @@ class AlpacaWebSocketManager:
     # 测试符号
     TEST_SYMBOL = "FAKEPACA"  # 官方测试股票代码
     
-    # Alpaca错误代码映射
+    # Alpaca错误代码映射与解决方案
     ERROR_CODES = {
-        400: "invalid syntax - 检查消息格式",
-        401: "unauthorized - API密钥无效",
-        402: "forbidden - 权限不足",
-        404: "not found - 端点不存在", 
-        406: "connection limit exceeded - 连接数超限",
-        409: "conflict - 重复订阅",
-        412: "option messages are only available in MsgPack format",
-        413: "too many symbols - 符号数量超限",
-        500: "internal server error - 服务器内部错误"
+        400: {
+            "description": "invalid syntax - 检查消息格式",
+            "solution": "检查JSON/MessagePack格式",
+            "retry": False
+        },
+        401: {
+            "description": "unauthorized - API密钥无效",
+            "solution": "验证API密钥和密钥对",
+            "retry": False
+        },
+        402: {
+            "description": "forbidden - 权限不足或订阅不足",
+            "solution": "升级账户订阅或使用IEX端点",
+            "retry": True,
+            "fallback_endpoint": True
+        },
+        404: {
+            "description": "not found - 端点不存在", 
+            "solution": "检查端点URL是否正确",
+            "retry": False
+        },
+        406: {
+            "description": "connection limit exceeded - 连接数超限",
+            "solution": "关闭其他连接或使用连接池",
+            "retry": True,
+            "wait_seconds": 30
+        },
+        409: {
+            "description": "conflict - 重复订阅或连接冲突",
+            "solution": "检查是否已有活跃连接",
+            "retry": True,
+            "wait_seconds": 5
+        },
+        412: {
+            "description": "option messages are only available in MsgPack format",
+            "solution": "期权数据必须使用MessagePack格式",
+            "retry": False
+        },
+        413: {
+            "description": "too many symbols - 符号数量超限",
+            "solution": "减少单次订阅的符号数量",
+            "retry": True,
+            "reduce_symbols": True
+        },
+        500: {
+            "description": "internal server error - 服务器内部错误",
+            "solution": "等待后重试",
+            "retry": True,
+            "wait_seconds": 60
+        }
     }
     
     def __init__(self):
@@ -77,6 +132,9 @@ class AlpacaWebSocketManager:
         self._shutdown = False
         self.last_message_time = {}  # 连接健康检查
         self.message_counts = {}     # 消息计数
+        self.current_stock_endpoint = None  # 当前使用的股票端点
+        self.active_connections_count = 0   # 活跃连接计数
+        self.connection_limit_reached = False  # 连接限制状态
         
     async def test_websocket_connection(self, api_key: str, secret_key: str) -> bool:
         """在启动正式数据流前测试WebSocket连接"""
@@ -151,31 +209,66 @@ class AlpacaWebSocketManager:
             logger.error(f"❌ WebSocket连接测试失败: {e}")
             return False
     
-    def handle_websocket_error(self, error_data: dict) -> str:
-        """处理WebSocket错误并返回建议的操作"""
+    async def handle_websocket_error(self, error_data: dict, endpoint_type: str = "unknown") -> dict:
+        """处理WebSocket错误并返回处理策略"""
         error_code = error_data.get("code")
         error_msg = error_data.get("msg", "Unknown error")
         
-        known_error = self.ERROR_CODES.get(error_code, "Unknown error code")
+        error_info = self.ERROR_CODES.get(error_code, {
+            "description": "Unknown error code",
+            "solution": "检查网络连接或稍后重试",
+            "retry": True
+        })
         
-        logger.error(f"🚨 WebSocket错误 [{error_code}]: {error_msg}")
-        logger.error(f"📋 解决方案: {known_error}")
+        logger.error(f"🚨 WebSocket错误 [{endpoint_type}] [{error_code}]: {error_msg}")
+        logger.error(f"📋 描述: {error_info['description']}")
+        logger.error(f"🔧 解决方案: {error_info['solution']}")
         
-        # 特定错误的处理逻辑
-        if error_code == 412:  # MessagePack格式错误
-            logger.error("⚠️ CRITICAL: 期权WebSocket必须使用MessagePack格式!")
-            return "switch_to_msgpack"
-        elif error_code == 406:  # 连接超限
-            logger.error("⚠️ 连接数量超限，需要关闭其他连接")
-            return "close_other_connections"
-        elif error_code == 401:  # 认证失败
-            logger.error("⚠️ API密钥无效，请检查配置")
-            return "check_api_keys"
-        elif error_code == 413:  # 符号数量超限
-            logger.error("⚠️ 订阅符号数量过多，减少订阅数量")
-            return "reduce_symbols"
+        # 构建处理策略
+        strategy = {
+            "error_code": error_code,
+            "error_msg": error_msg,
+            "should_retry": error_info.get("retry", False),
+            "wait_seconds": error_info.get("wait_seconds", 5),
+            "fallback_endpoint": error_info.get("fallback_endpoint", False),
+            "reduce_symbols": error_info.get("reduce_symbols", False),
+            "action": self._determine_error_action(error_code, endpoint_type)
+        }
+        
+        # 特定错误的额外处理
+        if error_code == 406:  # 连接超限
+            self.connection_limit_reached = True
+            self.active_connections_count = self.account_config.max_connections
+            strategy["action"] = "wait_for_connection_slot"
             
-        return "retry_with_backoff"
+        elif error_code == 402 and endpoint_type == "stock":  # 订阅不足，尝试降级端点
+            strategy["action"] = "try_fallback_endpoint"
+            strategy["fallback_endpoint"] = True
+            
+        elif error_code == 413:  # 符号过多
+            strategy["action"] = "reduce_symbol_count"
+            strategy["max_symbols"] = 10  # 减少到10个符号
+            
+        return strategy
+    
+    def _determine_error_action(self, error_code: int, endpoint_type: str) -> str:
+        """确定错误处理动作"""
+        if error_code == 401:
+            return "abort_invalid_credentials"
+        elif error_code == 402 and endpoint_type == "stock":
+            return "try_iex_fallback"
+        elif error_code == 406:
+            return "wait_for_connection_slot"
+        elif error_code == 409:
+            return "wait_and_retry"
+        elif error_code == 412:
+            return "switch_to_msgpack"
+        elif error_code == 413:
+            return "reduce_symbols"
+        elif error_code in [500, 502, 503]:
+            return "retry_with_exponential_backoff"
+        else:
+            return "log_and_continue"
     
     async def validate_connection_health(self, connection_type: str, ws_connection) -> tuple[bool, dict]:
         """验证连接健康状态"""
@@ -319,11 +412,32 @@ class AlpacaWebSocketManager:
             account_info = test_client.get_account()
             logger.info(f"✅ API连接验证成功 - 账户: {account_info.account_number}")
             
-            # 检测可用端点并连接
-            await self._detect_and_connect_available_endpoints()
+            # 检测可用端点并连接 - 智能回退逻辑
+            await self._detect_and_connect_stock_endpoints()
             
             self.connected = True
+            
+            # 详细记录当前配置
+            endpoint_name = self.current_stock_endpoint["name"] if self.current_stock_endpoint else "None"
+            endpoint_desc = self.current_stock_endpoint["description"] if self.current_stock_endpoint else "No endpoint selected"
+            
             logger.info("🚀 Alpaca WebSocket连接初始化成功 - 使用智能端点选择")
+            logger.info(f"📊 账户层级: {getattr(self.account_config, 'tier', 'unknown')}")
+            logger.info(f"🔗 当前股票端点: {endpoint_name}")
+            logger.info(f"📝 端点描述: {endpoint_desc}")
+            logger.info(f"🏷️ Paper Trading: {getattr(self.account_config, 'paper_trading', 'unknown')}")
+            logger.info(f"🔢 连接限制: {getattr(self.account_config, 'max_connections', 'unknown')}")
+            
+            # 根据端点类型提供不同的提示
+            if self.current_stock_endpoint:
+                if self.current_stock_endpoint["name"] == "SIP":
+                    logger.info("🏆 使用SIP端点 - 全市场实时数据可用")
+                elif self.current_stock_endpoint["name"] == "IEX":
+                    logger.info("📈 使用IEX端点 - IEX交易所数据，覆盖范围有限")
+                elif self.current_stock_endpoint["name"] == "TEST":
+                    logger.warning("🧪 使用测试端点 - 仅提供模拟数据，非真实市场数据")
+            else:
+                logger.warning("⚠️ 未选择股票数据端点")
             
         except Exception as e:
             logger.error(f"Alpaca WebSocket初始化失败: {e}")
@@ -372,15 +486,211 @@ class AlpacaWebSocketManager:
             logger.error(f"订阅真实数据失败: {e}")
             raise e
     
-    async def _connect_stock_websocket(self, symbols: List[str]):
-        """连接股票WebSocket端点"""
+    async def _detect_and_connect_stock_endpoints(self):
+        """智能检测并连接可用的股票数据端点"""
+        logger.info("🔍 开始智能股票端点检测...")
+        
+        # 根据账户层级确定尝试顺序
+        account_tier = getattr(self.account_config, 'tier', 'standard').lower()
+        
+        # 如果是高级账户，先尝试SIP端点
+        if account_tier in ['premium', 'algo_trader_plus']:
+            endpoints_to_try = self.STOCK_ENDPOINTS
+            logger.info(f"🏆 高级账户 ({account_tier})，优先尝试SIP端点")
+        else:
+            # 标准账户直接使用IEX端点
+            endpoints_to_try = [ep for ep in self.STOCK_ENDPOINTS if ep['name'] == 'IEX']
+            logger.info(f"📊 标准账户 ({account_tier})，使用IEX端点")
+        
+        last_error = None
+        
+        for endpoint in endpoints_to_try:
+            try:
+                logger.info(f"🔌 尝试连接 {endpoint['name']} 端点: {endpoint['url']}")
+                
+                # 测试端点连接
+                connection_result = await self._test_stock_endpoint(endpoint)
+                
+                if connection_result["success"]:
+                    self.current_stock_endpoint = endpoint
+                    logger.info(f"✅ 成功连接到 {endpoint['name']} 端点")
+                    logger.info(f"📝 端点描述: {endpoint['description']}")
+                    return True
+                else:
+                    logger.warning(f"❌ {endpoint['name']} 端点连接失败: {connection_result['error']}")
+                    last_error = connection_result["error"]
+                    
+                    # 如果是权限不足错误，立即尝试下一个端点
+                    if connection_result.get("error_code") == 402:
+                        logger.info(f"⬇️ 权限不足，尝试降级到下一个端点...")
+                        continue
+                        
+            except Exception as e:
+                logger.error(f"❌ {endpoint['name']} 端点测试异常: {e}")
+                last_error = str(e)
+                continue
+        
+        # 所有端点都失败
+        logger.error("🚨 所有股票数据端点连接失败")
+        if last_error:
+            logger.error(f"最后错误: {last_error}")
+        
+        # 作为最后的回退，尝试测试端点
+        logger.info("🆘 尝试连接测试端点作为最后回退...")
+        try:
+            await self._connect_test_endpoint_fallback()
+            return True
+        except Exception as e:
+            logger.error(f"测试端点回退失败: {e}")
+            return False
+    
+    async def _test_stock_endpoint(self, endpoint: dict) -> dict:
+        """测试单个股票端点的可用性"""
         try:
             ssl_context = ssl.create_default_context()
-            self.stock_ws = await websockets.connect(
-                self.STOCK_WS_URL,
+            ws = await websockets.connect(
+                endpoint["url"],
+                ssl=ssl_context,
+                ping_interval=20,
+                ping_timeout=10,
+                close_timeout=10
+            )
+            
+            logger.info(f"🔗 {endpoint['name']} WebSocket连接已建立")
+            
+            # 认证测试
+            auth_message = {
+                "action": "auth",
+                "key": self.account_config.api_key,
+                "secret": self.account_config.secret_key
+            }
+            await ws.send(json.dumps(auth_message))
+            
+            # 等待认证响应（10秒超时）
+            try:
+                response = await asyncio.wait_for(ws.recv(), timeout=10.0)
+                auth_data = json.loads(response)
+                
+                # 处理响应格式
+                if isinstance(auth_data, list):
+                    auth_response = auth_data[0] if auth_data else {}
+                else:
+                    auth_response = auth_data
+                
+                # 检查认证结果
+                if auth_response.get("T") == "success":
+                    logger.info(f"✅ {endpoint['name']} 认证成功")
+                    await ws.close()
+                    return {"success": True, "endpoint": endpoint}
+                    
+                elif auth_response.get("T") == "error":
+                    error_strategy = await self.handle_websocket_error(auth_response, "stock")
+                    await ws.close()
+                    return {
+                        "success": False, 
+                        "error": f"{endpoint['name']} 认证错误: {auth_response.get('msg')}",
+                        "error_code": auth_response.get("code"),
+                        "strategy": error_strategy
+                    }
+                else:
+                    await ws.close()
+                    return {
+                        "success": False,
+                        "error": f"{endpoint['name']} 认证响应格式未知: {auth_response}"
+                    }
+                    
+            except asyncio.TimeoutError:
+                logger.error(f"⏰ {endpoint['name']} 认证超时")
+                await ws.close()
+                return {
+                    "success": False,
+                    "error": f"{endpoint['name']} 认证超时 (>10秒)"
+                }
+                
+        except Exception as e:
+            logger.error(f"🔌 {endpoint['name']} 连接测试失败: {e}")
+            return {
+                "success": False,
+                "error": f"{endpoint['name']} 连接异常: {str(e)}"
+            }
+
+    async def _connect_test_endpoint_fallback(self):
+        """连接测试端点作为最后的回退方案"""
+        logger.info("🆘 连接测试端点作为回退方案...")
+        
+        try:
+            ssl_context = ssl.create_default_context()
+            test_ws = await websockets.connect(
+                self.TEST_WS_URL,
                 ssl=ssl_context,
                 ping_interval=20,
                 ping_timeout=10
+            )
+            
+            # 认证
+            auth_message = {
+                "action": "auth",
+                "key": self.account_config.api_key,
+                "secret": self.account_config.secret_key
+            }
+            await test_ws.send(json.dumps(auth_message))
+            
+            # 等待认证响应
+            response = await asyncio.wait_for(test_ws.recv(), timeout=10.0)
+            auth_data = json.loads(response)
+            
+            auth_result = auth_data[0] if isinstance(auth_data, list) else auth_data
+            if auth_result.get("T") != "success":
+                raise Exception(f"测试端点认证失败: {auth_result}")
+            
+            # 订阅测试符号
+            subscribe_msg = {
+                "action": "subscribe",
+                "trades": [self.TEST_SYMBOL],
+                "quotes": [self.TEST_SYMBOL]
+            }
+            await test_ws.send(json.dumps(subscribe_msg))
+            
+            # 使用测试端点作为股票连接
+            self.stock_ws = test_ws
+            self.stock_connected = True
+            self.current_stock_endpoint = {
+                "name": "TEST",
+                "url": self.TEST_WS_URL,
+                "description": "测试端点回退 - 提供模拟数据"
+            }
+            
+            logger.info("✅ 测试端点回退连接成功")
+            
+            # 启动监听任务
+            asyncio.create_task(self._listen_stock_websocket())
+            
+        except Exception as e:
+            logger.error(f"测试端点回退失败: {e}")
+            raise e
+
+    async def _connect_stock_websocket(self, symbols: List[str]):
+        """连接股票WebSocket端点 - 使用智能检测的端点"""
+        try:
+            # 确保已检测到可用端点
+            if not self.current_stock_endpoint:
+                logger.warning("⚠️ 未检测到可用股票端点，重新检测...")
+                success = await self._detect_and_connect_stock_endpoints()
+                if not success:
+                    raise Exception("无法找到可用的股票数据端点")
+            
+            endpoint_url = self.current_stock_endpoint["url"]
+            endpoint_name = self.current_stock_endpoint["name"]
+            
+            logger.info(f"🔌 连接股票端点: {endpoint_name} ({endpoint_url})")
+            
+            ssl_context = ssl.create_default_context()
+            self.stock_ws = await websockets.connect(
+                endpoint_url,
+                ssl=ssl_context,
+                ping_interval=20,
+                ping_timeout=10,
+                close_timeout=10
             )
             
             # 认证
@@ -614,14 +924,12 @@ class AlpacaWebSocketManager:
             elif msg_type in ["success", "subscription"]:
                 logger.info(f"✅ 股票WebSocket状态消息: {item}")
             elif msg_type == "error":
-                # 处理错误消息
-                action = self.handle_websocket_error(item)
-                logger.error(f"股票WebSocket错误处理建议: {action}")
+                # 处理错误消息 - 使用改进的错误处理
+                error_strategy = await self.handle_websocket_error(item, "stock")
+                logger.error(f"股票WebSocket错误处理策略: {error_strategy['action']}")
                 
-                if action == "check_api_keys":
-                    logger.error("⚠️ 需要检查API密钥配置")
-                elif action == "reduce_symbols":
-                    logger.error("⚠️ 订阅符号过多，需要减少订阅数量")
+                # 根据策略执行相应动作
+                await self._execute_error_strategy(error_strategy, "stock")
                     
             else:
                 logger.debug(f"未处理的股票消息类型: {msg_type}, 数据: {item}")
@@ -645,14 +953,12 @@ class AlpacaWebSocketManager:
             elif msg_type in ["success", "subscription"]:
                 logger.info(f"✅ 期权WebSocket状态消息: {item}")
             elif msg_type == "error":
-                # 处理错误消息
-                action = self.handle_websocket_error(item)
-                logger.error(f"期权WebSocket错误处理建议: {action}")
+                # 处理错误消息 - 使用改进的错误处理
+                error_strategy = await self.handle_websocket_error(item, "option")
+                logger.error(f"期权WebSocket错误处理策略: {error_strategy['action']}")
                 
-                if action == "switch_to_msgpack":
-                    logger.error("⚠️ 期权WebSocket已经使用MessagePack格式，这不应该发生!")
-                elif action == "check_api_keys":
-                    logger.error("⚠️ 需要检查API密钥配置")
+                # 根据策略执行相应动作
+                await self._execute_error_strategy(error_strategy, "option")
                     
             else:
                 logger.debug(f"未处理的期权消息类型: {msg_type}, 数据: {item}")
@@ -660,6 +966,117 @@ class AlpacaWebSocketManager:
         except Exception as e:
             logger.error(f"处理期权数据项错误: {e}, 数据: {item}")
     
+    async def _execute_error_strategy(self, strategy: dict, endpoint_type: str):
+        """根据错误策略执行相应的动作"""
+        action = strategy["action"]
+        
+        if action == "try_iex_fallback" and endpoint_type == "stock":
+            logger.info("🔄 尝试降级到IEX端点...")
+            # 查找IEX端点
+            iex_endpoint = next((ep for ep in self.STOCK_ENDPOINTS if ep['name'] == 'IEX'), None)
+            if iex_endpoint and iex_endpoint != self.current_stock_endpoint:
+                self.current_stock_endpoint = iex_endpoint
+                logger.info("⬇️ 已切换到IEX端点，重新连接...")
+                # 触发重连任务
+                asyncio.create_task(self._reconnect_stock_websocket())
+            else:
+                logger.warning("⚠️ 没有可用的IEX端点或已在使用IEX端点")
+                
+        elif action == "wait_for_connection_slot":
+            wait_time = strategy.get("wait_seconds", 30)
+            logger.info(f"⏳ 连接数超限，等待 {wait_time} 秒后重试...")
+            asyncio.create_task(self._delayed_reconnect(endpoint_type, wait_time))
+            
+        elif action == "reduce_symbols":
+            max_symbols = strategy.get("max_symbols", 10)
+            logger.info(f"📉 减少订阅符号数量到 {max_symbols} 个")
+            # 这需要在上层处理，这里只记录
+            await self._reduce_subscribed_symbols(max_symbols, endpoint_type)
+            
+        elif action == "wait_and_retry":
+            wait_time = strategy.get("wait_seconds", 5)
+            logger.info(f"⏳ 等待 {wait_time} 秒后重试连接...")
+            asyncio.create_task(self._delayed_reconnect(endpoint_type, wait_time))
+            
+        elif action == "retry_with_exponential_backoff":
+            logger.info("🔄 使用指数退避策略重试...")
+            asyncio.create_task(self._exponential_backoff_reconnect(endpoint_type))
+            
+        elif action == "abort_invalid_credentials":
+            logger.error("🚨 API凭证无效，停止尝试连接")
+            self.connected = False
+            if endpoint_type == "stock":
+                self.stock_connected = False
+            else:
+                self.option_connected = False
+                
+        else:
+            logger.info(f"📝 错误策略: {action} (仅记录)")
+    
+    async def _delayed_reconnect(self, endpoint_type: str, delay_seconds: int):
+        """延迟重连"""
+        await asyncio.sleep(delay_seconds)
+        if endpoint_type == "stock":
+            await self._reconnect_stock_websocket()
+        else:
+            await self._reconnect_option_websocket()
+    
+    async def _exponential_backoff_reconnect(self, endpoint_type: str, max_retries: int = 5):
+        """指数退避重连"""
+        for attempt in range(max_retries):
+            wait_time = min(2 ** attempt, 300)  # 最大等待5分钟
+            logger.info(f"⏳ 指数退避重连 (尝试 {attempt + 1}/{max_retries})，等待 {wait_time} 秒...")
+            await asyncio.sleep(wait_time)
+            
+            try:
+                if endpoint_type == "stock":
+                    await self._reconnect_stock_websocket()
+                else:
+                    await self._reconnect_option_websocket()
+                    
+                # 检查是否重连成功
+                if (endpoint_type == "stock" and self.stock_connected) or \
+                   (endpoint_type == "option" and self.option_connected):
+                    logger.info(f"✅ {endpoint_type} 重连成功")
+                    return
+            except Exception as e:
+                logger.error(f"❌ {endpoint_type} 重连尝试 {attempt + 1} 失败: {e}")
+        
+        logger.error(f"🚨 {endpoint_type} 指数退避重连达到最大尝试次数")
+    
+    async def _reduce_subscribed_symbols(self, max_symbols: int, endpoint_type: str):
+        """减少订阅的符号数量"""
+        current_symbols = list(subscribed_symbols)
+        
+        if endpoint_type == "stock":
+            stock_symbols = [s for s in current_symbols if not self._is_option_symbol(s)]
+            if len(stock_symbols) > max_symbols:
+                # 保留最重要的符号（默认股票）
+                important_symbols = [s for s in DEFAULT_STOCKS if s in stock_symbols]
+                remaining_symbols = [s for s in stock_symbols if s not in important_symbols]
+                
+                # 计算需要保留的数量
+                keep_important = min(len(important_symbols), max_symbols)
+                keep_remaining = max(0, max_symbols - keep_important)
+                
+                new_stock_symbols = important_symbols[:keep_important] + remaining_symbols[:keep_remaining]
+                
+                logger.info(f"📉 股票符号从 {len(stock_symbols)} 个减少到 {len(new_stock_symbols)} 个")
+                logger.info(f"保留的股票符号: {new_stock_symbols}")
+                
+                # 重新订阅减少后的符号
+                if self.stock_connected:
+                    await self._subscribe_stock_symbols(new_stock_symbols)
+        else:
+            # 类似处理期权符号
+            option_symbols = [s for s in current_symbols if self._is_option_symbol(s)]
+            if len(option_symbols) > max_symbols:
+                new_option_symbols = option_symbols[:max_symbols]
+                logger.info(f"📉 期权符号从 {len(option_symbols)} 个减少到 {len(new_option_symbols)} 个")
+                
+                if self.option_connected:
+                    await self._subscribe_option_symbols(new_option_symbols)
+
     async def _handle_quote_data(self, data_type: str, data: dict):
         """处理报价数据"""
         message = {
@@ -829,9 +1246,17 @@ async def websocket_market_data(websocket: WebSocket):
                 "stock_data": True,
                 "option_data": True,
                 "real_time": True,
-                "stock_endpoint": ws_manager.STOCK_WS_URL,
+                "current_stock_endpoint": ws_manager.current_stock_endpoint,
                 "option_endpoint": ws_manager.OPTION_WS_URL,
-                "native_websocket": True
+                "native_websocket": True,
+                "intelligent_endpoint_selection": True,
+                "production_features": {
+                    "sip_data_available": ws_manager.current_stock_endpoint and ws_manager.current_stock_endpoint.get("name") == "SIP",
+                    "iex_data_fallback": ws_manager.current_stock_endpoint and ws_manager.current_stock_endpoint.get("name") == "IEX",
+                    "test_data_fallback": ws_manager.current_stock_endpoint and ws_manager.current_stock_endpoint.get("name") == "TEST",
+                    "error_recovery": True,
+                    "connection_limit_handling": True
+                }
             }
         }
         await websocket.send_text(json.dumps(welcome_message))
@@ -922,10 +1347,17 @@ async def websocket_status():
         "websocket_endpoint": "/api/v1/ws/market-data",
         "connection_info": {
             "data_source": "Alpaca Official WebSocket API",
-            "stock_endpoint": ws_manager.STOCK_WS_URL,
+            "current_stock_endpoint": ws_manager.current_stock_endpoint,
+            "available_stock_endpoints": ws_manager.STOCK_ENDPOINTS,
             "option_endpoint": ws_manager.OPTION_WS_URL,
             "real_time": True,
             "native_websocket": True,
-            "supports_json_msgpack": True
+            "supports_json_msgpack": True,
+            "intelligent_fallback": True,
+            "connection_limits": {
+                "active_connections": ws_manager.active_connections_count,
+                "limit_reached": ws_manager.connection_limit_reached,
+                "max_allowed": getattr(ws_manager.account_config, 'max_connections', 'unknown') if ws_manager.account_config else 'unknown'
+            }
         }
     }
