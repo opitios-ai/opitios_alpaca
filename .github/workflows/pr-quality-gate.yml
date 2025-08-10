@@ -1,0 +1,92 @@
+name: PR Quality Gate
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+    types: [opened, synchronize, reopened]
+
+jobs:
+  quality-gate:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest-cov pytest-html pytest-json-report plotly
+        pip install flake8 black isort mypy
+    
+    - name: Create test secrets file
+      run: |
+        cat > secrets.yml << EOF
+        alpaca:
+          api_key: "test_key"
+          secret_key: "test_secret"
+          paper_trading: true
+        jwt:
+          secret: "test_jwt_secret"
+        redis:
+          url: "redis://localhost:6379"
+        EOF
+    
+    - name: Run linting checks
+      run: |
+        echo "::group::Linting"
+        flake8 app/ tests/ --count --select=E9,F63,F7,F82 --show-source --statistics
+        black --check app/ tests/
+        isort --check-only app/ tests/
+        echo "::endgroup::"
+    
+    - name: Run tests with coverage
+      run: |
+        python -m pytest tests/unit/ tests/security/ -v \
+          --cov=app \
+          --cov-report=xml \
+          --cov-report=html \
+          --cov-report=term-missing \
+          --html=test-reports/report.html \
+          --json-report --json-report-file=test-reports/report.json
+    
+    - name: Check coverage threshold
+      run: |
+        python -c "
+        import xml.etree.ElementTree as ET
+        tree = ET.parse('coverage.xml')
+        root = tree.getroot()
+        coverage = float(root.attrib['line-rate']) * 100
+        print(f'Coverage: {coverage:.1f}%')
+        if coverage < 70:
+            print('❌ Coverage below 70% threshold')
+            exit(1)
+        else:
+            print('✅ Coverage meets threshold')
+        "
+    
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: pr-test-results
+        path: |
+          test-reports/
+          htmlcov/
+          coverage.xml
+    
+    - name: Comment PR with coverage
+      if: github.event_name == 'pull_request'
+      uses: py-cov-action/python-coverage-comment-action@v3
+      with:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        MINIMUM_GREEN: 80
+        MINIMUM_ORANGE: 70
