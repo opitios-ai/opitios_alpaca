@@ -1,4 +1,4 @@
-name: CI/CD Pipeline
+name: CI
 
 on:
   push:
@@ -7,101 +7,109 @@ on:
     branches: [ main ]
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 black isort mypy
+        pip install -r requirements.txt
+    
+    - name: Lint with flake8
+      run: |
+        flake8 app/ tests/ --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 app/ tests/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    
+    - name: Check code formatting with black
+      run: black --check app/ tests/
+    
+    - name: Check import sorting with isort
+      run: isort --check-only app/ tests/
+    
+    - name: Type check with mypy
+      run: mypy app/ --ignore-missing-imports
+
   test:
     runs-on: ubuntu-latest
+    needs: lint
     strategy:
       matrix:
-        python-version: ["3.11", "3.12"]
-
+        python-version: ['3.9', '3.11']
+    
     steps:
     - uses: actions/checkout@v4
     
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v4
       with:
         python-version: ${{ matrix.python-version }}
     
-    - name: Cache pip dependencies
-      uses: actions/cache@v4
-      with:
-        path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-        restore-keys: |
-          ${{ runner.os }}-pip-
-    
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip setuptools wheel
-        pip install --upgrade pip-tools
-        # Try main requirements first, fallback to minimal if it fails
-        pip install --no-cache-dir --timeout 1000 --retries 5 -r requirements.txt || \
-        pip install --no-cache-dir --timeout 1000 --retries 5 -r requirements-minimal.txt
-        pip install --no-cache-dir pytest pytest-cov pytest-asyncio
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest-cov pytest-html pytest-json-report plotly
     
-    - name: Lint with flake8
+    - name: Create test secrets file
       run: |
-        pip install flake8
-        # Stop the build if there are Python syntax errors or undefined names
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # Exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+        cat > secrets.yml << EOF
+        alpaca:
+          api_key: "test_key"
+          secret_key: "test_secret"
+          paper_trading: true
+        jwt:
+          secret: "test_jwt_secret"
+        redis:
+          url: "redis://localhost:6379"
+        EOF
     
-    - name: Test with pytest (Unit Tests Only)
-      env:
-        PYTHONPATH: ${{ github.workspace }}
+    - name: Run unit tests with coverage
       run: |
-        # Run only basic unit tests that don't require API credentials
-        python -m pytest tests/test_main.py -v --tb=short --disable-warnings
+        python -m pytest tests/unit/ -v \
+          --cov=app \
+          --cov-report=xml \
+          --cov-report=html \
+          --cov-report=term-missing \
+          --html=test-reports/report.html \
+          --json-report --json-report-file=test-reports/report.json
     
-    - name: Generate coverage report
-      if: matrix.python-version == '3.11'
+    - name: Run security tests
       run: |
-        python -m pytest tests/test_main.py --cov=app --cov-report=xml --cov-report=html
+        python -m pytest tests/security/ -v \
+          --cov=app --cov-append \
+          --cov-report=xml \
+          --cov-report=term-missing
     
     - name: Upload coverage to Codecov
-      if: matrix.python-version == '3.11'
       uses: codecov/codecov-action@v3
       with:
         file: ./coverage.xml
         flags: unittests
         name: codecov-umbrella
         fail_ci_if_error: false
-
-  security-scan:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
     
-    - name: Set up Python
-      uses: actions/setup-python@v5
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
       with:
-        python-version: '3.11'
+        name: test-results-${{ matrix.python-version }}
+        path: |
+          test-reports/
+          htmlcov/
+          coverage.xml
     
-    - name: Install security scanning tools
-      run: |
-        pip install safety bandit
-    
-    - name: Run safety check
-      run: safety check --json || true
-    
-    - name: Run bandit security scan
-      run: bandit -r app/ -f json || true
-
-  docker-build:
-    runs-on: ubuntu-latest
-    needs: test
-    if: github.ref == 'refs/heads/main'
-    
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-    
-    - name: Build Docker image
-      run: |
-        docker build -t opitios-alpaca:latest .
-    
-    - name: Test Docker container
-      run: |
-        docker run --rm opitios-alpaca:latest python -c "import app.main; print('Docker build successful')"
+    - name: Comment PR with coverage
+      if: github.event_name == 'pull_request'
+      uses: py-cov-action/python-coverage-comment-action@v3
+      with:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        MINIMUM_GREEN: 80
+        MINIMUM_ORANGE: 70

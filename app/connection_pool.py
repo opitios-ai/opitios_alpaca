@@ -17,8 +17,8 @@ from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.live import StockDataStream
 from loguru import logger
 
-from app.logging_config import UserLogger, PerformanceMonitor
-from app.user_manager import User
+# from app.logging_config import UserLogger, PerformanceMonitor
+# from app.user_manager import User
 
 
 @dataclass
@@ -207,12 +207,6 @@ class ConnectionPool:
                         healthy_connections.append(conn)
                     else:
                         logger.warning(f"移除不健康连接 (用户: {user_id})")
-                        UserLogger.log_user_operation(
-                            user_id=user_id,
-                            operation="connection_health_check_failed",
-                            details={"error_count": conn.stats.error_count},
-                            success=False
-                        )
                 
                 self.user_pools[user_id] = healthy_connections
     
@@ -240,7 +234,7 @@ class ConnectionPool:
                     if user_id in self.usage_queues:
                         del self.usage_queues[user_id]
     
-    async def get_connection(self, user: User) -> AlpacaConnection:
+    async def get_connection(self, user) -> AlpacaConnection:
         """获取用户连接"""
         user_id = user.id
         
@@ -308,20 +302,20 @@ class ConnectionPool:
         """释放连接"""
         connection.release()
         
-        # 记录性能指标
-        UserLogger.log_performance_metric(
-            metric_name="connection_usage_count",
-            value=connection.stats.usage_count,
-            unit="count",
-            user_id=connection.user_id,
-            additional_data={
-                "avg_response_time": connection.stats.avg_response_time,
-                "error_count": connection.stats.error_count
-            }
-        )
+        # 记录性能指标 (commented out due to missing UserLogger)
+        # UserLogger.log_performance_metric(
+        #     metric_name="connection_usage_count",
+        #     value=connection.stats.usage_count,
+        #     unit="count",
+        #     user_id=connection.user_id,
+        #     additional_data={
+        #         "avg_response_time": connection.stats.avg_response_time,
+        #         "error_count": connection.stats.error_count
+        #     }
+        # )
     
     @asynccontextmanager
-    async def get_user_connection(self, user: User):
+    async def get_user_connection(self, user):
         """连接上下文管理器"""
         connection = None
         try:

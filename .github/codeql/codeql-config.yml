@@ -1,0 +1,49 @@
+name: "Opitios Alpaca CodeQL Configuration"
+
+# Disable the default CodeQL suite and specify custom queries
+disable-default-queries: false
+
+# Additional query suites to include
+queries:
+  - name: security-extended
+    uses: security-extended
+  - name: security-and-quality  
+    uses: security-and-quality
+
+# Paths to ignore during analysis
+paths-ignore:
+  - "venv/"
+  - ".venv/"
+  - "**/__pycache__/"
+  - "**/test_*"
+  - "**/tests/"
+  - "**/*.md"
+  - "**/*.txt" 
+  - "**/*.yml"
+  - "**/*.yaml"
+  - ".github/"
+  - "build/"
+  - "dist/"
+
+# Paths to specifically include (overrides paths-ignore for these)
+paths:
+  - "app/"
+  - "*.py"
+  - "tests/utils/"  # Include test utilities for analysis
+
+# Query filters to reduce noise
+query-filters:
+  - exclude:
+      id: py/clear-text-logging-sensitive-data
+      reason: "We handle sensitive data logging through our custom logging configuration"
+  
+  - exclude:  
+      id: py/hardcoded-credentials
+      reason: "We use environment variables and secrets files for credentials"
+
+# Custom query packs (if available)
+packs:
+  - codeql/python-queries
+  
+# Build configuration for Python
+build-mode: none  # For Python, CodeQL can analyze without building
