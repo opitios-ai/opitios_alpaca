@@ -158,12 +158,12 @@ class TestConnectionPoolPerformance:
     """Test connection pool performance under load."""
     
     @pytest.mark.asyncio
-    async def test_connection_reuse_efficiency(self, multi_account_clients, api_test_helper):
+    async def test_connection_reuse_efficiency(self, all_test_accounts, api_test_helper):
         """Test efficiency of connection reuse."""
-        if len(multi_account_clients) < 1:
+        if len(all_test_accounts) < 1:
             pytest.skip("Need at least 1 account for connection reuse test")
         
-        client = multi_account_clients[0]
+        client = all_test_accounts[0]
         symbol = "AAPL"
         num_requests = 10
         
@@ -197,9 +197,9 @@ class TestConnectionPoolPerformance:
                 assert avg_second_half <= avg_first_half * 1.5, "Connection reuse not providing benefit"
     
     @pytest.mark.asyncio
-    async def test_multi_account_load_distribution(self, multi_account_clients, api_test_helper):
+    async def test_multi_account_load_distribution(self, all_test_accounts, api_test_helper):
         """Test load distribution across multiple accounts."""
-        if len(multi_account_clients) < 2:
+        if len(all_test_accounts) < 2:
             pytest.skip("Need at least 2 accounts for load distribution test")
         
         symbols = ["AAPL", "MSFT", "GOOGL", "TSLA"]
@@ -208,7 +208,7 @@ class TestConnectionPoolPerformance:
         results_by_account = {}
         
         for i, symbol in enumerate(symbols):
-            client = multi_account_clients[i % len(multi_account_clients)]
+            client = all_test_accounts[i % len(all_test_accounts)]
             account_id = client.account_id
             
             if account_id not in results_by_account:
@@ -220,7 +220,7 @@ class TestConnectionPoolPerformance:
             results_by_account[account_id].append(result)
         
         # Analyze distribution
-        print(f"Load distribution across {len(multi_account_clients)} accounts:")
+        print(f"Load distribution across {len(all_test_accounts)} accounts:")
         for account_id, results in results_by_account.items():
             successful = [r for r in results if r.success]
             if successful:
