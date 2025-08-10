@@ -8,9 +8,27 @@ from enum import Enum
 import json
 import os
 from pathlib import Path
-import plotly.graph_objs as go
-from plotly.offline import plot
-import pandas as pd
+try:
+    import plotly.graph_objs as go
+    from plotly.offline import plot
+    import pandas as pd
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    PLOTLY_AVAILABLE = False
+    # Create dummy classes for when plotly is not available
+    class go:
+        class Scatter:
+            def __init__(self, *args, **kwargs):
+                pass
+        class Figure:
+            def __init__(self, *args, **kwargs):
+                pass
+    def plot(*args, **kwargs):
+        pass
+    class pd:
+        class DataFrame:
+            def __init__(self, *args, **kwargs):
+                pass
 
 from .test_data_manager import TestDataManager, CleanupStatus
 from .cleanup_verification import CleanupVerificationSystem, VerificationReport
@@ -570,8 +588,18 @@ class CleanupReportingSystem:
             
             data.append(row)
         
-        df = pd.DataFrame(data)
-        df.to_csv(file_path, index=False)
+        if PLOTLY_AVAILABLE:
+            df = pd.DataFrame(data)
+            df.to_csv(file_path, index=False)
+        else:
+            # Fallback: write CSV manually
+            import csv
+            with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
+                if data:
+                    fieldnames = data[0].keys()
+                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                    writer.writeheader()
+                    writer.writerows(data)
     
     def generate_trend_analysis(self, days: int = 30) -> Dict[str, Any]:
         """
@@ -637,10 +665,10 @@ class CleanupReportingSystem:
         
         file_path = self.reports_dir / file_name
         
-        # Create charts using plotly
+        # Create charts using plotly (if available)
         figures = []
         
-        if self.session_history:
+        if self.session_history and PLOTLY_AVAILABLE:
             # Success rate over time
             dates = [s.start_time for s in self.session_history]
             success_rates = [s.summary_metrics.success_rate if s.summary_metrics else 0 for s in self.session_history]
@@ -657,6 +685,8 @@ class CleanupReportingSystem:
             fig2.add_trace(go.Scatter(x=dates, y=cleanup_times, mode='lines+markers', name='Cleanup Time'))
             fig2.update_layout(title='Average Cleanup Time Trend', xaxis_title='Date', yaxis_title='Time (seconds)')
             figures.append(fig2)
+        elif not PLOTLY_AVAILABLE:
+            logger.warning("Plotly not available, dashboard will be generated without charts")
         
         # Generate HTML dashboard
         dashboard_html = """
