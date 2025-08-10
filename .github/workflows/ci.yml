@@ -30,8 +30,10 @@ jobs:
     - name: Install dependencies (fast)
       run: |
         python -m pip install --upgrade pip
-        pip install --no-deps -r requirements.txt  # 跳过依赖解析
-        pip install pytest-cov pytest-html pytest-json-report plotly flake8 --no-deps
+        # 安装核心依赖（带依赖解析）
+        pip install pytest-cov pytest-html pytest-json-report plotly flake8
+        # 安装项目依赖（跳过依赖解析以加速）
+        pip install --no-deps -r requirements.txt
     
     - name: Create test secrets file
       run: |
