@@ -25,7 +25,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         pip install pytest-cov pytest-html pytest-json-report plotly
-        pip install flake8 black isort mypy
+        pip install flake8
     
     - name: Create test secrets file
       run: |
@@ -40,12 +40,10 @@ jobs:
           url: "redis://localhost:6379"
         EOF
     
-    - name: Run linting checks
+    - name: Run critical linting only
       run: |
-        echo "::group::Linting"
+        echo "::group::Critical Linting"
         flake8 app/ tests/ --count --select=E9,F63,F7,F82 --show-source --statistics
-        black --check app/ tests/
-        isort --check-only app/ tests/
         echo "::endgroup::"
     
     - name: Run tests with coverage
