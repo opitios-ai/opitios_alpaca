@@ -71,7 +71,7 @@ jobs:
       timeout-minutes: 2
       run: |
         echo "Running core security tests with fast settings..."
-        python -m pytest tests/security/test_rate_limiting.py -v \
+        python -m pytest tests/unit/test_middleware.py::TestRateLimiter -v \
           --tb=short \
           --maxfail=2 \
           --disable-warnings \
