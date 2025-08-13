@@ -281,7 +281,7 @@ python main.py
 - **文档**：[完整指南](docs/README.md)
 - **问题反馈**：[GitHub Issues](../../issues)
 - **讨论**：[GitHub Discussions](../../discussions)
-- **邮箱**：support@opitios.com
+- **邮箱**：info@opitios.com
 
 ## 📈 路线图
 
