@@ -22,7 +22,7 @@ info:
   version: 1.0.0
   contact:
     name: Opitios Support
-    email: support@opitios.com
+    email: info@opitios.com
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
