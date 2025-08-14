@@ -89,6 +89,9 @@ class AlpacaConnectionManager:
             
             logger.info(f"初始化Trading Client成功 (用户: {self.user_id})")
             
+            # 验证账户资产信息以确保API正常工作
+            self._verify_account_assets_sync()
+            
         except Exception as e:
             logger.error(f"初始化核心连接失败 (用户: {self.user_id}): {e}")
             raise
@@ -267,6 +270,104 @@ class AlpacaConnectionManager:
         self._in_use.clear()
         
         logger.info(f"用户{self.user_id}的连接清理完成")
+
+    async def _verify_account_assets(self):
+        """验证账户资产信息以确保API正常工作"""
+        try:
+            if ConnectionType.TRADING_CLIENT not in self.connections:
+                logger.error(f"Trading Client未初始化，无法验证账户资产 (用户: {self.user_id})")
+                return
+
+            # 获取Trading Client连接
+            trading_client = self.connections[ConnectionType.TRADING_CLIENT]
+            
+            # 获取账户信息
+            account_info = trading_client.get_account()
+            
+            if account_info:
+                # 提取关键资产信息
+                account_id = account_info.id if hasattr(account_info, 'id') else 'N/A'
+                equity = float(account_info.equity) if hasattr(account_info, 'equity') else 0.0
+                buying_power = float(account_info.buying_power) if hasattr(account_info, 'buying_power') else 0.0
+                cash = float(account_info.cash) if hasattr(account_info, 'cash') else 0.0
+                status = account_info.status if hasattr(account_info, 'status') else 'UNKNOWN'
+                account_type = 'Paper Trading' if hasattr(account_info, 'pattern_day_trader') else 'Live'
+                
+                # 记录账户验证成功信息
+                logger.info(f"账户验证成功 (用户: {self.user_id})")
+                logger.info(f"  - 账户ID: {account_id}")
+                logger.info(f"  - 账户状态: {status}")
+                logger.info(f"  - 账户类型: {account_type}")
+                logger.info(f"  - 总资产: ${equity:,.2f}")
+                logger.info(f"  - 购买力: ${buying_power:,.2f}")
+                logger.info(f"  - 现金: ${cash:,.2f}")
+                
+                # 检查账户状态
+                if status.upper() != 'ACTIVE':
+                    logger.warning(f"账户状态异常 (用户: {self.user_id}): {status}")
+                
+                # 检查资产是否合理（基本验证）
+                if equity < 0:
+                    logger.warning(f"账户资产为负值 (用户: {self.user_id}): ${equity:,.2f}")
+                    
+                logger.info(f"API连接验证完成，账户运行正常 (用户: {self.user_id})")
+                
+            else:
+                logger.error(f"无法获取账户信息，API可能异常 (用户: {self.user_id})")
+                
+        except Exception as e:
+            logger.error(f"账户资产验证失败 (用户: {self.user_id}): {e}")
+            logger.warning(f"API连接可能有问题，请检查API密钥和网络连接 (用户: {self.user_id})")
+            # 不抛出异常，允许程序继续运行
+
+    def _verify_account_assets_sync(self):
+        """同步版本的账户资产验证（用于初始化时调用）"""
+        try:
+            if ConnectionType.TRADING_CLIENT not in self.connections:
+                logger.error(f"Trading Client未初始化，无法验证账户资产 (用户: {self.user_id})")
+                return
+
+            # 获取Trading Client连接
+            trading_client = self.connections[ConnectionType.TRADING_CLIENT]
+            
+            # 获取账户信息
+            account_info = trading_client.get_account()
+            
+            if account_info:
+                # 提取关键资产信息
+                account_id = account_info.id if hasattr(account_info, 'id') else 'N/A'
+                equity = float(account_info.equity) if hasattr(account_info, 'equity') else 0.0
+                buying_power = float(account_info.buying_power) if hasattr(account_info, 'buying_power') else 0.0
+                cash = float(account_info.cash) if hasattr(account_info, 'cash') else 0.0
+                status = account_info.status if hasattr(account_info, 'status') else 'UNKNOWN'
+                account_type = 'Paper Trading' if getattr(account_info, 'pattern_day_trader', None) is not None else 'Live'
+                
+                # 记录账户验证成功信息
+                logger.info(f"🔍 账户验证成功 (用户: {self.user_id})")
+                logger.info(f"  📋 账户ID: {account_id}")
+                logger.info(f"  ✅ 账户状态: {status}")
+                logger.info(f"  🎯 账户类型: {account_type}")
+                logger.info(f"  💰 总资产: ${equity:,.2f}")
+                logger.info(f"  💳 购买力: ${buying_power:,.2f}")
+                logger.info(f"  💵 现金: ${cash:,.2f}")
+                
+                # 检查账户状态
+                if status.upper() != 'ACTIVE':
+                    logger.warning(f"⚠️ 账户状态异常 (用户: {self.user_id}): {status}")
+                
+                # 检查资产是否合理（基本验证）
+                if equity < 0:
+                    logger.warning(f"⚠️ 账户资产为负值 (用户: {self.user_id}): ${equity:,.2f}")
+                    
+                logger.info(f"🎉 API连接验证完成，账户运行正常 (用户: {self.user_id})")
+                
+            else:
+                logger.error(f"❌ 无法获取账户信息，API可能异常 (用户: {self.user_id})")
+                
+        except Exception as e:
+            logger.error(f"❌ 账户资产验证失败 (用户: {self.user_id}): {e}")
+            logger.warning(f"⚠️ API连接可能有问题，请检查API密钥和网络连接 (用户: {self.user_id})")
+            # 不抛出异常，允许程序继续运行
 
 
 class ConnectionPool:
