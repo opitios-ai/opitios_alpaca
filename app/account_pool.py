@@ -1,6 +1,7 @@
 """
-预配置账户连接池管理器
-支持1000个预配置账户的连接池，支持账户路由和负载均衡
+优化的预配置账户连接池管理器
+基于Alpaca最佳实践，每账户只创建必要的连接
+支持1000个预配置账户的高效连接管理和负载均衡
 """
 
 import asyncio
@@ -19,12 +20,12 @@ from alpaca.data.historical.option import OptionHistoricalDataClient
 from loguru import logger
 
 from config import settings
-from app.alpaca_client import AlpacaClient
+from app.connection_pool import AlpacaConnectionManager, ConnectionType
 
 
 @dataclass
 class AccountConfig:
-    """账户配置"""
+    """优化的账户配置 - 符合Alpaca最佳实践"""
     account_id: str
     api_key: str
     secret_key: str
@@ -32,40 +33,23 @@ class AccountConfig:
     account_name: Optional[str] = None
     region: str = "us"
     tier: str = "standard"  # standard, premium, vip
-    max_connections: int = 3
     enabled: bool = True
+    # 移除 max_connections，改为使用Alpaca最佳实践
 
 
-@dataclass
-class ConnectionStats:
-    """连接统计信息"""
-    created_at: datetime
-    last_used: datetime
-    usage_count: int = 0
-    error_count: int = 0
-    avg_response_time: float = 0.0
-    is_healthy: bool = True
-    last_health_check: Optional[datetime] = None
-
-
-class AlpacaAccountConnection:
-    """单个账户连接封装"""
+class OptimizedAccountConnection:
+    """优化的账户连接封装 - 使用新的连接管理器"""
     
     def __init__(self, account_config: AccountConfig):
         self.account_config = account_config
         self.connection_id = f"{account_config.account_id}_{int(time.time())}"
         
-        # 初始化Alpaca客户端
-        self.alpaca_client = AlpacaClient(
+        # 使用优化的连接管理器，符合Alpaca最佳实践
+        self.connection_manager = AlpacaConnectionManager(
+            user_id=account_config.account_id,
             api_key=account_config.api_key,
             secret_key=account_config.secret_key,
             paper_trading=account_config.paper_trading
-        )
-        
-        # 连接统计
-        self.stats = ConnectionStats(
-            created_at=datetime.utcnow(),
-            last_used=datetime.utcnow()
         )
         
         # 异步锁
@@ -76,47 +60,24 @@ class AlpacaAccountConnection:
         """测试连接健康状态"""
         try:
             async with self._lock:
-                start_time = time.time()
-                
-                # 测试连接
-                result = await self.alpaca_client.test_connection()
-                
-                response_time = time.time() - start_time
-                
-                # 更新统计信息
-                self.stats.last_used = datetime.utcnow()
-                self.stats.last_health_check = datetime.utcnow()
-                self.stats.usage_count += 1
-                self.stats.avg_response_time = (
-                    (self.stats.avg_response_time *
-                     (self.stats.usage_count - 1) + response_time) /
-                    self.stats.usage_count
+                # 测试核心Trading Client连接
+                is_healthy = await self.connection_manager.test_connection(
+                    ConnectionType.TRADING_CLIENT
                 )
                 
-                is_healthy = result.get("status") == "connected"
-                self.stats.is_healthy = is_healthy
-                
                 if not is_healthy:
-                    self.stats.error_count += 1
-                    logger.warning(
-                        f"账户连接不健康: {self.account_config.account_id}"
-                    )
+                    logger.warning(f"账户连接不健康: {self.account_config.account_id}")
                 
                 return is_healthy
                 
         except Exception as e:
-            self.stats.error_count += 1
-            self.stats.is_healthy = False
-            logger.error(
-                f"连接测试失败 (账户: {self.account_config.account_id}): {e}"
-            )
+            logger.error(f"连接测试失败 (账户: {self.account_config.account_id}): {e}")
             return False
     
     async def acquire(self):
         """获取连接"""
         await self._lock.acquire()
         self._in_use = True
-        self.stats.last_used = datetime.utcnow()
         
     def release(self):
         """释放连接"""
@@ -124,42 +85,55 @@ class AlpacaAccountConnection:
         if self._lock.locked():
             self._lock.release()
     
+    async def get_trading_client(self) -> TradingClient:
+        """获取Trading Client"""
+        return await self.connection_manager.get_connection(ConnectionType.TRADING_CLIENT)
+    
+    def release_trading_client(self):
+        """释放Trading Client"""
+        self.connection_manager.release_connection(ConnectionType.TRADING_CLIENT)
+    
+    async def get_stock_data_client(self) -> StockHistoricalDataClient:
+        """获取股票数据客户端"""
+        return await self.connection_manager.get_connection(ConnectionType.STOCK_DATA)
+    
+    def release_stock_data_client(self):
+        """释放股票数据客户端"""
+        self.connection_manager.release_connection(ConnectionType.STOCK_DATA)
+    
     @property
     def is_available(self) -> bool:
         """检查连接是否可用"""
-        return (
-            not self._in_use and
-            self.stats.is_healthy and
-            self.account_config.enabled
-        )
+        return not self._in_use and self.account_config.enabled
     
     @property
-    def age_minutes(self) -> float:
-        """连接年龄(分钟)"""
-        return (
-            (datetime.utcnow() - self.stats.created_at).total_seconds() / 60
-        )
+    def connection_count(self) -> int:
+        """当前连接总数"""
+        return self.connection_manager.connection_count
+    
+    def get_connection_stats(self) -> Dict:
+        """获取连接统计信息"""
+        return self.connection_manager.get_connection_stats()
+    
+    async def shutdown(self):
+        """关闭所有连接"""
+        await self.connection_manager.shutdown()
 
 
 class AccountConnectionPool:
-    """账户连接池管理器"""
+    """优化的账户连接池管理器 - 基于Alpaca最佳实践"""
     
-    def __init__(
-        self,
-        max_connections_per_account: int = 3,
-        health_check_interval_seconds: int = 300
-    ):
-        self.max_connections_per_account = max_connections_per_account
+    def __init__(self, health_check_interval_seconds: int = 300):
         self.health_check_interval_seconds = health_check_interval_seconds
         
         # 账户配置 {account_id: AccountConfig}
         self.account_configs: Dict[str, AccountConfig] = {}
         
-        # 账户连接池 {account_id: [AlpacaAccountConnection]}
-        self.account_pools: Dict[str, List[AlpacaAccountConnection]] = {}
+        # 账户连接管理器 {account_id: OptimizedAccountConnection}
+        self.account_managers: Dict[str, OptimizedAccountConnection] = {}
         
-        # 连接使用队列 {account_id: deque[AlpacaAccountConnection]}
-        self.usage_queues: Dict[str, deque[AlpacaAccountConnection]] = {}
+        # 连接使用队列 {account_id: deque[OptimizedAccountConnection]} 
+        self.usage_queues: Dict[str, deque[OptimizedAccountConnection]] = {}
         
         # 账户ID映射 (用于路由算法)
         self.account_id_list: List[str] = []
@@ -193,7 +167,7 @@ class AccountConnectionPool:
         self._start_background_tasks()
         
         self._initialized = True
-        logger.info(f"账户连接池初始化完成: {len(self.account_configs)} 个账户, {sum(len(conns) for conns in self.account_pools.values())} 个连接")
+        logger.info(f"账户连接池初始化完成: {len(self.account_configs)} 个账户, {sum(manager.connection_count for manager in self.account_managers.values())} 个连接管理器")
     
     async def _ensure_async_components(self):
         """确保异步组件已初始化"""
@@ -233,8 +207,8 @@ class AccountConnectionPool:
                 account_name=config.get('name', account_id),
                 region=config.get('region', 'us'),
                 tier=config.get('tier', 'standard'),
-                max_connections=config.get('max_connections', 3),
                 enabled=config.get('enabled', True)
+                # 移除 max_connections，改为使用Alpaca最佳实践（每账户1个核心连接）
             )
             
             self.account_configs[account_id] = account_config
@@ -243,35 +217,35 @@ class AccountConnectionPool:
         logger.info(f"加载了 {len(self.account_configs)} 个账户配置")
     
     async def _prebuild_connections(self):
-        """预建立所有账户连接"""
-        logger.info("开始预建立账户连接...")
+        """优化的连接预建立 - 每账户只创建1个核心连接管理器"""
+        logger.info("开始初始化账户连接管理器...")
         
         for account_id, account_config in self.account_configs.items():
             if not account_config.enabled:
                 continue
                 
-            logger.info(f"为账户 {account_id} 预建立 {account_config.max_connections} 个连接")
+            logger.info(f"为账户 {account_id} 初始化连接管理器 (核心连接: 1个)")
             
-            self.account_pools[account_id] = []
             self.usage_queues[account_id] = deque()
             
-            # 为每个账户创建指定数量的连接
-            for i in range(account_config.max_connections):
-                try:
-                    connection = AlpacaAccountConnection(account_config)
+            try:
+                # 创建优化的账户连接管理器（每账户1个）
+                connection_manager = OptimizedAccountConnection(account_config)
+                
+                # 测试核心连接
+                if await connection_manager.test_connection():
+                    self.account_managers[account_id] = connection_manager
+                    logger.debug(f"账户 {account_id} 连接管理器初始化成功")
+                else:
+                    logger.error(f"账户 {account_id} 连接管理器测试失败")
                     
-                    # 测试连接
-                    if await connection.test_connection():
-                        self.account_pools[account_id].append(connection)
-                        logger.debug(f"账户 {account_id} 连接 {i+1} 创建成功")
-                    else:
-                        logger.error(f"账户 {account_id} 连接 {i+1} 测试失败")
-                        
-                except Exception as e:
-                    logger.error(f"创建账户 {account_id} 连接 {i+1} 失败: {e}")
+            except Exception as e:
+                logger.error(f"初始化账户 {account_id} 连接管理器失败: {e}")
         
-        total_connections = sum(len(conns) for conns in self.account_pools.values())
-        logger.info(f"预建立连接完成: {total_connections} 个连接")
+        total_connections = sum(
+            manager.connection_count for manager in self.account_managers.values()
+        )
+        logger.info(f"连接管理器初始化完成: {len(self.account_managers)} 个管理器, {total_connections} 个核心连接")
     
     def _start_background_tasks(self):
         """启动后台维护任务"""
@@ -315,28 +289,33 @@ class AccountConnectionPool:
             return
             
         async with self._global_lock:
-            for account_id, connections in self.account_pools.items():
-                healthy_connections = []
-                
-                for conn in connections:
-                    if conn._in_use:
-                        healthy_connections.append(conn)
-                        continue
-                        
-                    # 测试连接健康状态
-                    is_healthy = await conn.test_connection()
-                    
-                    if is_healthy:
-                        healthy_connections.append(conn)
-                    else:
-                        logger.warning(f"移除不健康连接 (账户: {account_id})")
-                
-                self.account_pools[account_id] = healthy_connections
+            for account_id, manager in self.account_managers.items():
+                try:
+                    # 对每个账户管理器进行健康检查
+                    await manager.test_connection()
+                except Exception as e:
+                    logger.error(f"账户 {account_id} 健康检查失败: {e}")
     
     async def _cleanup_idle_connections(self):
-        """清理空闲连接（暂时不清理，保持预配置连接）"""
-        # 对于预配置连接池，我们不清理空闲连接，而是保持它们活跃
-        pass
+        """智能连接清理 - 只清理非核心连接"""
+        # 对于预配置账户，只清理数据连接，保持核心Trading Client连接
+        if not self._global_lock:
+            return
+            
+        async with self._global_lock:
+            for account_id, manager in self.account_managers.items():
+                try:
+                    # 获取连接管理器的统计信息
+                    stats = manager.get_connection_stats()
+                    
+                    # 检查是否有空闲的数据连接可以清理
+                    # 核心连接（TRADING_CLIENT）会保持活跃
+                    # 这个清理逻辑由底层的AlpacaConnectionManager处理
+                    
+                    logger.debug(f"账户 {account_id} 连接状态: 总连接数={stats.get('total_connections', 0)}")
+                    
+                except Exception as e:
+                    logger.error(f"清理账户 {account_id} 空闲连接失败: {e}")
     
     def get_account_by_routing(self, routing_key: Optional[str] = None, strategy: str = "round_robin") -> Optional[str]:
         """根据路由策略获取账户ID"""
@@ -365,14 +344,19 @@ class AccountConnectionPool:
             selected_account = None
             
             for account_id in self.account_id_list:
-                connections = self.account_pools.get(account_id, [])
-                if not connections:
+                manager = self.account_managers.get(account_id)
+                if not manager:
                     continue
                     
-                # 计算平均使用次数作为负载指标
-                avg_usage = sum(conn.stats.usage_count for conn in connections) / len(connections)
-                if avg_usage < min_load:
-                    min_load = avg_usage
+                # 获取管理器的连接统计信息
+                stats = manager.get_connection_stats()
+                total_usage = sum(
+                    conn_info.get('usage_count', 0) 
+                    for conn_info in stats.get('connections', {}).values()
+                )
+                
+                if total_usage < min_load:
+                    min_load = total_usage
                     selected_account = account_id
             
             return selected_account or self.account_id_list[0]
@@ -380,8 +364,8 @@ class AccountConnectionPool:
         # 默认返回第一个账户
         return self.account_id_list[0]
     
-    async def get_connection(self, account_id: Optional[str] = None, routing_key: Optional[str] = None) -> AlpacaAccountConnection:
-        """获取账户连接"""
+    async def get_connection(self, account_id: Optional[str] = None, routing_key: Optional[str] = None) -> OptimizedAccountConnection:
+        """获取优化的账户连接"""
         if not self._initialized:
             await self.initialize()
         
@@ -389,39 +373,29 @@ class AccountConnectionPool:
         if not account_id:
             account_id = self.get_account_by_routing(routing_key, strategy="round_robin")
         
-        if not account_id or account_id not in self.account_pools:
-            raise Exception(f"账户不存在或无可用连接: {account_id}")
+        if not account_id or account_id not in self.account_managers:
+            raise Exception(f"账户不存在或无可用连接管理器: {account_id}")
         
         async with self._global_lock:
-            connections = self.account_pools[account_id]
+            manager = self.account_managers[account_id]
             usage_queue = self.usage_queues[account_id]
             
-            # 寻找可用连接
-            available_conn = None
-            for conn in connections:
-                if conn.is_available:
-                    available_conn = conn
-                    break
+            # 检查连接管理器是否可用
+            if not manager.is_available:
+                logger.warning(f"连接管理器繁忙，等待可用 (账户: {account_id})")
+                # 这里可以等待或者直接返回，根据业务需求决定
             
-            # 如果没有可用连接，使用最少使用的连接
-            if not available_conn and connections:
-                available_conn = min(connections, key=lambda c: c.stats.usage_count)
-                logger.warning(f"复用繁忙连接 (账户: {account_id})")
-            
-            if not available_conn:
-                raise Exception(f"无法获取连接 (账户: {account_id})")
-            
-            # 获取连接
-            await available_conn.acquire()
+            # 获取连接管理器
+            await manager.acquire()
             
             # 更新使用队列
-            if available_conn in usage_queue:
-                usage_queue.remove(available_conn)
-            usage_queue.append(available_conn)
+            if manager in usage_queue:
+                usage_queue.remove(manager)
+            usage_queue.append(manager)
             
-            return available_conn
+            return manager
     
-    def release_connection(self, connection: AlpacaAccountConnection):
+    def release_connection(self, connection: OptimizedAccountConnection):
         """释放连接"""
         connection.release()
     
@@ -437,29 +411,28 @@ class AccountConnectionPool:
                 self.release_connection(connection)
     
     def get_pool_stats(self) -> Dict[str, Any]:
-        """获取连接池统计信息"""
+        """获取优化的连接池统计信息"""
+        total_connections = sum(
+            manager.connection_count for manager in self.account_managers.values()
+        )
+        
         stats = {
             "total_accounts": len(self.account_configs),
             "active_accounts": len([acc for acc in self.account_configs.values() if acc.enabled]),
-            "total_connections": sum(len(conns) for conns in self.account_pools.values()),
+            "total_connections": total_connections,
             "account_stats": {}
         }
         
-        for account_id, connections in self.account_pools.items():
-            if not connections:
-                continue
-                
+        for account_id, manager in self.account_managers.items():
             account_config = self.account_configs.get(account_id)
+            manager_stats = manager.get_connection_stats()
+            
             account_stats = {
                 "account_name": account_config.account_name if account_config else account_id,
                 "tier": account_config.tier if account_config else "unknown",
-                "connection_count": len(connections),
-                "available_connections": sum(1 for c in connections if c.is_available),
-                "healthy_connections": sum(1 for c in connections if c.stats.is_healthy),
-                "total_usage": sum(c.stats.usage_count for c in connections),
-                "total_errors": sum(c.stats.error_count for c in connections),
-                "avg_response_time": sum(c.stats.avg_response_time for c in connections) / len(connections) if connections else 0,
-                "last_health_check": max((c.stats.last_health_check for c in connections if c.stats.last_health_check), default=None)
+                "connection_count": manager.connection_count,
+                "is_available": manager.is_available,
+                "connection_details": manager_stats.get('connections', {})
             }
             stats["account_stats"][account_id] = account_stats
         
@@ -476,30 +449,30 @@ class AccountConnectionPool:
         # 等待任务完成
         await asyncio.gather(*self._background_tasks, return_exceptions=True)
         
-        # 清理所有连接
+        # 关闭所有账户连接管理器
         if self._global_lock:
             async with self._global_lock:
-                for account_id, connections in self.account_pools.items():
-                    for conn in connections:
-                        if conn._in_use:
-                            conn.release()
+                for account_id, manager in list(self.account_managers.items()):
+                    try:
+                        await manager.shutdown()
+                    except Exception as e:
+                        logger.error(f"关闭账户 {account_id} 连接管理器失败: {e}")
                 
-                self.account_pools.clear()
+                self.account_managers.clear()
                 self.usage_queues.clear()
         
         logger.info("账户连接池关闭完成")
 
 
-# 全局账户连接池实例
+# 全局账户连接池实例 - 优化配置
 account_pool = AccountConnectionPool(
-    max_connections_per_account=3,
-    health_check_interval_seconds=300
+    health_check_interval_seconds=300  # 移除max_connections_per_account，使用Alpaca最佳实践
 )
 
 
 # 依赖注入函数
 def get_account_pool() -> AccountConnectionPool:
-    """获取账户连接池实例"""
+    """获取优化的账户连接池实例"""
     return account_pool
 
 
