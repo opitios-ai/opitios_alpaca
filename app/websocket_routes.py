@@ -49,10 +49,15 @@ class AlpacaWebSocketManager:
     TEST_WS_URL = "wss://stream.data.alpaca.markets/v2/test"
     TRADING_WS_URL = "wss://paper-api.alpaca.markets/stream"
     
-    # 连接池相关设置
+    # 连接池相关设置  
     _instance = None
     _connections_count = 0
-    _max_connections = 3  # Alpaca推荐的每账户最大并发连接数
+    _max_connections = 2  # 2个专用账户：1个股票WebSocket + 1个期权WebSocket
+    
+    # 专用账户WebSocket管理
+    _stock_account = None     # 专用股票WebSocket账户 (stock_ws)
+    _option_account = None    # 专用期权WebSocket账户 (option_ws)
+    _websocket_lock = None    # 异步锁，确保连接操作的线程安全
     
     # 测试符号
     TEST_SYMBOL = "FAKEPACA"  # 官方测试股票代码
@@ -142,6 +147,11 @@ class AlpacaWebSocketManager:
         # 连接池引用
         self.pool = None
         self.account_connection = None
+        
+        # 初始化WebSocket互斥锁
+        if self.__class__._websocket_lock is None:
+            import asyncio
+            self.__class__._websocket_lock = asyncio.Lock()
         
         # 标记已初始化
         self._initialized = True
@@ -380,11 +390,10 @@ class AlpacaWebSocketManager:
         logger.info("🏥 定期健康检查任务结束")
         
     async def initialize(self):
-        """初始化Alpaca连接 - 使用优化的连接池架构"""
+        """初始化Alpaca连接 - 使用专用账户架构"""
         try:
-            # 获取优化的账户连接池
+            # 获取账户连接池
             from app.account_pool import get_account_pool
-            from app.connection_pool import ConnectionType
             
             self.pool = get_account_pool()
             
@@ -392,30 +401,17 @@ class AlpacaWebSocketManager:
             if not self.pool._initialized:
                 await self.pool.initialize()
             
-            # 获取第一个可用账户连接
-            account_connection = await self.pool.get_connection()
-            self.account_connection = account_connection
-            self.account_config = account_connection.account_config
+            # 加载专用WebSocket账户配置
+            await self._load_dedicated_websocket_accounts()
             
-            logger.info(
-                f"✅ 使用优化连接池 - 账户: {self.account_config.account_id} "
-                f"(连接数: {account_connection.connection_count})"
-            )
-            
-            # 验证连接池中的Trading Client
-            trading_client = await account_connection.get_trading_client()
-            account_info = trading_client.get_account()
-            logger.info(f"✅ 连接池验证成功 - 账户: {account_info.account_number}")
-            account_connection.release_trading_client()
-            
-            # 标记为已连接 - 使用连接池管理的连接
+            # 标记为已连接
             self.connected = True
             
-            logger.info("🚀 WebSocket管理器初始化成功 - 使用优化连接池架构")
-            logger.info(f"📊 账户层级: {getattr(self.account_config, 'tier', 'standard')}")
-            logger.info(f"🔗 连接池管理: 核心连接复用,按需创建数据流连接")
-            logger.info(f"🏷️ Paper Trading: {getattr(self.account_config, 'paper_trading', True)}")
-            logger.info(f"🔢 优化架构: 避免连接数超限问题")
+            logger.info("🚀 WebSocket管理器初始化成功 - 使用专用账户架构")
+            logger.info(f"📊 股票WebSocket账户: {self._stock_account['name'] if self._stock_account else 'None'}")
+            logger.info(f"📊 期权WebSocket账户: {self._option_account['name'] if self._option_account else 'None'}")
+            logger.info(f"🔗 双账户架构: 股票和期权可同时运行WebSocket连接")
+            logger.info(f"🔢 连接限制: 每账户最多{self._max_connections}个连接")
             
         except Exception as e:
             logger.error(f"Alpaca WebSocket初始化失败: {e}")
@@ -664,15 +660,98 @@ class AlpacaWebSocketManager:
         if self._connections_count > 0:
             self._connections_count -= 1
             logger.info(f"📉 当前连接数: {self._connections_count}/{self._max_connections}")
+    
+    async def _load_dedicated_websocket_accounts(self):
+        """加载专用WebSocket账户配置"""
+        if not self.pool.account_configs:
+            raise Exception("No account configurations found")
+        
+        # 查找专用股票WebSocket账户 (stock_ws)
+        if 'stock_ws' in self.pool.account_configs:
+            stock_config = self.pool.account_configs['stock_ws']
+            if stock_config.enabled:
+                self._stock_account = {
+                    'account_id': stock_config.account_id,
+                    'name': stock_config.account_name or stock_config.account_id,
+                    'api_key': stock_config.api_key,
+                    'secret_key': stock_config.secret_key,
+                    'paper_trading': stock_config.paper_trading,
+                    'tier': getattr(stock_config, 'tier', 'standard')
+                }
+                logger.info(f"✅ 已加载股票WebSocket专用账户: {self._stock_account['name']}")
+            else:
+                logger.warning("⚠️ stock_ws账户已禁用")
+        else:
+            logger.warning("⚠️ 未找到stock_ws专用账户配置")
+        
+        # 查找专用期权WebSocket账户 (option_ws)
+        if 'option_ws' in self.pool.account_configs:
+            option_config = self.pool.account_configs['option_ws']
+            if option_config.enabled:
+                self._option_account = {
+                    'account_id': option_config.account_id,
+                    'name': option_config.account_name or option_config.account_id,
+                    'api_key': option_config.api_key,
+                    'secret_key': option_config.secret_key,
+                    'paper_trading': option_config.paper_trading,
+                    'tier': getattr(option_config, 'tier', 'standard')
+                }
+                logger.info(f"✅ 已加载期权WebSocket专用账户: {self._option_account['name']}")
+            else:
+                logger.warning("⚠️ option_ws账户已禁用")
+        else:
+            logger.warning("⚠️ 未找到option_ws专用账户配置")
+        
+        # 验证至少有一个专用账户可用
+        if not self._stock_account and not self._option_account:
+            raise Exception("No dedicated WebSocket accounts (stock_ws/option_ws) found or enabled")
+        
+        logger.info(f"🎯 专用WebSocket账户配置完成")
+    
+    def _get_account_for_websocket_type(self, websocket_type: str) -> dict:
+        """获取指定WebSocket类型的专用账户"""
+        if websocket_type == 'stock':
+            if not self._stock_account:
+                raise Exception("Stock WebSocket专用账户 (stock_ws) 未配置或已禁用")
+            return self._stock_account
+        elif websocket_type == 'option':
+            if not self._option_account:
+                raise Exception("Option WebSocket专用账户 (option_ws) 未配置或已禁用")
+            return self._option_account
+        else:
+            raise ValueError(f"无效的WebSocket类型: {websocket_type}")
+            
+    async def _test_dedicated_account_connection(self, account: dict) -> bool:
+        """测试专用账户的连接"""
+        try:
+            from alpaca.trading.client import TradingClient
+            
+            client = TradingClient(
+                api_key=account['api_key'],
+                secret_key=account['secret_key'],
+                paper=account['paper_trading']
+            )
+            
+            account_info = client.get_account()
+            logger.info(f"✅ 专用账户连接验证成功 - {account['name']}: {account_info.account_number}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ 专用账户连接验证失败 - {account['name']}: {e}")
+            return False
 
     async def _connect_stock_websocket(self, symbols: List[str]):
-        """连接股票WebSocket端点 - 带连接数限制"""
+        """连接股票WebSocket端点 - 使用专用stock_ws账户"""
         try:
+            # 确保stock_ws专用账户已加载
+            if not self._stock_account:
+                raise Exception("Stock WebSocket专用账户未配置")
+            
             # 检查连接限制
             if not self._can_create_connection():
-                raise Exception(f"Connection limit exceeded: {self._connections_count}/{self._max_connections}")
+                raise Exception(f"Stock WebSocket connection limit exceeded: {self._connections_count}/{self._max_connections}")
             
-            logger.info(f"🔌 连接IEX端点获取最快价格: {self.STOCK_WS_URL}")
+            logger.info(f"🔌 连接股票WebSocket端点 (专用账户: {self._stock_account['name']}): {self.STOCK_WS_URL}")
             
             ssl_context = ssl.create_default_context()
             self.stock_ws = await websockets.connect(
@@ -686,11 +765,11 @@ class AlpacaWebSocketManager:
             # 成功建立连接后增加计数
             self._increment_connection_count()
             
-            # 认证
+            # 使用专用股票账户认证
             auth_message = {
                 "action": "auth",
-                "key": self.account_config.api_key,
-                "secret": self.account_config.secret_key
+                "key": self._stock_account['api_key'],
+                "secret": self._stock_account['secret_key']
             }
             await self.stock_ws.send(json.dumps(auth_message))
             
@@ -707,7 +786,7 @@ class AlpacaWebSocketManager:
             if auth_response.get("T") != "success":
                 raise Exception(f"Stock WebSocket authentication failed: {auth_response}")
             
-            logger.info("股票WebSocket认证成功")
+            logger.info(f"✅ 股票WebSocket认证成功 (账户: {self._stock_account['name']})")
             self.stock_connected = True
             
             # 订阅股票符号
@@ -725,13 +804,17 @@ class AlpacaWebSocketManager:
             raise e
     
     async def _connect_option_websocket(self, symbols: List[str]):
-        """连接期权WebSocket端点 - 带连接数限制"""
+        """连接期权WebSocket端点 - 使用专用option_ws账户"""
         try:
+            # 确保option_ws专用账户已加载
+            if not self._option_account:
+                raise Exception("Option WebSocket专用账户未配置")
+            
             # 检查连接限制
             if not self._can_create_connection():
-                raise Exception(f"Connection limit exceeded: {self._connections_count}/{self._max_connections}")
+                raise Exception(f"Option WebSocket connection limit exceeded: {self._connections_count}/{self._max_connections}")
             
-            logger.info(f"🔌 连接期权WebSocket端点: {self.OPTION_WS_URL}")
+            logger.info(f"🔌 连接期权WebSocket端点 (专用账户: {self._option_account['name']}): {self.OPTION_WS_URL}")
             
             ssl_context = ssl.create_default_context()
             self.option_ws = await websockets.connect(
@@ -744,11 +827,11 @@ class AlpacaWebSocketManager:
             # 成功建立连接后增加计数
             self._increment_connection_count()
             
-            # 认证 - 期权WebSocket使用MessagePack格式
+            # 使用专用期权账户认证 - 期权WebSocket使用MessagePack格式
             auth_message = {
                 "action": "auth",
-                "key": self.account_config.api_key,
-                "secret": self.account_config.secret_key
+                "key": self._option_account['api_key'],
+                "secret": self._option_account['secret_key']
             }
             packed_auth = msgpack.packb(auth_message)
             await self.option_ws.send(packed_auth)
@@ -779,7 +862,7 @@ class AlpacaWebSocketManager:
             if auth_response.get("T") != "success":
                 raise Exception(f"Option WebSocket authentication failed: {auth_response}")
             
-            logger.info("期权WebSocket认证成功")
+            logger.info(f"✅ 期权WebSocket认证成功 (账户: {self._option_account['name']})")
             self.option_connected = True
             
             # 订阅期权符号
@@ -847,6 +930,9 @@ class AlpacaWebSocketManager:
             self.stock_connected = False
             # 连接关闭时减少计数
             self._decrement_connection_count()
+            # 清除WebSocket类型状态
+            if self._active_websocket_type == 'stock':
+                self._active_websocket_type = None
             if not self._shutdown:
                 logger.info("尝试重连股票WebSocket...")
                 asyncio.create_task(self._reconnect_stock_websocket())
@@ -870,6 +956,9 @@ class AlpacaWebSocketManager:
             self.option_connected = False
             # 连接关闭时减少计数
             self._decrement_connection_count()
+            # 清除WebSocket类型状态
+            if self._active_websocket_type == 'option':
+                self._active_websocket_type = None
             if not self._shutdown:
                 logger.info("尝试重连期权WebSocket...")
                 asyncio.create_task(self._reconnect_option_websocket())
@@ -1202,6 +1291,9 @@ class AlpacaWebSocketManager:
             self.option_connected = False
             self._decrement_connection_count()
             logger.info("✅ 期权WebSocket连接已关闭")
+        
+        # 清除WebSocket类型状态
+        self._active_websocket_type = None
         
         logger.info("🎯 所有WebSocket连接和任务已关闭")
     
