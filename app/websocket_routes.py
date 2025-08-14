@@ -706,6 +706,14 @@ class AlpacaWebSocketManager:
         if not self._stock_account and not self._option_account:
             raise Exception("No dedicated WebSocket accounts (stock_ws/option_ws) found or enabled")
         
+        # 设置主账户配置用于WebSocket欢迎信息 (优先使用stock_ws账户)
+        if self._stock_account:
+            self.account_config = type('AccountConfig', (), self._stock_account)()
+            logger.info(f"🎯 使用股票WebSocket账户作为主账户配置: {self._stock_account['name']}")
+        elif self._option_account:
+            self.account_config = type('AccountConfig', (), self._option_account)()
+            logger.info(f"🎯 使用期权WebSocket账户作为主账户配置: {self._option_account['name']}")
+        
         logger.info(f"🎯 专用WebSocket账户配置完成")
     
     def _get_account_for_websocket_type(self, websocket_type: str) -> dict:
@@ -1336,17 +1344,22 @@ async def websocket_market_data(websocket: WebSocket):
             await ws_manager.initialize()
         
         # 发送欢迎消息
+        # 获取账户信息，提供安全的默认值
+        account_id = getattr(ws_manager.account_config, 'account_id', 'Unknown') if ws_manager.account_config else 'Unknown'
+        tier = getattr(ws_manager.account_config, 'tier', 'standard') if ws_manager.account_config else 'standard'
+        paper_trading = getattr(ws_manager.account_config, 'paper_trading', True) if ws_manager.account_config else True
+        
         welcome_message = {
             "type": "welcome",
             "client_id": client_id,
             "message": "连接成功！正在建立Alpaca官方WebSocket数据流",
             "default_stocks": DEFAULT_STOCKS,
             "default_options": DEFAULT_OPTIONS,
-            "data_source": f"Alpaca {ws_manager.account_config.account_id} - 官方WebSocket端点",
+            "data_source": f"Alpaca {account_id} - 官方WebSocket端点",
             "account_info": {
-                "account_id": ws_manager.account_config.account_id,
-                "tier": ws_manager.account_config.tier,
-                "paper_trading": ws_manager.account_config.paper_trading
+                "account_id": account_id,
+                "tier": tier,
+                "paper_trading": paper_trading
             },
             "capabilities": {
                 "stock_data": True,
