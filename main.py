@@ -102,11 +102,10 @@ async def lifespan(app: FastAPI):
     logger.info(
         f"Environment: {'Production' if not settings.debug else 'Development'}"
     )
-    logger.info(f"Paper trading mode: {settings.alpaca_paper_trading}")
-    logger.info(f"Alpaca base URL: {settings.alpaca_base_url}")
     logger.info(f"Real data only mode: {settings.real_data_only}")
     logger.info(f"Mock data enabled: {settings.enable_mock_data}")
     logger.info(f"Strict error handling: {settings.strict_error_handling}")
+    logger.info(f"Multi-account trading mode: {len(settings.accounts)} accounts configured")
     
     # Initialize account connection pool
     try:

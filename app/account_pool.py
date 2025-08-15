@@ -189,18 +189,8 @@ class AccountPool:
         accounts_config = getattr(settings, 'accounts', {})
         
         if not accounts_config:
-            # Use default single account configuration
-            logger.warning("No multi-account config found, using default single account")
-            default_account = AccountConfig(
-                account_id="default_account",
-                api_key=settings.alpaca_api_key,
-                secret_key=settings.alpaca_secret_key,
-                paper_trading=settings.alpaca_paper_trading,
-                account_name="Default Account"
-            )
-            self.account_configs["default_account"] = default_account
-            self.account_id_list = ["default_account"]
-            return
+            logger.error("No account configurations found in secrets.yml. Please configure multi-account setup.")
+            raise ValueError("No account configurations found. Multi-account setup required.")
         
         # Load multi-account configurations
         for account_id, config in accounts_config.items():
