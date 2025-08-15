@@ -275,7 +275,7 @@ class AlpacaWebSocketManager:
         # 特定错误的额外处理
         if error_code == 406:  # 连接超限
             self.connection_limit_reached = True
-            self.active_connections_count = self.account_config.max_connections
+            self.active_connections_count = self._max_connections
             strategy["action"] = "wait_for_connection_slot"
             
         elif error_code == 402 and endpoint_type == "stock":  # 订阅不足，尝试降级端点
@@ -1245,14 +1245,26 @@ class AlpacaWebSocketManager:
     
     async def _reconnect_stock_websocket(self):
         """重连股票WebSocket"""
+        # 检查是否已经连接，避免不必要的重连
+        if self.stock_connected:
+            logger.info("股票WebSocket已连接，无需重连")
+            return
+            
         if self._stock_reconnect_task and not self._stock_reconnect_task.done():
+            logger.info("股票WebSocket重连任务已在进行中")
             return
             
         self._stock_reconnect_task = asyncio.create_task(self._do_stock_reconnect())
     
     async def _reconnect_option_websocket(self):
         """重连期权WebSocket"""
+        # 检查是否已经连接，避免不必要的重连
+        if self.option_connected:
+            logger.info("期权WebSocket已连接，无需重连")
+            return
+            
         if self._option_reconnect_task and not self._option_reconnect_task.done():
+            logger.info("期权WebSocket重连任务已在进行中")
             return
             
         self._option_reconnect_task = asyncio.create_task(self._do_option_reconnect())
@@ -1265,6 +1277,11 @@ class AlpacaWebSocketManager:
         while retry_count < max_retries and not self._shutdown:
             try:
                 await asyncio.sleep(min(2 ** retry_count, 30))  # Exponential backoff
+                
+                # 检查是否已经连接，避免重复连接
+                if self.stock_connected:
+                    logger.info("股票WebSocket已连接，停止重连")
+                    return
                 
                 # 重新获取需要订阅的股票符号
                 stock_symbols = [s for s in subscribed_symbols if not self._is_option_symbol(s)]
@@ -1288,6 +1305,11 @@ class AlpacaWebSocketManager:
         while retry_count < max_retries and not self._shutdown:
             try:
                 await asyncio.sleep(min(2 ** retry_count, 30))  # Exponential backoff
+                
+                # 检查是否已经连接，避免重复连接
+                if self.option_connected:
+                    logger.info("期权WebSocket已连接，停止重连")
+                    return
                 
                 # 重新获取需要订阅的期权符号
                 option_symbols = [s for s in subscribed_symbols if self._is_option_symbol(s)]
@@ -1513,7 +1535,7 @@ async def websocket_status():
             "connection_limits": {
                 "active_connections": ws_manager.active_connections_count,
                 "limit_reached": ws_manager.connection_limit_reached,
-                "max_allowed": getattr(ws_manager.account_config, 'max_connections', 'unknown') if ws_manager.account_config else 'unknown'
+                "max_allowed": ws_manager._max_connections
             }
         }
     }
