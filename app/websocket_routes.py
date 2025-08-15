@@ -175,7 +175,7 @@ class AlpacaWebSocketManager:
         
     async def test_websocket_connection(self, api_key: str, secret_key: str) -> bool:
         """在启动正式数据流前测试WebSocket连接"""
-        logger.info("🧪 开始WebSocket连接测试...")
+        logger.info("[TEST] 开始WebSocket连接测试...")
         
         try:
             # 1. 验证API凭证
@@ -185,7 +185,7 @@ class AlpacaWebSocketManager:
                 paper=True  # 使用paper环境测试
             )
             account = test_client.get_account()
-            logger.info(f"✅ API凭证验证成功: {account.account_number}")
+            logger.info(f"[SUCCESS] API凭证验证成功: {account.account_number}")
             
             # 2. 测试WebSocket连接
             ssl_context = ssl.create_default_context()
@@ -195,7 +195,7 @@ class AlpacaWebSocketManager:
                 ping_interval=20,
                 ping_timeout=10
             )
-            logger.info(f"✅ WebSocket测试端点连接成功: {self.TEST_WS_URL}")
+            logger.info(f"[SUCCESS] WebSocket测试端点连接成功: {self.TEST_WS_URL}")
             
             # 3. 测试认证
             auth_message = {
@@ -215,7 +215,7 @@ class AlpacaWebSocketManager:
                 auth_response = auth_data
                 
             if auth_response.get("T") == "success":
-                logger.info("✅ WebSocket认证测试成功")
+                logger.info("[SUCCESS] WebSocket认证测试成功")
                 
                 # 5. 测试订阅测试符号
                 test_subscription = {
@@ -224,26 +224,26 @@ class AlpacaWebSocketManager:
                     "quotes": [self.TEST_SYMBOL]
                 }
                 await test_ws.send(json.dumps(test_subscription))
-                logger.info(f"✅ 测试符号订阅成功: {self.TEST_SYMBOL}")
+                logger.info(f"[SUCCESS] 测试符号订阅成功: {self.TEST_SYMBOL}")
                 
                 # 6. 等待订阅确认
                 sub_response = await asyncio.wait_for(test_ws.recv(), timeout=5.0)
                 sub_data = json.loads(sub_response)
-                logger.info(f"✅ 订阅确认: {sub_data}")
+                logger.info(f"[SUCCESS] 订阅确认: {sub_data}")
                 
                 await test_ws.close()
-                logger.info("🎉 WebSocket连接测试完全通过!")
+                logger.info("[SUCCESS] WebSocket连接测试完全通过!")
                 return True
             else:
-                logger.error(f"❌ WebSocket认证失败: {auth_response}")
+                logger.error(f"[ERROR] WebSocket认证失败: {auth_response}")
                 await test_ws.close()
                 return False
                 
         except asyncio.TimeoutError:
-            logger.error("❌ WebSocket连接测试超时")
+            logger.error("[ERROR] WebSocket连接测试超时")
             return False
         except Exception as e:
-            logger.error(f"❌ WebSocket连接测试失败: {e}")
+            logger.error(f"[ERROR] WebSocket连接测试失败: {e}")
             return False
     
     async def handle_websocket_error(self, error_data: dict, endpoint_type: str = "unknown") -> dict:
@@ -257,9 +257,9 @@ class AlpacaWebSocketManager:
             "retry": True
         })
         
-        logger.error(f"🚨 WebSocket错误 [{endpoint_type}] [{error_code}]: {error_msg}")
-        logger.error(f"📋 描述: {error_info['description']}")
-        logger.error(f"🔧 解决方案: {error_info['solution']}")
+        logger.error(f"[ALERT] WebSocket错误 [{endpoint_type}] [{error_code}]: {error_msg}")
+        logger.error(f"[INFO] 描述: {error_info['description']}")
+        logger.error(f"[TOOL] 解决方案: {error_info['solution']}")
         
         # 构建处理策略
         strategy = {
@@ -324,9 +324,9 @@ class AlpacaWebSocketManager:
         all_healthy = all(checks.values())
         
         if not all_healthy:
-            logger.warning(f"⚠️ 连接健康检查失败 [{connection_type}]: {checks}")
+            logger.warning(f"[WARNING] 连接健康检查失败 [{connection_type}]: {checks}")
         else:
-            logger.debug(f"✅ 连接健康 [{connection_type}]: {checks}")
+            logger.debug(f"[SUCCESS] 连接健康 [{connection_type}]: {checks}")
             
         return all_healthy, checks
     
@@ -361,7 +361,7 @@ class AlpacaWebSocketManager:
     
     async def _periodic_health_check(self):
         """定期健康检查任务"""
-        logger.info("🏥 开始定期WebSocket健康检查")
+        logger.info("[HEALTH] 开始定期WebSocket健康检查")
         
         while not self._shutdown:
             try:
@@ -374,30 +374,30 @@ class AlpacaWebSocketManager:
                 if self.stock_connected and self.stock_ws:
                     stock_healthy, stock_checks = await self.validate_connection_health("stock", self.stock_ws)
                     if not stock_healthy:
-                        logger.warning(f"🚨 股票WebSocket不健康: {stock_checks}")
+                        logger.warning(f"[ALERT] 股票WebSocket不健康: {stock_checks}")
                         # 可以在这里触发重连逻辑
                         if not stock_checks.get("connection_open", False):
                             logger.error("股票WebSocket连接已关闭，启动重连...")
                             asyncio.create_task(self._reconnect_stock_websocket())
                     else:
-                        logger.debug("✅ 股票WebSocket健康检查通过")
+                        logger.debug("[SUCCESS] 股票WebSocket健康检查通过")
                 
                 # 检查期权WebSocket健康状态
                 if self.option_connected and self.option_ws:
                     option_healthy, option_checks = await self.validate_connection_health("option", self.option_ws)
                     if not option_healthy:
-                        logger.warning(f"🚨 期权WebSocket不健康: {option_checks}")
+                        logger.warning(f"[ALERT] 期权WebSocket不健康: {option_checks}")
                         # 可以在这里触发重连逻辑
                         if not option_checks.get("connection_open", False):
                             logger.error("期权WebSocket连接已关闭，启动重连...")
                             asyncio.create_task(self._reconnect_option_websocket())
                     else:
-                        logger.debug("✅ 期权WebSocket健康检查通过")
+                        logger.debug("[SUCCESS] 期权WebSocket健康检查通过")
                 
                 # 报告消息统计
                 if self.message_counts:
                     total_messages = sum(self.message_counts.values())
-                    logger.info(f"📊 消息统计: 总计={total_messages}, 股票={self.message_counts.get('stock', 0)}, 期权={self.message_counts.get('option', 0)}")
+                    logger.info(f"[DATA] 消息统计: 总计={total_messages}, 股票={self.message_counts.get('stock', 0)}, 期权={self.message_counts.get('option', 0)}")
                     
                     # 检查消息流状态（仅在正常交易时间内）
                     if is_market_hours():
@@ -416,7 +416,7 @@ class AlpacaWebSocketManager:
             except Exception as e:
                 logger.error(f"健康检查任务错误: {e}")
                 
-        logger.info("🏥 定期健康检查任务结束")
+        logger.info("[HEALTH] 定期健康检查任务结束")
         
     async def initialize(self):
         """初始化Alpaca连接 - 使用专用账户架构"""
@@ -436,11 +436,11 @@ class AlpacaWebSocketManager:
             # 标记为已连接
             self.connected = True
             
-            logger.info("🚀 WebSocket管理器初始化成功 - 使用专用账户架构")
-            logger.info(f"📊 股票WebSocket账户: {self._stock_account['name'] if self._stock_account else 'None'}")
-            logger.info(f"📊 期权WebSocket账户: {self._option_account['name'] if self._option_account else 'None'}")
-            logger.info(f"🔗 双账户架构: 股票和期权可同时运行WebSocket连接")
-            logger.info(f"🔢 连接限制: 每账户最多{self._max_connections}个连接")
+            logger.info("[INIT] WebSocket管理器初始化成功 - 使用专用账户架构")
+            logger.info(f"[DATA] 股票WebSocket账户: {self._stock_account['name'] if self._stock_account else 'None'}")
+            logger.info(f"[DATA] 期权WebSocket账户: {self._option_account['name'] if self._option_account else 'None'}")
+            logger.info(f"[LINK] 双账户架构: 股票和期权可同时运行WebSocket连接")
+            logger.info(f"[COUNT] 连接限制: 每账户最多{self._max_connections}个连接")
             
         except Exception as e:
             logger.error(f"Alpaca WebSocket初始化失败: {e}")
@@ -450,7 +450,7 @@ class AlpacaWebSocketManager:
             try:
                 await self._connect_test_endpoint_fallback()
                 self.connected = True
-                logger.info("✅ 已连接到测试端点作为回退方案")
+                logger.info("[SUCCESS] 已连接到测试端点作为回退方案")
             except Exception as fallback_error:
                 logger.error(f"测试端点回退也失败: {fallback_error}")
                 self.connected = False
@@ -483,7 +483,7 @@ class AlpacaWebSocketManager:
             # 启动健康检查任务
             if not self._health_check_task or self._health_check_task.done():
                 self._health_check_task = asyncio.create_task(self._periodic_health_check())
-                logger.info("🏥 启动WebSocket连接健康检查任务")
+                logger.info("[HEALTH] 启动WebSocket连接健康检查任务")
             
         except Exception as e:
             logger.error(f"订阅真实数据失败: {e}")
@@ -491,7 +491,7 @@ class AlpacaWebSocketManager:
     
     async def _detect_and_connect_stock_endpoints(self):
         """智能检测并连接可用的股票数据端点"""
-        logger.info("🔍 开始智能股票端点检测...")
+        logger.info("[SEARCH] 开始智能股票端点检测...")
         
         # 根据账户层级确定尝试顺序
         account_tier = getattr(self.account_config, 'tier', 'standard').lower()
@@ -499,47 +499,47 @@ class AlpacaWebSocketManager:
         # 如果是高级账户，先尝试SIP端点
         if account_tier in ['premium', 'algo_trader_plus']:
             endpoints_to_try = self.STOCK_ENDPOINTS
-            logger.info(f"🏆 高级账户 ({account_tier})，优先尝试SIP端点")
+            logger.info(f"[PREMIUM] 高级账户 ({account_tier})，优先尝试SIP端点")
         else:
             # 标准账户直接使用IEX端点
             endpoints_to_try = [ep for ep in self.STOCK_ENDPOINTS if ep['name'] == 'IEX']
-            logger.info(f"📊 标准账户 ({account_tier})，使用IEX端点")
+            logger.info(f"[DATA] 标准账户 ({account_tier})，使用IEX端点")
         
         last_error = None
         
         for endpoint in endpoints_to_try:
             try:
-                logger.info(f"🔌 尝试连接 {endpoint['name']} 端点: {endpoint['url']}")
+                logger.info(f"[CONNECT] 尝试连接 {endpoint['name']} 端点: {endpoint['url']}")
                 
                 # 测试端点连接
                 connection_result = await self._test_stock_endpoint(endpoint)
                 
                 if connection_result["success"]:
                     self.current_stock_endpoint = endpoint
-                    logger.info(f"✅ 成功连接到 {endpoint['name']} 端点")
-                    logger.info(f"📝 端点描述: {endpoint['description']}")
+                    logger.info(f"[SUCCESS] 成功连接到 {endpoint['name']} 端点")
+                    logger.info(f"[NOTE] 端点描述: {endpoint['description']}")
                     return True
                 else:
-                    logger.warning(f"❌ {endpoint['name']} 端点连接失败: {connection_result['error']}")
+                    logger.warning(f"[ERROR] {endpoint['name']} 端点连接失败: {connection_result['error']}")
                     last_error = connection_result["error"]
                     
                     # 如果是权限不足错误，立即尝试下一个端点
                     if connection_result.get("error_code") == 402:
-                        logger.info(f"⬇️ 权限不足，尝试降级到下一个端点...")
+                        logger.info(f"[DOWN] 权限不足，尝试降级到下一个端点...")
                         continue
                         
             except Exception as e:
-                logger.error(f"❌ {endpoint['name']} 端点测试异常: {e}")
+                logger.error(f"[ERROR] {endpoint['name']} 端点测试异常: {e}")
                 last_error = str(e)
                 continue
         
         # 所有端点都失败
-        logger.error("🚨 所有股票数据端点连接失败")
+        logger.error("[ALERT] 所有股票数据端点连接失败")
         if last_error:
             logger.error(f"最后错误: {last_error}")
         
         # 作为最后的回退，尝试测试端点
-        logger.info("🆘 尝试连接测试端点作为最后回退...")
+        logger.info("[FALLBACK] 尝试连接测试端点作为最后回退...")
         try:
             await self._connect_test_endpoint_fallback()
             return True
@@ -559,7 +559,7 @@ class AlpacaWebSocketManager:
                 close_timeout=10
             )
             
-            logger.info(f"🔗 {endpoint['name']} WebSocket连接已建立")
+            logger.info(f"[LINK] {endpoint['name']} WebSocket连接已建立")
             
             # 认证测试
             auth_message = {
@@ -582,7 +582,7 @@ class AlpacaWebSocketManager:
                 
                 # 检查认证结果
                 if auth_response.get("T") == "success":
-                    logger.info(f"✅ {endpoint['name']} 认证成功")
+                    logger.info(f"[SUCCESS] {endpoint['name']} 认证成功")
                     await ws.close()
                     return {"success": True, "endpoint": endpoint}
                     
@@ -603,7 +603,7 @@ class AlpacaWebSocketManager:
                     }
                     
             except asyncio.TimeoutError:
-                logger.error(f"⏰ {endpoint['name']} 认证超时")
+                logger.error(f"[TIMEOUT] {endpoint['name']} 认证超时")
                 await ws.close()
                 return {
                     "success": False,
@@ -611,7 +611,7 @@ class AlpacaWebSocketManager:
                 }
                 
         except Exception as e:
-            logger.error(f"🔌 {endpoint['name']} 连接测试失败: {e}")
+            logger.error(f"[CONNECT] {endpoint['name']} 连接测试失败: {e}")
             return {
                 "success": False,
                 "error": f"{endpoint['name']} 连接异常: {str(e)}"
@@ -619,7 +619,7 @@ class AlpacaWebSocketManager:
 
     async def _connect_test_endpoint_fallback(self):
         """连接测试端点作为最后的回退方案"""
-        logger.info("🆘 连接测试端点作为回退方案...")
+        logger.info("[FALLBACK] 连接测试端点作为回退方案...")
         
         try:
             ssl_context = ssl.create_default_context()
@@ -663,7 +663,7 @@ class AlpacaWebSocketManager:
                 "description": "测试端点回退 - 提供模拟数据"
             }
             
-            logger.info("✅ 测试端点回退连接成功")
+            logger.info("[SUCCESS] 测试端点回退连接成功")
             
             # 启动监听任务
             asyncio.create_task(self._listen_stock_websocket())
@@ -675,20 +675,20 @@ class AlpacaWebSocketManager:
     def _can_create_connection(self) -> bool:
         """检查是否可以创建新连接"""
         if self._connections_count >= self._max_connections:
-            logger.warning(f"⚠️ 连接数已达上限: {self._connections_count}/{self._max_connections}")
+            logger.warning(f"[WARNING] 连接数已达上限: {self._connections_count}/{self._max_connections}")
             return False
         return True
     
     def _increment_connection_count(self):
         """增加连接计数"""
         self._connections_count += 1
-        logger.info(f"📈 当前连接数: {self._connections_count}/{self._max_connections}")
+        logger.info(f"[UP] 当前连接数: {self._connections_count}/{self._max_connections}")
     
     def _decrement_connection_count(self):
         """减少连接计数"""
         if self._connections_count > 0:
             self._connections_count -= 1
-            logger.info(f"📉 当前连接数: {self._connections_count}/{self._max_connections}")
+            logger.info(f"[DOWN] 当前连接数: {self._connections_count}/{self._max_connections}")
     
     async def _load_dedicated_websocket_accounts(self):
         """加载专用WebSocket账户配置"""
@@ -707,11 +707,11 @@ class AlpacaWebSocketManager:
                     'paper_trading': stock_config.paper_trading,
                     'tier': getattr(stock_config, 'tier', 'standard')
                 }
-                logger.info(f"✅ 已加载股票WebSocket专用账户: {self._stock_account['name']}")
+                logger.info(f"[SUCCESS] 已加载股票WebSocket专用账户: {self._stock_account['name']}")
             else:
-                logger.warning("⚠️ stock_ws账户已禁用")
+                logger.warning("[WARNING] stock_ws账户已禁用")
         else:
-            logger.warning("⚠️ 未找到stock_ws专用账户配置")
+            logger.warning("[WARNING] 未找到stock_ws专用账户配置")
         
         # 查找专用期权WebSocket账户 (option_ws)
         if 'option_ws' in self.pool.account_configs:
@@ -725,11 +725,11 @@ class AlpacaWebSocketManager:
                     'paper_trading': option_config.paper_trading,
                     'tier': getattr(option_config, 'tier', 'standard')
                 }
-                logger.info(f"✅ 已加载期权WebSocket专用账户: {self._option_account['name']}")
+                logger.info(f"[SUCCESS] 已加载期权WebSocket专用账户: {self._option_account['name']}")
             else:
-                logger.warning("⚠️ option_ws账户已禁用")
+                logger.warning("[WARNING] option_ws账户已禁用")
         else:
-            logger.warning("⚠️ 未找到option_ws专用账户配置")
+            logger.warning("[WARNING] 未找到option_ws专用账户配置")
         
         # 验证至少有一个专用账户可用
         if not self._stock_account and not self._option_account:
@@ -738,12 +738,12 @@ class AlpacaWebSocketManager:
         # 设置主账户配置用于WebSocket欢迎信息 (优先使用stock_ws账户)
         if self._stock_account:
             self.account_config = type('AccountConfig', (), self._stock_account)()
-            logger.info(f"🎯 使用股票WebSocket账户作为主账户配置: {self._stock_account['name']}")
+            logger.info(f"[TARGET] 使用股票WebSocket账户作为主账户配置: {self._stock_account['name']}")
         elif self._option_account:
             self.account_config = type('AccountConfig', (), self._option_account)()
-            logger.info(f"🎯 使用期权WebSocket账户作为主账户配置: {self._option_account['name']}")
+            logger.info(f"[TARGET] 使用期权WebSocket账户作为主账户配置: {self._option_account['name']}")
         
-        logger.info(f"🎯 专用WebSocket账户配置完成")
+        logger.info(f"[TARGET] 专用WebSocket账户配置完成")
     
     def _get_account_for_websocket_type(self, websocket_type: str) -> dict:
         """获取指定WebSocket类型的专用账户"""
@@ -770,11 +770,11 @@ class AlpacaWebSocketManager:
             )
             
             account_info = client.get_account()
-            logger.info(f"✅ 专用账户连接验证成功 - {account['name']}: {account_info.account_number}")
+            logger.info(f"[SUCCESS] 专用账户连接验证成功 - {account['name']}: {account_info.account_number}")
             return True
             
         except Exception as e:
-            logger.error(f"❌ 专用账户连接验证失败 - {account['name']}: {e}")
+            logger.error(f"[ERROR] 专用账户连接验证失败 - {account['name']}: {e}")
             return False
 
     async def _connect_stock_websocket(self, symbols: List[str]):
@@ -788,7 +788,7 @@ class AlpacaWebSocketManager:
             if not self._can_create_connection():
                 raise Exception(f"Stock WebSocket connection limit exceeded: {self._connections_count}/{self._max_connections}")
             
-            logger.info(f"🔌 连接股票WebSocket端点 (专用账户: {self._stock_account['name']}): {self.STOCK_WS_URL}")
+            logger.info(f"[CONNECT] 连接股票WebSocket端点 (专用账户: {self._stock_account['name']}): {self.STOCK_WS_URL}")
             
             ssl_context = ssl.create_default_context()
             self.stock_ws = await websockets.connect(
@@ -823,7 +823,7 @@ class AlpacaWebSocketManager:
             if auth_response.get("T") != "success":
                 raise Exception(f"Stock WebSocket authentication failed: {auth_response}")
             
-            logger.info(f"✅ 股票WebSocket认证成功 (账户: {self._stock_account['name']})")
+            logger.info(f"[SUCCESS] 股票WebSocket认证成功 (账户: {self._stock_account['name']})")
             self.stock_connected = True
             
             # 订阅股票符号
@@ -851,7 +851,7 @@ class AlpacaWebSocketManager:
             if not self._can_create_connection():
                 raise Exception(f"Option WebSocket connection limit exceeded: {self._connections_count}/{self._max_connections}")
             
-            logger.info(f"🔌 连接期权WebSocket端点 (专用账户: {self._option_account['name']}): {self.OPTION_WS_URL}")
+            logger.info(f"[CONNECT] 连接期权WebSocket端点 (专用账户: {self._option_account['name']}): {self.OPTION_WS_URL}")
             
             ssl_context = ssl.create_default_context()
             self.option_ws = await websockets.connect(
@@ -899,7 +899,7 @@ class AlpacaWebSocketManager:
             if auth_response.get("T") != "success":
                 raise Exception(f"Option WebSocket authentication failed: {auth_response}")
             
-            logger.info(f"✅ 期权WebSocket认证成功 (账户: {self._option_account['name']})")
+            logger.info(f"[SUCCESS] 期权WebSocket认证成功 (账户: {self._option_account['name']})")
             self.option_connected = True
             
             # 订阅期权符号
@@ -1060,7 +1060,7 @@ class AlpacaWebSocketManager:
             elif msg_type == "t":  # Trade data
                 await self._handle_trade_data("stock", item)
             elif msg_type in ["success", "subscription"]:
-                logger.info(f"✅ 股票WebSocket状态消息: {item}")
+                logger.info(f"[SUCCESS] 股票WebSocket状态消息: {item}")
             elif msg_type == "error":
                 # 处理错误消息 - 使用改进的错误处理
                 error_strategy = await self.handle_websocket_error(item, "stock")
@@ -1089,7 +1089,7 @@ class AlpacaWebSocketManager:
             elif msg_type == "t":  # Trade data
                 await self._handle_trade_data("option", item)
             elif msg_type in ["success", "subscription"]:
-                logger.info(f"✅ 期权WebSocket状态消息: {item}")
+                logger.info(f"[SUCCESS] 期权WebSocket状态消息: {item}")
             elif msg_type == "error":
                 # 处理错误消息 - 使用改进的错误处理
                 error_strategy = await self.handle_websocket_error(item, "option")
@@ -1109,39 +1109,39 @@ class AlpacaWebSocketManager:
         action = strategy["action"]
         
         if action == "try_iex_fallback" and endpoint_type == "stock":
-            logger.info("🔄 尝试降级到IEX端点...")
+            logger.info("[RETRY] 尝试降级到IEX端点...")
             # 查找IEX端点
             iex_endpoint = next((ep for ep in self.STOCK_ENDPOINTS if ep['name'] == 'IEX'), None)
             if iex_endpoint and iex_endpoint != self.current_stock_endpoint:
                 self.current_stock_endpoint = iex_endpoint
-                logger.info("⬇️ 已切换到IEX端点，重新连接...")
+                logger.info("[DOWN] 已切换到IEX端点，重新连接...")
                 # 触发重连任务
                 asyncio.create_task(self._reconnect_stock_websocket())
             else:
-                logger.warning("⚠️ 没有可用的IEX端点或已在使用IEX端点")
+                logger.warning("[WARNING] 没有可用的IEX端点或已在使用IEX端点")
                 
         elif action == "wait_for_connection_slot":
             wait_time = strategy.get("wait_seconds", 30)
-            logger.info(f"⏳ 连接数超限，等待 {wait_time} 秒后重试...")
+            logger.info(f"[WAIT] 连接数超限，等待 {wait_time} 秒后重试...")
             asyncio.create_task(self._delayed_reconnect(endpoint_type, wait_time))
             
         elif action == "reduce_symbols":
             max_symbols = strategy.get("max_symbols", 10)
-            logger.info(f"📉 减少订阅符号数量到 {max_symbols} 个")
+            logger.info(f"[DOWN] 减少订阅符号数量到 {max_symbols} 个")
             # 这需要在上层处理，这里只记录
             await self._reduce_subscribed_symbols(max_symbols, endpoint_type)
             
         elif action == "wait_and_retry":
             wait_time = strategy.get("wait_seconds", 5)
-            logger.info(f"⏳ 等待 {wait_time} 秒后重试连接...")
+            logger.info(f"[WAIT] 等待 {wait_time} 秒后重试连接...")
             asyncio.create_task(self._delayed_reconnect(endpoint_type, wait_time))
             
         elif action == "retry_with_exponential_backoff":
-            logger.info("🔄 使用指数退避策略重试...")
+            logger.info("[RETRY] 使用指数退避策略重试...")
             asyncio.create_task(self._exponential_backoff_reconnect(endpoint_type))
             
         elif action == "abort_invalid_credentials":
-            logger.error("🚨 API凭证无效，停止尝试连接")
+            logger.error("[ALERT] API凭证无效，停止尝试连接")
             self.connected = False
             if endpoint_type == "stock":
                 self.stock_connected = False
@@ -1149,7 +1149,7 @@ class AlpacaWebSocketManager:
                 self.option_connected = False
                 
         else:
-            logger.info(f"📝 错误策略: {action} (仅记录)")
+            logger.info(f"[NOTE] 错误策略: {action} (仅记录)")
     
     async def _delayed_reconnect(self, endpoint_type: str, delay_seconds: int):
         """延迟重连"""
@@ -1163,7 +1163,7 @@ class AlpacaWebSocketManager:
         """指数退避重连"""
         for attempt in range(max_retries):
             wait_time = min(2 ** attempt, 300)  # 最大等待5分钟
-            logger.info(f"⏳ 指数退避重连 (尝试 {attempt + 1}/{max_retries})，等待 {wait_time} 秒...")
+            logger.info(f"[WAIT] 指数退避重连 (尝试 {attempt + 1}/{max_retries})，等待 {wait_time} 秒...")
             await asyncio.sleep(wait_time)
             
             try:
@@ -1175,12 +1175,12 @@ class AlpacaWebSocketManager:
                 # 检查是否重连成功
                 if (endpoint_type == "stock" and self.stock_connected) or \
                    (endpoint_type == "option" and self.option_connected):
-                    logger.info(f"✅ {endpoint_type} 重连成功")
+                    logger.info(f"[SUCCESS] {endpoint_type} 重连成功")
                     return
             except Exception as e:
-                logger.error(f"❌ {endpoint_type} 重连尝试 {attempt + 1} 失败: {e}")
+                logger.error(f"[ERROR] {endpoint_type} 重连尝试 {attempt + 1} 失败: {e}")
         
-        logger.error(f"🚨 {endpoint_type} 指数退避重连达到最大尝试次数")
+        logger.error(f"[ALERT] {endpoint_type} 指数退避重连达到最大尝试次数")
     
     async def _reduce_subscribed_symbols(self, max_symbols: int, endpoint_type: str):
         """减少订阅的符号数量"""
@@ -1199,7 +1199,7 @@ class AlpacaWebSocketManager:
                 
                 new_stock_symbols = important_symbols[:keep_important] + remaining_symbols[:keep_remaining]
                 
-                logger.info(f"📉 股票符号从 {len(stock_symbols)} 个减少到 {len(new_stock_symbols)} 个")
+                logger.info(f"[DOWN] 股票符号从 {len(stock_symbols)} 个减少到 {len(new_stock_symbols)} 个")
                 logger.info(f"保留的股票符号: {new_stock_symbols}")
                 
                 # 重新订阅减少后的符号
@@ -1210,7 +1210,7 @@ class AlpacaWebSocketManager:
             option_symbols = [s for s in current_symbols if self._is_option_symbol(s)]
             if len(option_symbols) > max_symbols:
                 new_option_symbols = option_symbols[:max_symbols]
-                logger.info(f"📉 期权符号从 {len(option_symbols)} 个减少到 {len(new_option_symbols)} 个")
+                logger.info(f"[DOWN] 期权符号从 {len(option_symbols)} 个减少到 {len(new_option_symbols)} 个")
                 
                 if self.option_connected:
                     await self._subscribe_option_symbols(new_option_symbols)
@@ -1305,7 +1305,7 @@ class AlpacaWebSocketManager:
     
     async def shutdown(self):
         """关闭WebSocket连接"""
-        logger.info("🛑 开始关闭WebSocket连接...")
+        logger.info("[STOP] 开始关闭WebSocket连接...")
         self._shutdown = True
         
         # 停止健康检查任务
@@ -1314,25 +1314,25 @@ class AlpacaWebSocketManager:
             try:
                 await self._health_check_task
             except asyncio.CancelledError:
-                logger.info("✅ 健康检查任务已停止")
+                logger.info("[SUCCESS] 健康检查任务已停止")
         
         # 关闭WebSocket连接
         if self.stock_ws:
             await self.stock_ws.close()
             self.stock_connected = False
             self._decrement_connection_count()
-            logger.info("✅ 股票WebSocket连接已关闭")
+            logger.info("[SUCCESS] 股票WebSocket连接已关闭")
             
         if self.option_ws:
             await self.option_ws.close()
             self.option_connected = False
             self._decrement_connection_count()
-            logger.info("✅ 期权WebSocket连接已关闭")
+            logger.info("[SUCCESS] 期权WebSocket连接已关闭")
         
         # 清除WebSocket类型状态
         self._active_websocket_type = None
         
-        logger.info("🎯 所有WebSocket连接和任务已关闭")
+        logger.info("[TARGET] 所有WebSocket连接和任务已关闭")
     
     def _is_option_symbol(self, symbol: str) -> bool:
         """判断是否为期权代码"""
@@ -1368,9 +1368,12 @@ async def websocket_market_data(websocket: WebSocket):
     logger.info(f"WebSocket客户端连接: {client_id}")
     
     try:
-        # 首先初始化Alpaca连接 - 必须成功才能继续
+        # 检查是否已有Alpaca连接，如果没有才初始化
         if not ws_manager.connected:
+            logger.info(f"首次客户端连接，初始化Alpaca WebSocket管理器: {client_id}")
             await ws_manager.initialize()
+        else:
+            logger.info(f"复用现有Alpaca连接，客户端: {client_id}")
         
         # 发送欢迎消息
         # 获取账户信息，提供安全的默认值
@@ -1409,33 +1412,38 @@ async def websocket_market_data(websocket: WebSocket):
         }
         await websocket.send_text(json.dumps(welcome_message))
         
-        # 自动订阅默认股票和期权
-        all_symbols = DEFAULT_STOCKS + DEFAULT_OPTIONS
-        subscribed_symbols.update(all_symbols)
-        
-        # 启动数据订阅
-        try:
-            await ws_manager.subscribe_symbols(list(subscribed_symbols))
-            logger.info(f"WebSocket订阅成功: {len(subscribed_symbols)} 个符号")
+        # 只有首次连接才需要订阅Alpaca数据
+        if not ws_manager.stock_connected and not ws_manager.option_connected:
+            logger.info(f"首次客户端，启动Alpaca数据订阅: {client_id}")
+            # 自动订阅默认股票和期权
+            all_symbols = DEFAULT_STOCKS + DEFAULT_OPTIONS
+            subscribed_symbols.update(all_symbols)
             
-            # 发送订阅确认
-            subscription_message = {
-                "type": "subscription",
-                "subscribed_symbols": list(subscribed_symbols),
-                "message": f"成功订阅 {len(subscribed_symbols)} 个证券代码的真实数据流",
-                "status": "active"
-            }
-            await websocket.send_text(json.dumps(subscription_message))
+            # 启动数据订阅
+            try:
+                await ws_manager.subscribe_symbols(list(subscribed_symbols))
+                logger.info(f"WebSocket订阅成功: {len(subscribed_symbols)} 个符号")
+            except Exception as e:
+                logger.error(f"WebSocket订阅失败: {e}")
+                # 发送错误消息给客户端
+                error_message = {
+                    "type": "error",
+                    "message": f"真实数据订阅失败: {str(e)}。系统配置为仅真实数据模式，无法提供服务。"
+                }
+                await websocket.send_text(json.dumps(error_message))
+                return
+        else:
+            logger.info(f"复用现有Alpaca订阅，客户端: {client_id}")
+            # 使用已订阅的符号列表
             
-        except Exception as e:
-            logger.error(f"WebSocket订阅失败: {e}")
-            # 发送错误消息给客户端
-            error_message = {
-                "type": "error",
-                "message": f"真实数据订阅失败: {str(e)}。系统配置为仅真实数据模式，无法提供服务。"
-            }
-            await websocket.send_text(json.dumps(error_message))
-            return
+        # 发送订阅确认（对所有客户端）
+        subscription_message = {
+            "type": "subscription",
+            "subscribed_symbols": list(subscribed_symbols),
+            "message": f"成功订阅 {len(subscribed_symbols)} 个证券代码的真实数据流",
+            "status": "active"
+        }
+        await websocket.send_text(json.dumps(subscription_message))
         
         # 保持连接并处理客户端消息
         while True:
