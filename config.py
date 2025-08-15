@@ -21,11 +21,6 @@ def load_secrets():
 secrets = load_secrets()
 
 class Settings(BaseSettings):
-    # Alpaca API Configuration (Legacy single account support)
-    alpaca_api_key: str = secrets.get('alpaca', {}).get('api_key', "YOUR_ALPACA_API_KEY_HERE")
-    alpaca_secret_key: Optional[str] = secrets.get('alpaca', {}).get('secret_key')
-    alpaca_base_url: str = secrets.get('alpaca', {}).get('base_url', "https://paper-api.alpaca.markets")
-    alpaca_paper_trading: bool = secrets.get('alpaca', {}).get('paper_trading', True)
     
     # Multi-Account Configuration
     accounts: Dict = secrets.get('accounts', {})
