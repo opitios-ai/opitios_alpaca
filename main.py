@@ -8,6 +8,7 @@ from app.middleware import (
 )
 from app.logging_config import logging_config
 from app.account_pool import account_pool
+from app.market_utils import init_market_checker
 from config import settings
 from loguru import logger
 from contextlib import asynccontextmanager
@@ -106,6 +107,16 @@ async def lifespan(app: FastAPI):
     logger.info(f"Mock data enabled: {settings.enable_mock_data}")
     logger.info(f"Strict error handling: {settings.strict_error_handling}")
     logger.info(f"Multi-account trading mode: {len(settings.accounts)} accounts configured")
+    
+    # Initialize market time checker
+    try:
+        market_checker = init_market_checker(settings.market_config)
+        market_status = market_checker.get_market_status_info()
+        logger.info(f"Market time checker initialized: {market_status['market_hours']}")
+        logger.info(f"Current market status: {market_status['status']} - {market_status['message']}")
+    except Exception as e:
+        logger.error(f"Failed to initialize market checker: {e}")
+        raise
     
     # Initialize account connection pool
     try:
