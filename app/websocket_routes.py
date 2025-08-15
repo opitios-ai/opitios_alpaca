@@ -8,13 +8,15 @@ import json
 import asyncio
 import websockets
 import msgpack
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from alpaca.trading.client import TradingClient
 from loguru import logger
 import ssl
 import time
+import arrow
 
 from config import settings
+from app.market_utils import is_market_hours, get_market_status_info
 
 # WebSocket路由
 ws_router = APIRouter(prefix="/ws", tags=["websocket"])
@@ -48,6 +50,20 @@ class AlpacaWebSocketManager:
     OPTION_WS_URL = "wss://stream.data.alpaca.markets/v1beta1/indicative"
     TEST_WS_URL = "wss://stream.data.alpaca.markets/v2/test"
     TRADING_WS_URL = "wss://paper-api.alpaca.markets/stream"
+    
+    # 股票数据端点配置
+    STOCK_ENDPOINTS = [
+        {
+            "name": "IEX",
+            "url": "wss://stream.data.alpaca.markets/v2/iex",
+            "description": "IEX数据端点 - 标准账户可用"
+        },
+        {
+            "name": "SIP",
+            "url": "wss://stream.data.alpaca.markets/v2/sip",
+            "description": "SIP数据端点 - 需要高级订阅"
+        }
+    ]
     
     # 连接池相关设置  
     _instance = None
@@ -143,6 +159,7 @@ class AlpacaWebSocketManager:
         self.current_stock_endpoint = None  # 当前使用的股票端点
         self.active_connections_count = 0   # 活跃连接计数
         self.connection_limit_reached = False  # 连接限制状态
+        self._active_websocket_type = None  # 当前活跃的WebSocket类型
         
         # 连接池引用
         self.pool = None
@@ -314,11 +331,16 @@ class AlpacaWebSocketManager:
         return all_healthy, checks
     
     def _check_recent_messages(self, connection_type: str) -> bool:
-        """检查最近是否收到消息"""
+        """检查最近是否收到消息 - 考虑市场时间"""
+        # 如果市场关闭，则不要求有新消息
+        if not is_market_hours():
+            return True  # 市场关闭时不检查消息
+            
         last_time = self.last_message_time.get(connection_type)
         if not last_time:
             return False
         return (time.time() - last_time) < 60  # 60秒内有消息
+    
     
     def _get_connection_status(self, connection_type: str) -> bool:
         """获取连接状态"""
@@ -377,12 +399,19 @@ class AlpacaWebSocketManager:
                     total_messages = sum(self.message_counts.values())
                     logger.info(f"📊 消息统计: 总计={total_messages}, 股票={self.message_counts.get('stock', 0)}, 期权={self.message_counts.get('option', 0)}")
                     
-                    # 如果连接了但长时间没有消息，发出警告
-                    current_time = time.time()
-                    for conn_type in ["stock", "option"]:
-                        last_time = self.last_message_time.get(conn_type)
-                        if last_time and (current_time - last_time) > 300:  # 5分钟没有消息
-                            logger.warning(f"⚠️ {conn_type}WebSocket超过5分钟没有收到消息")
+                    # 检查消息流状态（仅在正常交易时间内）
+                    if is_market_hours():
+                        # 正常交易时间 - 检查消息流
+                        current_time = time.time()
+                        for conn_type in ["stock", "option"]:
+                            last_time = self.last_message_time.get(conn_type)
+                            if last_time and (current_time - last_time) > 300:  # 5分钟没有消息
+                                logger.warning(f"TRADING_HOURS_WARNING: {conn_type} WebSocket no messages for 5+ minutes")
+                    else:
+                        # 非交易时间 - 只报告连接状态
+                        market_info = get_market_status_info()
+                        logger.debug(f"OFF_HOURS: {market_info['message']}")
+                        logger.debug("WEBSOCKET: Connection healthy, no data flow check needed")
                 
             except Exception as e:
                 logger.error(f"健康检查任务错误: {e}")
