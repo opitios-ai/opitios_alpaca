@@ -1,18 +1,17 @@
 """
-优化的预配置账户连接池管理器
-基于Alpaca最佳实践，每账户只创建必要的连接
-支持1000个预配置账户的高效连接管理和负载均衡
+Modern Alpaca Account Connection Pool
+Clean, simple architecture without legacy compatibility layers
 """
 
 import asyncio
 import time
 import hashlib
+import random
 from datetime import datetime, timedelta
-from typing import Dict, Optional, List, Tuple, Any
+from typing import Dict, Optional, List, Any
 from dataclasses import dataclass
 from collections import deque
 from contextlib import asynccontextmanager
-import random
 
 from alpaca.trading.client import TradingClient
 from alpaca.data.historical import StockHistoricalDataClient
@@ -20,168 +19,156 @@ from alpaca.data.historical.option import OptionHistoricalDataClient
 from loguru import logger
 
 from config import settings
-from app.connection_pool import AlpacaConnectionManager, ConnectionType
+from app.connection_pool import ConnectionManager, ConnectionType
 
 
 @dataclass
 class AccountConfig:
-    """优化的账户配置 - 符合Alpaca最佳实践"""
+    """Account configuration"""
     account_id: str
     api_key: str
     secret_key: str
     paper_trading: bool = True
     account_name: Optional[str] = None
     region: str = "us"
-    tier: str = "standard"  # standard, premium, vip
+    tier: str = "standard"
     enabled: bool = True
-    # 移除 max_connections，改为使用Alpaca最佳实践
 
 
-class OptimizedAccountConnection:
-    """优化的账户连接封装 - 使用新的连接管理器"""
+class AccountConnection:
+    """Single account connection wrapper"""
     
     def __init__(self, account_config: AccountConfig):
         self.account_config = account_config
         self.connection_id = f"{account_config.account_id}_{int(time.time())}"
         
-        # 使用优化的连接管理器，符合Alpaca最佳实践
-        self.connection_manager = AlpacaConnectionManager(
+        # Connection manager for this account
+        self.connection_manager = ConnectionManager(
             user_id=account_config.account_id,
             api_key=account_config.api_key,
             secret_key=account_config.secret_key,
             paper_trading=account_config.paper_trading
         )
         
-        # 异步锁
+        # Connection state
         self._lock = asyncio.Lock()
         self._in_use = False
         
     async def test_connection(self) -> bool:
-        """测试连接健康状态"""
+        """Test connection health"""
         try:
             async with self._lock:
-                # 测试核心Trading Client连接
-                is_healthy = await self.connection_manager.test_connection(
-                    ConnectionType.TRADING_CLIENT
-                )
-                
-                if not is_healthy:
-                    logger.warning(f"账户连接不健康: {self.account_config.account_id}")
-                
-                return is_healthy
-                
+                trading_client = await self.connection_manager.get_connection(ConnectionType.TRADING_CLIENT)
+                try:
+                    account = trading_client.get_account()
+                    return account is not None
+                finally:
+                    self.connection_manager.release_connection(ConnectionType.TRADING_CLIENT)
         except Exception as e:
-            logger.error(f"连接测试失败 (账户: {self.account_config.account_id}): {e}")
+            logger.error(f"Connection test failed for account {self.account_config.account_id}: {e}")
             return False
     
     async def acquire(self):
-        """获取连接"""
+        """Acquire connection"""
         await self._lock.acquire()
         self._in_use = True
         
     def release(self):
-        """释放连接"""
+        """Release connection"""
         self._in_use = False
         if self._lock.locked():
             self._lock.release()
     
     async def get_trading_client(self) -> TradingClient:
-        """获取Trading Client"""
+        """Get trading client"""
         return await self.connection_manager.get_connection(ConnectionType.TRADING_CLIENT)
     
     def release_trading_client(self):
-        """释放Trading Client"""
+        """Release trading client"""
         self.connection_manager.release_connection(ConnectionType.TRADING_CLIENT)
     
     async def get_stock_data_client(self) -> StockHistoricalDataClient:
-        """获取股票数据客户端"""
+        """Get stock data client"""
         return await self.connection_manager.get_connection(ConnectionType.STOCK_DATA)
     
     def release_stock_data_client(self):
-        """释放股票数据客户端"""
+        """Release stock data client"""
         self.connection_manager.release_connection(ConnectionType.STOCK_DATA)
+    
+    async def get_option_data_client(self) -> OptionHistoricalDataClient:
+        """Get option data client"""
+        return await self.connection_manager.get_connection(ConnectionType.OPTION_DATA)
+    
+    def release_option_data_client(self):
+        """Release option data client"""
+        self.connection_manager.release_connection(ConnectionType.OPTION_DATA)
     
     @property
     def is_available(self) -> bool:
-        """检查连接是否可用"""
+        """Check if connection is available"""
         return not self._in_use and self.account_config.enabled
     
     @property
     def connection_count(self) -> int:
-        """当前连接总数"""
+        """Current connection count"""
         return self.connection_manager.connection_count
     
     def get_connection_stats(self) -> Dict:
-        """获取连接统计信息"""
+        """Get connection statistics"""
         return self.connection_manager.get_connection_stats()
     
     async def shutdown(self):
-        """关闭所有连接"""
+        """Shutdown connection"""
         await self.connection_manager.shutdown()
 
 
-class AccountConnectionPool:
-    """优化的账户连接池管理器 - 基于Alpaca最佳实践"""
+class AccountPool:
+    """Modern account connection pool"""
     
     def __init__(self, health_check_interval_seconds: int = 300):
         self.health_check_interval_seconds = health_check_interval_seconds
         
-        # 账户配置 {account_id: AccountConfig}
+        # Account configurations and connections
         self.account_configs: Dict[str, AccountConfig] = {}
+        self.account_connections: Dict[str, AccountConnection] = {}
+        self.usage_queues: Dict[str, deque[AccountConnection]] = {}
         
-        # 账户连接管理器 {account_id: OptimizedAccountConnection}
-        self.account_managers: Dict[str, OptimizedAccountConnection] = {}
-        
-        # 连接使用队列 {account_id: deque[OptimizedAccountConnection]} 
-        self.usage_queues: Dict[str, deque[OptimizedAccountConnection]] = {}
-        
-        # 账户ID映射 (用于路由算法)
+        # Account lookup maps
         self.account_id_list: List[str] = []
+        self.account_name_to_id: Dict[str, str] = {}
         
-        # 全局锁
+        # Async components
         self._global_lock = None
-        
-        # 后台任务
         self._background_tasks = []
-        
-        # 初始化标志
         self._initialized = False
         
     async def initialize(self):
-        """初始化连接池"""
+        """Initialize the account pool"""
         if self._initialized:
             return
             
-        logger.info("开始初始化账户连接池...")
+        logger.info("Initializing account connection pool...")
         
-        # 确保异步组件已初始化
         await self._ensure_async_components()
-        
-        # 加载账户配置
         await self._load_account_configs()
-        
-        # 预建立连接
-        await self._prebuild_connections()
-        
-        # 启动后台任务
+        await self._create_connections()
         self._start_background_tasks()
         
         self._initialized = True
-        logger.info(f"账户连接池初始化完成: {len(self.account_configs)} 个账户, {sum(manager.connection_count for manager in self.account_managers.values())} 个连接管理器")
+        logger.info(f"Account pool initialized: {len(self.account_configs)} accounts, {sum(conn.connection_count for conn in self.account_connections.values())} connections")
     
     async def _ensure_async_components(self):
-        """确保异步组件已初始化"""
+        """Ensure async components are initialized"""
         if self._global_lock is None:
             self._global_lock = asyncio.Lock()
     
     async def _load_account_configs(self):
-        """从配置文件加载账户配置"""
-        # 从secrets.yml加载多账户配置
+        """Load account configurations"""
         accounts_config = getattr(settings, 'accounts', {})
         
         if not accounts_config:
-            # 如果没有多账户配置，使用默认单账户配置
-            logger.warning("未找到多账户配置，使用默认单账户配置")
+            # Use default single account configuration
+            logger.warning("No multi-account config found, using default single account")
             default_account = AccountConfig(
                 account_id="default_account",
                 api_key=settings.alpaca_api_key,
@@ -193,10 +180,10 @@ class AccountConnectionPool:
             self.account_id_list = ["default_account"]
             return
         
-        # 加载多账户配置
+        # Load multi-account configurations
         for account_id, config in accounts_config.items():
             if not config.get('enabled', True):
-                logger.info(f"跳过已禁用的账户: {account_id}")
+                logger.info(f"Skipping disabled account: {account_id}")
                 continue
                 
             account_config = AccountConfig(
@@ -208,148 +195,139 @@ class AccountConnectionPool:
                 region=config.get('region', 'us'),
                 tier=config.get('tier', 'standard'),
                 enabled=config.get('enabled', True)
-                # 移除 max_connections，改为使用Alpaca最佳实践（每账户1个核心连接）
             )
             
             self.account_configs[account_id] = account_config
         
         self.account_id_list = list(self.account_configs.keys())
-        logger.info(f"加载了 {len(self.account_configs)} 个账户配置")
+        
+        # Build account name to ID mapping
+        self.account_name_to_id.clear()
+        for account_id, config in self.account_configs.items():
+            if config.account_name:
+                self.account_name_to_id[config.account_name.lower()] = account_id
+        
+        logger.info(f"Loaded {len(self.account_configs)} account configurations")
     
-    async def _prebuild_connections(self):
-        """优化的连接预建立 - 每账户只创建1个核心连接管理器"""
-        logger.info("开始初始化账户连接管理器...")
+    async def _create_connections(self):
+        """Create account connections"""
+        logger.info("Creating account connections...")
         
         for account_id, account_config in self.account_configs.items():
             if not account_config.enabled:
                 continue
                 
-            logger.info(f"为账户 {account_id} 初始化连接管理器 (核心连接: 1个)")
+            logger.info(f"Creating connection for account {account_id}")
             
             self.usage_queues[account_id] = deque()
             
             try:
-                # 创建优化的账户连接管理器（每账户1个）
-                connection_manager = OptimizedAccountConnection(account_config)
+                connection = AccountConnection(account_config)
                 
-                # 测试核心连接
-                if await connection_manager.test_connection():
-                    self.account_managers[account_id] = connection_manager
-                    logger.debug(f"账户 {account_id} 连接管理器初始化成功")
+                if await connection.test_connection():
+                    self.account_connections[account_id] = connection
+                    logger.debug(f"Account {account_id} connection created successfully")
                 else:
-                    logger.error(f"账户 {account_id} 连接管理器测试失败")
+                    logger.error(f"Account {account_id} connection test failed")
                     
             except Exception as e:
-                logger.error(f"初始化账户 {account_id} 连接管理器失败: {e}")
+                logger.error(f"Failed to create connection for account {account_id}: {e}")
         
         total_connections = sum(
-            manager.connection_count for manager in self.account_managers.values()
+            conn.connection_count for conn in self.account_connections.values()
         )
-        logger.info(f"连接管理器初始化完成: {len(self.account_managers)} 个管理器, {total_connections} 个核心连接")
+        logger.info(f"Connection creation complete: {len(self.account_connections)} accounts, {total_connections} connections")
     
     def _start_background_tasks(self):
-        """启动后台维护任务"""
+        """Start background maintenance tasks"""
         try:
             loop = asyncio.get_running_loop()
             
-            # 健康检查任务
+            # Health check task
             health_check_task = asyncio.create_task(self._health_check_loop())
             self._background_tasks.append(health_check_task)
             
-            # 连接清理任务
+            # Cleanup task
             cleanup_task = asyncio.create_task(self._cleanup_loop())
             self._background_tasks.append(cleanup_task)
             
-            logger.info("后台维护任务启动完成")
+            logger.info("Background tasks started")
             
         except RuntimeError:
-            logger.info("没有运行的事件循环，后台任务将稍后启动")
+            logger.info("No running event loop, background tasks will start later")
     
     async def _health_check_loop(self):
-        """健康检查循环"""
+        """Health check loop"""
         while True:
             try:
                 await asyncio.sleep(self.health_check_interval_seconds)
                 await self._perform_health_checks()
             except Exception as e:
-                logger.error(f"健康检查循环错误: {e}")
+                logger.error(f"Health check loop error: {e}")
                 
     async def _cleanup_loop(self):
-        """连接清理循环"""
+        """Cleanup loop"""
         while True:
             try:
-                await asyncio.sleep(60)  # 每分钟清理一次
+                await asyncio.sleep(60)  # Every minute
                 await self._cleanup_idle_connections()
             except Exception as e:
-                logger.error(f"连接清理循环错误: {e}")
+                logger.error(f"Cleanup loop error: {e}")
     
     async def _perform_health_checks(self):
-        """执行健康检查"""
+        """Perform health checks"""
         if not self._global_lock:
             return
             
         async with self._global_lock:
-            for account_id, manager in self.account_managers.items():
+            for account_id, connection in self.account_connections.items():
                 try:
-                    # 对每个账户管理器进行健康检查
-                    await manager.test_connection()
+                    await connection.test_connection()
                 except Exception as e:
-                    logger.error(f"账户 {account_id} 健康检查失败: {e}")
+                    logger.error(f"Health check failed for account {account_id}: {e}")
     
     async def _cleanup_idle_connections(self):
-        """智能连接清理 - 只清理非核心连接"""
-        # 对于预配置账户，只清理数据连接，保持核心Trading Client连接
+        """Cleanup idle connections"""
         if not self._global_lock:
             return
             
         async with self._global_lock:
-            for account_id, manager in self.account_managers.items():
+            for account_id, connection in self.account_connections.items():
                 try:
-                    # 获取连接管理器的统计信息
-                    stats = manager.get_connection_stats()
-                    
-                    # 检查是否有空闲的数据连接可以清理
-                    # 核心连接（TRADING_CLIENT）会保持活跃
-                    # 这个清理逻辑由底层的AlpacaConnectionManager处理
-                    
-                    logger.debug(f"账户 {account_id} 连接状态: 总连接数={stats.get('total_connections', 0)}")
-                    
+                    # Get connection stats for cleanup decisions
+                    stats = connection.get_connection_stats()
+                    logger.debug(f"Account {account_id} connection stats: {stats.get('total_connections', 0)} connections")
                 except Exception as e:
-                    logger.error(f"清理账户 {account_id} 空闲连接失败: {e}")
+                    logger.error(f"Failed to cleanup connections for account {account_id}: {e}")
     
     def get_account_by_routing(self, routing_key: Optional[str] = None, strategy: str = "round_robin") -> Optional[str]:
-        """根据路由策略获取账户ID"""
+        """Get account ID by routing strategy"""
         if not self.account_id_list:
             return None
         
         if strategy == "round_robin":
-            # 简单轮询
             current_time = int(time.time())
             index = current_time % len(self.account_id_list)
             return self.account_id_list[index]
             
         elif strategy == "hash" and routing_key:
-            # 基于routing_key的哈希路由
             hash_value = hashlib.md5(routing_key.encode()).hexdigest()
             index = int(hash_value, 16) % len(self.account_id_list)
             return self.account_id_list[index]
             
         elif strategy == "random":
-            # 随机选择
             return random.choice(self.account_id_list)
             
         elif strategy == "least_loaded":
-            # 选择负载最小的账户
             min_load = float('inf')
             selected_account = None
             
             for account_id in self.account_id_list:
-                manager = self.account_managers.get(account_id)
-                if not manager:
+                connection = self.account_connections.get(account_id)
+                if not connection:
                     continue
                     
-                # 获取管理器的连接统计信息
-                stats = manager.get_connection_stats()
+                stats = connection.get_connection_stats()
                 total_usage = sum(
                     conn_info.get('usage_count', 0) 
                     for conn_info in stats.get('connections', {}).values()
@@ -361,47 +339,82 @@ class AccountConnectionPool:
             
             return selected_account or self.account_id_list[0]
         
-        # 默认返回第一个账户
         return self.account_id_list[0]
     
-    async def get_connection(self, account_id: Optional[str] = None, routing_key: Optional[str] = None) -> OptimizedAccountConnection:
-        """获取优化的账户连接"""
+    def resolve_account_id(self, account_identifier: Optional[str]) -> Optional[str]:
+        """Resolve account identifier to account ID"""
+        if not account_identifier:
+            return None
+            
+        # Check if it's a direct account ID
+        if account_identifier in self.account_configs:
+            return account_identifier
+        
+        # Check if it's an account name
+        account_name_lower = account_identifier.lower()
+        if account_name_lower in self.account_name_to_id:
+            resolved_id = self.account_name_to_id[account_name_lower]
+            logger.debug(f"Account name '{account_identifier}' resolved to ID: {resolved_id}")
+            return resolved_id
+        
+        # Try partial matching
+        for name, account_id in self.account_name_to_id.items():
+            if account_name_lower in name or name in account_name_lower:
+                logger.debug(f"Account name '{account_identifier}' partially matched to ID: {account_id}")
+                return account_id
+        
+        logger.warning(f"Cannot resolve account identifier: {account_identifier}")
+        return None
+    
+    async def get_connection(self, account_id: Optional[str] = None, routing_key: Optional[str] = None) -> AccountConnection:
+        """Get account connection"""
         if not self._initialized:
             await self.initialize()
         
-        # 如果没有指定账户ID，使用路由策略选择
-        if not account_id:
-            account_id = self.get_account_by_routing(routing_key, strategy="round_robin")
+        # Resolve account identifier
+        resolved_account_id = None
+        if account_id:
+            resolved_account_id = self.resolve_account_id(account_id)
+            if not resolved_account_id:
+                raise Exception(f"Cannot resolve account identifier: {account_id}")
         
-        if not account_id or account_id not in self.account_managers:
-            raise Exception(f"账户不存在或无可用连接管理器: {account_id}")
+        # Use routing if no specific account
+        if not resolved_account_id:
+            resolved_account_id = self.get_account_by_routing(routing_key, strategy="round_robin")
+        
+        if not resolved_account_id or resolved_account_id not in self.account_connections:
+            available_accounts = list(self.account_connections.keys())
+            available_names = [self.account_configs[aid].account_name for aid in available_accounts if self.account_configs[aid].account_name]
+            raise Exception(
+                f"Account not found: {resolved_account_id}. "
+                f"Available accounts: {available_accounts}. "
+                f"Available names: {available_names}"
+            )
         
         async with self._global_lock:
-            manager = self.account_managers[account_id]
-            usage_queue = self.usage_queues[account_id]
+            connection = self.account_connections[resolved_account_id]
+            usage_queue = self.usage_queues[resolved_account_id]
             
-            # 检查连接管理器是否可用
-            if not manager.is_available:
-                logger.warning(f"连接管理器繁忙，等待可用 (账户: {account_id})")
-                # 这里可以等待或者直接返回，根据业务需求决定
+            if not connection.is_available:
+                logger.warning(f"Connection busy, waiting for availability (account: {resolved_account_id})")
             
-            # 获取连接管理器
-            await manager.acquire()
+            await connection.acquire()
             
-            # 更新使用队列
-            if manager in usage_queue:
-                usage_queue.remove(manager)
-            usage_queue.append(manager)
+            # Update usage queue
+            if connection in usage_queue:
+                usage_queue.remove(connection)
+            usage_queue.append(connection)
             
-            return manager
+            logger.debug(f"Successfully acquired account connection (account: {resolved_account_id})")
+            return connection
     
-    def release_connection(self, connection: OptimizedAccountConnection):
-        """释放连接"""
+    def release_connection(self, connection: AccountConnection):
+        """Release connection"""
         connection.release()
     
     @asynccontextmanager
     async def get_account_connection(self, account_id: Optional[str] = None, routing_key: Optional[str] = None):
-        """连接上下文管理器"""
+        """Connection context manager"""
         connection = None
         try:
             connection = await self.get_connection(account_id, routing_key)
@@ -411,9 +424,9 @@ class AccountConnectionPool:
                 self.release_connection(connection)
     
     def get_pool_stats(self) -> Dict[str, Any]:
-        """获取优化的连接池统计信息"""
+        """Get pool statistics"""
         total_connections = sum(
-            manager.connection_count for manager in self.account_managers.values()
+            conn.connection_count for conn in self.account_connections.values()
         )
         
         stats = {
@@ -423,59 +436,57 @@ class AccountConnectionPool:
             "account_stats": {}
         }
         
-        for account_id, manager in self.account_managers.items():
+        for account_id, connection in self.account_connections.items():
             account_config = self.account_configs.get(account_id)
-            manager_stats = manager.get_connection_stats()
+            connection_stats = connection.get_connection_stats()
             
             account_stats = {
                 "account_name": account_config.account_name if account_config else account_id,
                 "tier": account_config.tier if account_config else "unknown",
-                "connection_count": manager.connection_count,
-                "is_available": manager.is_available,
-                "connection_details": manager_stats.get('connections', {})
+                "connection_count": connection.connection_count,
+                "is_available": connection.is_available,
+                "connection_details": connection_stats.get('connections', {})
             }
             stats["account_stats"][account_id] = account_stats
         
         return stats
     
     async def shutdown(self):
-        """关闭连接池"""
-        logger.info("关闭账户连接池...")
+        """Shutdown account pool"""
+        logger.info("Shutting down account pool...")
         
-        # 取消后台任务
+        # Cancel background tasks
         for task in self._background_tasks:
             task.cancel()
             
-        # 等待任务完成
+        # Wait for tasks to complete
         await asyncio.gather(*self._background_tasks, return_exceptions=True)
         
-        # 关闭所有账户连接管理器
+        # Shutdown all connections
         if self._global_lock:
             async with self._global_lock:
-                for account_id, manager in list(self.account_managers.items()):
+                for account_id, connection in list(self.account_connections.items()):
                     try:
-                        await manager.shutdown()
+                        await connection.shutdown()
                     except Exception as e:
-                        logger.error(f"关闭账户 {account_id} 连接管理器失败: {e}")
+                        logger.error(f"Failed to shutdown connection for account {account_id}: {e}")
                 
-                self.account_managers.clear()
+                self.account_connections.clear()
                 self.usage_queues.clear()
         
-        logger.info("账户连接池关闭完成")
+        logger.info("Account pool shutdown complete")
 
 
-# 全局账户连接池实例 - 优化配置
-account_pool = AccountConnectionPool(
-    health_check_interval_seconds=300  # 移除max_connections_per_account，使用Alpaca最佳实践
-)
+# Global account pool instance
+account_pool = AccountPool(health_check_interval_seconds=300)
 
 
-# 依赖注入函数
-def get_account_pool() -> AccountConnectionPool:
-    """获取优化的账户连接池实例"""
+# Dependency injection function
+def get_account_pool() -> AccountPool:
+    """Get account pool instance"""
     return account_pool
 
 
-# 向后兼容的别名（替代原来的connection_pool）
+# Backward compatibility alias
 connection_pool = account_pool
 get_connection_pool = get_account_pool
