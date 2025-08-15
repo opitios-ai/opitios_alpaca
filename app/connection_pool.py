@@ -277,21 +277,15 @@ class ConnectionManager:
             
             if account_info:
                 # Extract key account information
-                account_id = account_info.id if hasattr(account_info, 'id') else 'N/A'
+                account_id = str(account_info.id) if hasattr(account_info, 'id') else 'N/A'
                 equity = float(account_info.equity) if hasattr(account_info, 'equity') else 0.0
                 buying_power = float(account_info.buying_power) if hasattr(account_info, 'buying_power') else 0.0
                 cash = float(account_info.cash) if hasattr(account_info, 'cash') else 0.0
                 status = account_info.status if hasattr(account_info, 'status') else 'UNKNOWN'
                 account_type = 'Paper Trading' if getattr(account_info, 'pattern_day_trader', None) is not None else 'Live'
                 
-                # Log successful account verification
-                logger.info(f"Account verification successful (user: {self.user_id})")
-                logger.info(f"  Account ID: {account_id}")
-                logger.info(f"  Account Status: {status}")
-                logger.info(f"  Account Type: {account_type}")
-                logger.info(f"  Total Equity: ${equity:,.2f}")
-                logger.info(f"  Buying Power: ${buying_power:,.2f}")
-                logger.info(f"  Cash: ${cash:,.2f}")
+                # Log successful account verification - One line format for easy tracking
+                logger.info(f"✅ {self.user_id}: {status} | Account#{account_id[:8]}... | Equity=${equity:,.2f} | Cash=${cash:,.2f} | BuyPower=${buying_power:,.2f} | Type={account_type}")
                 
                 # Check account status
                 if status.upper() != 'ACTIVE':

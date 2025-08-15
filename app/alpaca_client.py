@@ -12,12 +12,12 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 class AlpacaClient:
-    def __init__(self, api_key: Optional[str] = None, secret_key: Optional[str] = None, paper_trading: Optional[bool] = None):
-        # Use provided credentials or fall back to settings
-        self.api_key = api_key or settings.alpaca_api_key
-        self.secret_key = secret_key or settings.alpaca_secret_key
-        self.base_url = settings.alpaca_base_url
-        self.paper_trading = paper_trading if paper_trading is not None else settings.alpaca_paper_trading
+    def __init__(self, api_key: str, secret_key: str, paper_trading: bool = True):
+        # Use provided credentials (required in clean architecture)
+        self.api_key = api_key
+        self.secret_key = secret_key
+        self.paper_trading = paper_trading
+        self.base_url = "https://paper-api.alpaca.markets" if paper_trading else "https://api.alpaca.markets"
         
         # Validate credentials
         if not self.api_key or not self.secret_key:
