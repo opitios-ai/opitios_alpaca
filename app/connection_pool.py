@@ -285,7 +285,7 @@ class ConnectionManager:
                 account_type = 'Paper Trading' if getattr(account_info, 'pattern_day_trader', None) is not None else 'Live'
                 
                 # Log successful account verification - One line format for easy tracking
-                logger.info(f"✅ {self.user_id}: {status} | Account#{account_id[:8]}... | Equity=${equity:,.2f} | Cash=${cash:,.2f} | BuyPower=${buying_power:,.2f} | Type={account_type}")
+                logger.info(f"OK {self.user_id}: {status} | Account#{account_id[:8]}... | Equity=${equity:,.2f} | Cash=${cash:,.2f} | BuyPower=${buying_power:,.2f} | Type={account_type}")
                 
                 # Check account status
                 if status.upper() != 'ACTIVE':
