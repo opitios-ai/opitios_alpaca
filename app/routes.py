@@ -36,7 +36,7 @@ async def health_check():
             "real_data_only": settings.real_data_only,
             "mock_data_enabled": settings.enable_mock_data,
             "strict_error_handling": settings.strict_error_handling,
-            "paper_trading": settings.alpaca_paper_trading,
+            "multi_account_mode": len(settings.accounts) > 0,
             "max_option_symbols_per_request": settings.max_option_symbols_per_request
         },
         "data_policy": "Real Alpaca market data only - no calculated or mock data"
