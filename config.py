@@ -59,6 +59,16 @@ class Settings(BaseSettings):
     default_rate_limit: int = secrets.get('rate_limit', {}).get('default_limit', 120)
     rate_limit_window: int = secrets.get('rate_limit', {}).get('window_seconds', 60)
     
+    # Market Hours Configuration
+    market_config: Dict = secrets.get('market', {
+        'open_hour': 8,
+        'open_minute': 50,
+        'close_hour': 17,
+        'close_minute': 0,
+        'timezone': 'US/Eastern',
+        'trading_days': [0, 1, 2, 3, 4]
+    })
+    
     class Config:
         env_file = ".env"
         case_sensitive = False
