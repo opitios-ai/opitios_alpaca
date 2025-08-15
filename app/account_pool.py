@@ -68,6 +68,28 @@ class AccountConnection:
             logger.error(f"Connection test failed for account {self.account_config.account_id}: {e}")
             return False
     
+    @property
+    def alpaca_client(self):
+        """Get AlpacaClient compatible interface"""
+        from app.alpaca_client import AlpacaClient
+        return AlpacaClient(
+            api_key=self.account_config.api_key,
+            secret_key=self.account_config.secret_key,
+            paper_trading=self.account_config.paper_trading
+        )
+    
+    async def get_trading_client(self):
+        """Get trading client from connection manager"""
+        return await self.connection_manager.get_connection(ConnectionType.TRADING_CLIENT)
+    
+    async def get_stock_data_client(self):
+        """Get stock data client from connection manager"""
+        return await self.connection_manager.get_connection(ConnectionType.STOCK_DATA)
+    
+    async def get_option_data_client(self):
+        """Get option data client from connection manager"""
+        return await self.connection_manager.get_connection(ConnectionType.OPTION_DATA)
+    
     async def acquire(self):
         """Acquire connection"""
         await self._lock.acquire()
