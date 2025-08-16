@@ -8,7 +8,7 @@ import asyncio
 import websockets
 import msgpack
 import ssl
-from typing import Dict, List, Set, Optional
+from typing import Dict, List, Set
 from datetime import datetime
 from loguru import logger
 
@@ -213,6 +213,8 @@ class SingletonWebSocketManager:
     
     async def add_client_subscription(self, client_id: str, symbols: List[str]):
         """添加客户端订阅"""
+        global subscribed_symbols, client_subscriptions
+        
         await self.ensure_initialized()
         
         # 记录客户端订阅
@@ -232,6 +234,8 @@ class SingletonWebSocketManager:
     
     async def remove_client_subscription(self, client_id: str):
         """移除客户端订阅（客户端断开时调用）"""
+        global subscribed_symbols, client_subscriptions
+        
         if client_id not in client_subscriptions:
             return
         
@@ -251,6 +255,7 @@ class SingletonWebSocketManager:
     
     async def _update_subscriptions(self):
         """更新Alpaca WebSocket订阅"""
+        
         if not subscribed_symbols:
             return
         
@@ -342,6 +347,8 @@ class SingletonWebSocketManager:
     
     async def _broadcast_data(self, data: dict, data_type: str):
         """广播数据给所有相关的客户端"""
+        global active_connections
+        
         if not data or data.get("T") not in ["q", "t"]:  # 只处理报价(q)和交易(t)数据
             return
         
@@ -425,6 +432,8 @@ DEFAULT_OPTIONS = [
 @ws_router.websocket("/market-data")
 async def websocket_market_data(websocket: WebSocket):
     """WebSocket端点 - 实时市场数据（单例架构）"""
+    global active_connections, client_subscriptions
+    
     await websocket.accept()
     client_id = f"client_{datetime.now().timestamp()}"
     active_connections[client_id] = websocket
@@ -466,7 +475,7 @@ async def websocket_market_data(websocket: WebSocket):
             "client_id": client_id,
             "subscribed_symbols": list(client_subscriptions.get(client_id, [])),
             "total_clients": len(active_connections),
-            "message": f"成功订阅实时数据流",
+            "message": "成功订阅实时数据流",
             "status": "active"
         }
         await websocket.send_text(json.dumps(subscription_message))
