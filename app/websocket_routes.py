@@ -77,22 +77,34 @@ class SingletonWebSocketManager:
     async def _load_dedicated_accounts(self):
         """加载专用WebSocket账户"""
         try:
+            # 导入account_pool以获取AccountConfig对象
+            from app.account_pool import account_pool
+            
+            # 确保account_pool已初始化
+            if not account_pool._initialized:
+                await account_pool.initialize()
+            
             # 获取专用股票WebSocket账户
             stock_account = None
             option_account = None
             
-            for username, account in settings.accounts.items():
-                if username == "stock_ws":
+            # 从account_pool获取AccountConfig对象
+            if 'stock_ws' in account_pool.account_configs:
+                stock_config = account_pool.account_configs['stock_ws']
+                if stock_config.enabled:
                     stock_account = {
-                        'name': username,
-                        'api_key': account.api_key,
-                        'secret_key': account.secret_key
+                        'name': stock_config.account_name or 'stock_ws',
+                        'api_key': stock_config.api_key,
+                        'secret_key': stock_config.secret_key
                     }
-                elif username == "option_ws":
+            
+            if 'option_ws' in account_pool.account_configs:
+                option_config = account_pool.account_configs['option_ws']
+                if option_config.enabled:
                     option_account = {
-                        'name': username,
-                        'api_key': account.api_key,
-                        'secret_key': account.secret_key
+                        'name': option_config.account_name or 'option_ws',
+                        'api_key': option_config.api_key,
+                        'secret_key': option_config.secret_key
                     }
             
             if not stock_account:
