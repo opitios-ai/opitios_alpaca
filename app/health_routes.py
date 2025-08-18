@@ -174,7 +174,7 @@ class WebHealthChecker:
                     "recent_orders_count": len(orders),
                     "orders": [
                         {
-                            "id": order.id,
+                            "id": str(order.id),  # 确保ID是字符串类型
                             "symbol": order.symbol,
                             "side": order.side.value,
                             "qty": float(order.qty),
@@ -236,7 +236,7 @@ class WebHealthChecker:
             return {
                 "status": "success",
                 "data": {
-                    "test_order_id": order.id,
+                    "test_order_id": str(order.id),  # 确保ID是字符串类型
                     "order_submitted": True,
                     "order_cancelled": cancel_success
                 },
@@ -272,7 +272,7 @@ class WebHealthChecker:
             
             return {
                 "status": "success",
-                "data": {"test_order_id": order.id},
+                "data": {"test_order_id": str(order.id)},  # 确保ID是字符串类型
                 "message": "订单取消权限正常"
             }
             

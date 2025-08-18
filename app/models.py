@@ -38,6 +38,7 @@ class StockOrderRequest(BaseModel):
     time_in_force: TimeInForce = Field(default=TimeInForce.DAY, description="Time in force")
     limit_price: Optional[float] = Field(None, description="Limit price for limit orders")
     stop_price: Optional[float] = Field(None, description="Stop price for stop orders")
+    bulk_place: Optional[bool] = Field(default=False, description="If true, place order for all accounts")
 
 # Options Models
 class OptionType(str, Enum):
@@ -62,6 +63,7 @@ class OptionOrderRequest(BaseModel):
     type: OrderType = Field(default=OrderType.MARKET, description="Order type")
     time_in_force: TimeInForce = Field(default=TimeInForce.DAY, description="Time in force")
     limit_price: Optional[float] = Field(None, description="Limit price for limit orders")
+    bulk_place: Optional[bool] = Field(default=False, description="If true, place order for all accounts")
 
 # Response Models
 class StockQuoteResponse(BaseModel):
@@ -134,6 +136,52 @@ class AccountResponse(BaseModel):
     last_equity: float
     multiplier: int
     pattern_day_trader: bool
+
+class BulkOrderResult(BaseModel):
+    """Single account result in bulk order"""
+    account_id: str
+    account_name: Optional[str] = None
+    success: bool
+    order: Optional[OrderResponse] = None
+    error: Optional[str] = None
+
+class BulkOrderResponse(BaseModel):
+    """Response for bulk order operations"""
+    bulk_place: bool = True
+    total_accounts: int
+    successful_orders: int
+    failed_orders: int
+    results: List[BulkOrderResult]
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "bulk_place": True,
+                "total_accounts": 3,
+                "successful_orders": 2,
+                "failed_orders": 1,
+                "results": [
+                    {
+                        "account_id": "account_1",
+                        "account_name": "Trading Account 1",
+                        "success": True,
+                        "order": {
+                            "id": "order_123",
+                            "symbol": "AAPL",
+                            "qty": 10,
+                            "side": "buy",
+                            "order_type": "market",
+                            "status": "pending_new"
+                        }
+                    },
+                    {
+                        "account_id": "account_2", 
+                        "success": False,
+                        "error": "Insufficient buying power"
+                    }
+                ]
+            }
+        }
 
 class ErrorResponse(BaseModel):
     """Structured error response for API failures"""

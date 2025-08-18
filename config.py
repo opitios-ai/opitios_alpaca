@@ -69,6 +69,11 @@ class Settings(BaseSettings):
         'trading_days': [0, 1, 2, 3, 4]
     })
     
+    # Discord Configuration
+    discord_config: Dict = secrets.get('discord', {
+        'transaction_channel': None
+    })
+    
     class Config:
         env_file = ".env"
         case_sensitive = False

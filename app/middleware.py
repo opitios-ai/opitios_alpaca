@@ -1,10 +1,11 @@
 """
 简化的认证和限流中间件
-支持外部JWT验证和基础限流功能
+支持外部JWT验证、内网判断和基础限流功能
 """
 
 import time
 import hashlib
+import ipaddress
 from typing import Dict, Optional, Callable, Any
 from datetime import datetime, timedelta
 from collections import defaultdict, deque
@@ -218,6 +219,37 @@ def create_jwt_token(user_data: dict) -> str:
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
+def get_allowed_external_ips():
+    """获取允许的外部IP列表"""
+    try:
+        from config import secrets
+        return secrets.get('allowed_external_ips', [])
+    except Exception as e:
+        logger.warning(f"Failed to load allowed external IPs: {e}")
+        return []
+
+def is_internal_ip(ip: str) -> bool:
+    """判断是否为内网IP"""
+    try:
+        # 检查白名单IP
+        allowed_external_ips = get_allowed_external_ips()
+        if ip in allowed_external_ips:
+            return True
+            
+        # 检查私有IP地址
+        ip_obj = ipaddress.ip_address(ip)
+        if ip_obj.is_private or ip_obj.is_loopback:
+            return True
+            
+        # 检查特殊网段 (如果需要)
+        # if ip_obj in ipaddress.ip_network("100.64.0.0/10"):
+        #     return True
+            
+        return False
+    except ValueError:
+        logger.warning(f"Invalid IP address format: {ip}")
+        return False
+
 def verify_jwt_token(token: str) -> dict:
     """验证JWT token - 支持外部token"""
     try:
@@ -229,13 +261,67 @@ def verify_jwt_token(token: str) -> dict:
         raise HTTPException(status_code=401, detail="Invalid token")
 
 
-async def get_current_context(credentials: HTTPAuthorizationCredentials = Depends(security)) -> RequestContext:
-    """获取当前请求上下文"""
-    token = credentials.credentials
-    payload = verify_jwt_token(token)
+async def internal_or_jwt_auth(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer(auto_error=False))
+):
+    """内网或JWT认证 - 参考 Opitios_Service 的实现"""
+    client_ip = request.client.host if request.client else "unknown"
+    is_internal = is_internal_ip(client_ip)
     
-    # 创建简化的请求上下文
-    context = RequestContext(payload)
+    logger.debug(f"Client IP: {client_ip}, Is Internal: {is_internal}")
+    
+    if is_internal:
+        # 内部访问：尝试解析token获取用户信息，如果没有token则仅标记为内部访问
+        user_data = None
+        if credentials and credentials.credentials:
+            try:
+                payload = verify_jwt_token(credentials.credentials)
+                user_data = payload
+                logger.debug(f"Internal access with valid token: {user_data.get('user_id', 'unknown')}")
+            except HTTPException:
+                logger.debug("Internal access with invalid token, proceeding without user data")
+                pass
+        else:
+            logger.debug("Internal access without token")
+        
+        return {
+            "ip": client_ip, 
+            "internal": True,
+            "user": user_data  # 如果有有效token则包含用户信息，否则为None
+        }
+    
+    # 外网IP，必须有JWT
+    token = credentials.credentials if credentials else None
+    payload = verify_jwt_token(token) if token else None
+    
+    if not payload:
+        logger.warning(f"External IP {client_ip} attempted access without valid JWT")
+        raise HTTPException(status_code=401, detail="Invalid or missing JWT token")
+        
+    logger.debug(f"External access with valid token: {payload.get('user_id', 'unknown')}")
+    return {"ip": client_ip, "internal": False, "user": payload}
+
+async def get_current_context(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer(auto_error=False))
+) -> RequestContext:
+    """获取当前请求上下文 - 支持内网免JWT"""
+    auth_result = await internal_or_jwt_auth(request, credentials)
+    
+    # 如果是内网访问且没有用户信息，创建默认上下文
+    if auth_result["internal"] and not auth_result["user"]:
+        default_payload = {
+            "user_id": "internal_user",
+            "account_id": None,
+            "permissions": ["trading", "market_data", "admin"]  # 内网默认给予所有权限
+        }
+        context = RequestContext(default_payload)
+    else:
+        # 使用JWT中的用户信息
+        user_data = auth_result["user"]
+        context = RequestContext(user_data)
+    
     context.update_activity()
     return context
 
@@ -244,8 +330,37 @@ async def get_current_context(credentials: HTTPAuthorizationCredentials = Depend
 get_current_user = get_current_context
 
 
+def role_required(roles: list[str]):
+    """角色权限检查装饰器"""
+    def dependency(
+        request: Request,
+        credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer(auto_error=False))
+    ):
+        # 使用内网或JWT认证
+        import asyncio
+        auth_result = asyncio.create_task(internal_or_jwt_auth(request, credentials))
+        auth_data = asyncio.get_event_loop().run_until_complete(auth_result)
+        
+        # 内网/白名单IP直接放行
+        if auth_data.get('internal'):
+            logger.debug(f"Internal IP {auth_data.get('ip')} bypassing role check")
+            return
+            
+        payload = auth_data.get('user')
+        if not payload:
+            raise HTTPException(status_code=401, detail="Invalid user account")
+            
+        user_role = payload.get('permission_group') or payload.get('role', 'user')
+        
+        if user_role not in roles:
+            raise HTTPException(
+                status_code=403, 
+                detail=f"You need one of roles: {roles}. Current role: {user_role}"
+            )
+    return dependency
+
 class AuthenticationMiddleware(BaseHTTPMiddleware):
-    """简化的认证中间件"""
+    """支持内网免JWT的认证中间件"""
     
     def __init__(self, app):
         super().__init__(app)
@@ -266,6 +381,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             "/api/v1/auth/demo-token",
             "/api/v1/auth/verify-token",
             "/api/v1/auth/alpaca-credentials",
+            "/api/v1/auth/admin-token",  # 新增管理员token端点
             # 静态文件路径
             "/static",
             "/favicon.ico",
@@ -281,7 +397,6 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         
         # Debug logging
-        from loguru import logger
         logger.debug(f"AuthMiddleware checking path: {path}")
         
         # Check for health endpoints first
@@ -294,10 +409,48 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             any(path.startswith("/api/v1/stocks/") and path.endswith("/quote") for _ in [None])):
             logger.debug(f"Skipping auth for public path: {path}")
             return await call_next(request)
+        
+        # 获取客户端IP
+        client_ip = request.client.host if request.client else "unknown"
+        is_internal = is_internal_ip(client_ip)
+        
+        # 内网访问：可选JWT
+        if is_internal:
+            logger.debug(f"Internal IP {client_ip} accessing {path}")
             
-        # 检查Authorization header
+            # 尝试获取JWT信息（如果有的话）
+            auth_header = request.headers.get("Authorization")
+            if auth_header and auth_header.startswith("Bearer "):
+                try:
+                    token = auth_header.split(" ")[1]
+                    payload = verify_jwt_token(token)
+                    request.state.user_id = payload.get("user_id", "internal_user")
+                    request.state.account_id = payload.get("account_id")
+                    request.state.permissions = payload.get("permissions", ["trading", "market_data", "admin"])
+                    request.state.internal = True
+                    logger.debug(f"Internal access with JWT: {request.state.user_id}")
+                except HTTPException:
+                    # JWT无效，但内网访问仍然允许
+                    request.state.user_id = "internal_user"
+                    request.state.account_id = None
+                    request.state.permissions = ["trading", "market_data", "admin"]
+                    request.state.internal = True
+                    logger.debug("Internal access with invalid JWT, using default permissions")
+            else:
+                # 内网访问，无JWT
+                request.state.user_id = "internal_user"
+                request.state.account_id = None
+                request.state.permissions = ["trading", "market_data", "admin"]
+                request.state.internal = True
+                logger.debug("Internal access without JWT, using default permissions")
+                
+            return await call_next(request)
+        
+        # 外网访问：必须有JWT
+        logger.debug(f"External IP {client_ip} accessing {path}")
         auth_header = request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
+            logger.warning(f"External IP {client_ip} missing authorization header")
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Missing or invalid authorization header"}
@@ -309,7 +462,10 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             request.state.user_id = payload.get("user_id", "external_user")
             request.state.account_id = payload.get("account_id")
             request.state.permissions = payload.get("permissions", [])
+            request.state.internal = False
+            logger.debug(f"External access with valid JWT: {request.state.user_id}")
         except HTTPException as e:
+            logger.warning(f"External IP {client_ip} invalid JWT: {e.detail}")
             return JSONResponse(status_code=e.status_code, content={"detail": e.detail})
             
         return await call_next(request)
