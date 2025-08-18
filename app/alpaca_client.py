@@ -5,6 +5,8 @@ from alpaca.trading.requests import MarketOrderRequest, LimitOrderRequest, StopO
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderType
 from alpaca.data.requests import StockLatestQuoteRequest, StockBarsRequest, OptionLatestQuoteRequest, OptionChainRequest
 from alpaca.data.timeframe import TimeFrame
+from sqlalchemy import false
+
 from config import settings
 from loguru import logger
 from typing import Optional, List, Dict, Any
@@ -406,7 +408,7 @@ class AlpacaClient:
     # Trading Methods
     async def place_stock_order(self, symbol: str, qty: float, side: str, order_type: str = "market", 
                               limit_price: Optional[float] = None, stop_price: Optional[float] = None,
-                              time_in_force: str = "day") -> Dict[str, Any]:
+                              time_in_force: str = "day", user_id: Optional[str] = None) -> Dict[str, Any]:
         """Place a stock order"""
         try:
             # Convert string parameters to Alpaca enums
@@ -458,10 +460,17 @@ class AlpacaClient:
                 "filled_at": order.filled_at
             }
             
-            # 详细的成功日志
+            # 详细的成功日志 - 包含用户信息
             price_str = f" at ${limit_price}" if limit_price else f" at ${stop_price} (stop)" if stop_price else ""
-            logger.info(f"✅ Stock order placed successfully: {order_result['symbol']} x{order_result['qty']} {order_result['side'].upper()}{price_str} | Order ID: {order_result['id']} | Status: {order_result['status']}")
-            
+            user_info = f"User: {user_id} | " if user_id else ""
+            logger.info(f"✅ Stock order placed successfully: {user_info}{order_result['symbol']} x{order_result['qty']} {order_result['side'].upper()}{price_str} | Order ID: {order_result['id']} | Status: {order_result['status']}")
+
+            # 发送Discord通知
+            try:
+                from app.utils.discord_notifier import send_trade_notification
+                asyncio.create_task(send_trade_notification(order_result, user_info, is_bulk=False))
+            except Exception as e:
+                logger.warning(f"Failed to send Discord notification: {e}")
             return order_result
             
         except Exception as e:
@@ -469,7 +478,8 @@ class AlpacaClient:
             return {"error": str(e)}
 
     async def place_option_order(self, option_symbol: str, qty: int, side: str, order_type: str = "market",
-                               limit_price: Optional[float] = None, time_in_force: str = "day") -> Dict[str, Any]:
+                               limit_price: Optional[float] = None, time_in_force: str = "day", 
+                               user_id: Optional[str] = None) -> Dict[str, Any]:
         """Place an options order using Alpaca's options trading API"""
         try:
             # Convert string parameters to Alpaca enums
@@ -522,9 +532,10 @@ class AlpacaClient:
                 "asset_class": "option"
             }
             
-            # 详细的成功日志
+            # 详细的成功日志 - 包含用户信息
             price_str = f" at ${limit_price}" if limit_price else ""
-            logger.info(f"✅ Option order placed successfully: {order.symbol} x{order_result['qty']} {order_result['side'].upper()}{price_str} | Order ID: {order_result['id']} | Status: {order_result['status']}")
+            user_info = f"User: {user_id} | " if user_id else ""
+            logger.info(f"✅ Option order placed successfully: {user_info}{order.symbol} x{order_result['qty']} {order_result['side'].upper()}{price_str} | Order ID: {order_result['id']} | Status: {order_result['status']}")
             
             return order_result
             
@@ -672,20 +683,21 @@ class PooledAlpacaClient:
     async def place_stock_order(self, symbol: str, qty: float, side: str, order_type: str = "market", 
                               limit_price: Optional[float] = None, stop_price: Optional[float] = None,
                               time_in_force: str = "day", account_id: Optional[str] = None, 
-                              routing_key: Optional[str] = None) -> Dict[str, Any]:
+                              routing_key: Optional[str] = None, user_id: Optional[str] = None) -> Dict[str, Any]:
         """下股票订单 - 使用连接池"""
         async with self.pool.get_account_connection(account_id, routing_key or symbol) as connection:
             return await connection.alpaca_client.place_stock_order(
-                symbol, qty, side, order_type, limit_price, stop_price, time_in_force
+                symbol, qty, side, order_type, limit_price, stop_price, time_in_force, user_id
             )
     
     async def place_option_order(self, option_symbol: str, qty: int, side: str, order_type: str = "market",
                                limit_price: Optional[float] = None, time_in_force: str = "day",
-                               account_id: Optional[str] = None, routing_key: Optional[str] = None) -> Dict[str, Any]:
+                               account_id: Optional[str] = None, routing_key: Optional[str] = None, 
+                               user_id: Optional[str] = None) -> Dict[str, Any]:
         """下期权订单 - 使用连接池"""
         async with self.pool.get_account_connection(account_id, routing_key or option_symbol) as connection:
             return await connection.alpaca_client.place_option_order(
-                option_symbol, qty, side, order_type, limit_price, time_in_force
+                option_symbol, qty, side, order_type, limit_price, time_in_force, user_id
             )
     
     async def get_account(self, account_id: Optional[str] = None, routing_key: Optional[str] = None) -> Dict[str, Any]:
@@ -712,7 +724,7 @@ class PooledAlpacaClient:
     
     async def bulk_place_stock_order(self, symbol: str, qty: float, side: str, order_type: str = "market", 
                                    limit_price: Optional[float] = None, stop_price: Optional[float] = None,
-                                   time_in_force: str = "day") -> Dict[str, Any]:
+                                   time_in_force: str = "day", user_id: Optional[str] = None) -> Dict[str, Any]:
         """为所有账户批量下股票订单"""
         from app.models import BulkOrderResult
         
@@ -740,7 +752,8 @@ class PooledAlpacaClient:
                     limit_price=limit_price,
                     stop_price=stop_price,
                     time_in_force=time_in_force,
-                    account_id=account_id
+                    account_id=account_id,
+                    user_id=user_id
                 )
                 
                 if "error" in order_result:
@@ -767,13 +780,14 @@ class PooledAlpacaClient:
                         order=OrderResponse(**order_result)
                     ))
                     
-                    # 详细的成功日志
+                    # 详细的成功日志 - 包含用户信息
                     price_str = f" at ${order_result.get('limit_price')}" if order_result.get('limit_price') else f" at ${order_result.get('stop_price')} (stop)" if order_result.get('stop_price') else ""
-                    logger.info(f"✅ Stock order placed for {account_name}: {order_result['symbol']} x{order_result['qty']} {order_result['side'].upper()}{price_str} | Order ID: {order_result['id']}")
+                    user_info = f"User: {user_id} | " if user_id else ""
+                    logger.info(f"✅ Stock order placed for {account_name}: {user_info}{order_result['symbol']} x{order_result['qty']} {order_result['side'].upper()}{price_str} | Order ID: {order_result['id']}")
                     
                     # 发送Discord通知
                     try:
-                        from app.discord_notifier import send_trade_notification
+                        from app.utils.discord_notifier import send_trade_notification
                         asyncio.create_task(send_trade_notification(order_result, account_name, is_bulk=True))
                     except Exception as e:
                         logger.warning(f"Failed to send Discord notification: {e}")
@@ -794,7 +808,7 @@ class PooledAlpacaClient:
         # 发送批量交易汇总通知
         if successful_orders > 0:
             try:
-                from app.discord_notifier import send_bulk_trade_summary
+                from app.utils.discord_notifier import send_bulk_trade_summary
                 asyncio.create_task(send_bulk_trade_summary(
                     [r.dict() for r in results], symbol, qty, side, "stock"
                 ))
@@ -810,7 +824,8 @@ class PooledAlpacaClient:
         }
     
     async def bulk_place_option_order(self, option_symbol: str, qty: int, side: str, order_type: str = "market",
-                                    limit_price: Optional[float] = None, time_in_force: str = "day") -> Dict[str, Any]:
+                                    limit_price: Optional[float] = None, time_in_force: str = "day",
+                                    user_id: Optional[str] = None) -> Dict[str, Any]:
         """为所有账户批量下期权订单"""
         from app.models import BulkOrderResult
         
@@ -837,7 +852,8 @@ class PooledAlpacaClient:
                     order_type=order_type,
                     limit_price=limit_price,
                     time_in_force=time_in_force,
-                    account_id=account_id
+                    account_id=account_id,
+                    user_id=user_id
                 )
                 
                 if "error" in order_result:
@@ -864,13 +880,14 @@ class PooledAlpacaClient:
                         order=OrderResponse(**order_result)
                     ))
                     
-                    # 详细的成功日志
+                    # 详细的成功日志 - 包含用户信息
                     price_str = f" at ${order_result.get('limit_price')}" if order_result.get('limit_price') else ""
-                    logger.info(f"✅ Option order placed for {account_name}: {order_result['symbol']} x{order_result['qty']} {order_result['side'].upper()}{price_str} | Order ID: {order_result['id']}")
+                    user_info = f"User: {user_id} | " if user_id else ""
+                    logger.info(f"✅ Option order placed for {account_name}: {user_info}{order_result['symbol']} x{order_result['qty']} {order_result['side'].upper()}{price_str} | Order ID: {order_result['id']}")
                     
                     # 发送Discord通知
                     try:
-                        from app.discord_notifier import send_trade_notification
+                        from app.utils.discord_notifier import send_trade_notification
                         asyncio.create_task(send_trade_notification(order_result, account_name, is_bulk=True))
                     except Exception as e:
                         logger.warning(f"Failed to send Discord notification: {e}")

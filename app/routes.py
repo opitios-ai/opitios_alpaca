@@ -600,6 +600,13 @@ async def place_stock_order(
 ):
     """Place a stock order - supports both single account and bulk placement"""
     try:
+        # Extract user information from auth_data
+        user_id = None
+        if auth_data and auth_data.get("user"):
+            user_id = auth_data["user"].get("user_id")
+        elif auth_data and auth_data.get("internal"):
+            user_id = "internal_user"
+        
         # 检查是否为批量下单
         if request.bulk_place:
             logger.info(f"Processing bulk stock order: {request.symbol} {request.qty} {request.side.value}")
@@ -611,7 +618,8 @@ async def place_stock_order(
                 order_type=request.type.value,
                 limit_price=request.limit_price,
                 stop_price=request.stop_price,
-                time_in_force=request.time_in_force.value
+                time_in_force=request.time_in_force.value,
+                user_id=user_id
             )
             
             return BulkOrderResponse(**bulk_result)
@@ -627,7 +635,8 @@ async def place_stock_order(
                 stop_price=request.stop_price,
                 time_in_force=request.time_in_force.value,
                 account_id=routing_info["account_id"],
-                routing_key=routing_info["routing_key"]
+                routing_key=routing_info["routing_key"],
+                user_id=user_id
             )
             if "error" in order_data:
                 raise HTTPException(status_code=400, detail=order_data["error"])
@@ -676,6 +685,13 @@ async def place_option_order(
 ):
     """Place an options order - supports both single account and bulk placement"""
     try:
+        # Extract user information from auth_data
+        user_id = None
+        if auth_data and auth_data.get("user"):
+            user_id = auth_data["user"].get("user_id")
+        elif auth_data and auth_data.get("internal"):
+            user_id = "internal_user"
+        
         # 检查是否为批量下单
         if request.bulk_place:
             logger.info(f"Processing bulk option order: {request.option_symbol} {request.qty} {request.side.value}")
@@ -686,7 +702,8 @@ async def place_option_order(
                 side=request.side.value,
                 order_type=request.type.value,
                 limit_price=request.limit_price,
-                time_in_force=request.time_in_force.value
+                time_in_force=request.time_in_force.value,
+                user_id=user_id
             )
             
             return BulkOrderResponse(**bulk_result)
@@ -701,7 +718,8 @@ async def place_option_order(
                 limit_price=request.limit_price,
                 time_in_force=request.time_in_force.value,
                 account_id=routing_info["account_id"],
-                routing_key=routing_info["routing_key"]
+                routing_key=routing_info["routing_key"],
+                user_id=user_id
             )
             if "error" in order_data:
                 raise HTTPException(status_code=400, detail=order_data["error"])
@@ -724,6 +742,10 @@ async def get_orders(
 ):
     """Get orders - uses connection pool"""
     try:
+        if routing_info["account_id"] is None:
+            logger.error(f"Account ID is required to get orders.")
+            raise HTTPException(status_code=400, detail="Account ID is required for order retrieval")
+        logger.info(f"getting orders for account {routing_info['account_id']} with status {status} and limit {limit}")
         orders = await pooled_client.get_orders(
             status=status, 
             limit=limit,
@@ -733,6 +755,8 @@ async def get_orders(
         if orders and "error" in orders[0]:
             raise HTTPException(status_code=500, detail=orders[0]["error"])
         return [OrderResponse(**order) for order in orders if "error" not in order]
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error in get_orders: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -747,6 +771,14 @@ async def cancel_order(
 ):
     """Cancel an order - uses connection pool"""
     try:
+        if routing_info["account_id"] is None:
+            logger.error(f"Account ID is required to cancel order {order_id}.")
+            raise HTTPException(status_code=400, detail="Account ID is required for order cancellation")
+        logger.info(f"Cancelling order {order_id} for account {routing_info['account_id']}")
+        if not order_id:
+            logger.error(f"Order ID is required to cancel order.")
+            raise HTTPException(status_code=400, detail="Order ID is required for cancellation")
+        # Cancel the order using the pooled client
         result = await pooled_client.cancel_order(
             order_id=order_id,
             account_id=routing_info["account_id"],
@@ -755,6 +787,8 @@ async def cancel_order(
         if "error" in result:
             raise HTTPException(status_code=400, detail=result["error"])
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error in cancel_order: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -779,6 +813,13 @@ async def buy_stock(
 ):
     """Quick buy stock endpoint - supports bulk placement"""
     try:
+        # Extract user information from auth_data
+        user_id = None
+        if auth_data and auth_data.get("user"):
+            user_id = auth_data["user"].get("user_id")
+        elif auth_data and auth_data.get("internal"):
+            user_id = "internal_user"
+        
         # 检查是否为批量下单
         if bulk_place:
             logger.info(f"Processing bulk buy order: {symbol} {qty}")
@@ -788,7 +829,8 @@ async def buy_stock(
                 qty=qty,
                 side="buy",
                 order_type=order_type,
-                limit_price=limit_price
+                limit_price=limit_price,
+                user_id=user_id
             )
             
             return BulkOrderResponse(**bulk_result)
@@ -802,7 +844,8 @@ async def buy_stock(
                 order_type=order_type,
                 limit_price=limit_price,
                 account_id=routing_info["account_id"],
-                routing_key=routing_info["routing_key"]
+                routing_key=routing_info["routing_key"],
+                user_id=user_id
             )
             if "error" in order_data:
                 raise HTTPException(status_code=400, detail=order_data["error"])
@@ -831,6 +874,13 @@ async def sell_stock(
 ):
     """Quick sell stock endpoint - supports bulk placement"""
     try:
+        # Extract user information from auth_data
+        user_id = None
+        if auth_data and auth_data.get("user"):
+            user_id = auth_data["user"].get("user_id")
+        elif auth_data and auth_data.get("internal"):
+            user_id = "internal_user"
+        
         # 检查是否为批量下单
         if bulk_place:
             logger.info(f"Processing bulk sell order: {symbol} {qty}")
@@ -840,7 +890,8 @@ async def sell_stock(
                 qty=qty,
                 side="sell",
                 order_type=order_type,
-                limit_price=limit_price
+                limit_price=limit_price,
+                user_id=user_id
             )
             
             return BulkOrderResponse(**bulk_result)
@@ -854,7 +905,8 @@ async def sell_stock(
                 order_type=order_type,
                 limit_price=limit_price,
                 account_id=routing_info["account_id"],
-                routing_key=routing_info["routing_key"]
+                routing_key=routing_info["routing_key"],
+                user_id=user_id
             )
             if "error" in order_data:
                 raise HTTPException(status_code=400, detail=order_data["error"])
