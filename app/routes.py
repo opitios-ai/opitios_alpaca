@@ -600,12 +600,20 @@ async def place_stock_order(
 ):
     """Place a stock order - supports both single account and bulk placement"""
     try:
-        # Extract user information from auth_data
+        # Extract user information from auth_data - REQUIRED for security
+        if routing_info["account_id"] is None:
+            logger.error("Stock order attempt without account ID - SECURITY RISK")
+            raise HTTPException(status_code=400, detail="Account ID is required for order placement")
         user_id = None
         if auth_data and auth_data.get("user"):
             user_id = auth_data["user"].get("user_id")
         elif auth_data and auth_data.get("internal"):
             user_id = "internal_user"
+        
+        # Security check: Require user identification for all orders
+        if not user_id:
+            logger.error("Stock order attempt without user identification - SECURITY RISK")
+            raise HTTPException(status_code=401, detail="User identification required for order placement")
         
         # 检查是否为批量下单
         if request.bulk_place:
@@ -642,6 +650,8 @@ async def place_stock_order(
                 raise HTTPException(status_code=400, detail=order_data["error"])
             return OrderResponse(**order_data)
             
+    except Exception as e:
+        raise
     except Exception as e:
         logger.error(f"Error in place_stock_order: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -685,12 +695,20 @@ async def place_option_order(
 ):
     """Place an options order - supports both single account and bulk placement"""
     try:
-        # Extract user information from auth_data
+        # Extract user information from auth_data - REQUIRED for security
+        if routing_info["account_id"] is None:
+            logger.error("Option order attempt without account ID - SECURITY RISK")
+            raise HTTPException(status_code=400, detail="Account ID is required for order placement")
         user_id = None
         if auth_data and auth_data.get("user"):
             user_id = auth_data["user"].get("user_id")
         elif auth_data and auth_data.get("internal"):
             user_id = "internal_user"
+        
+        # Security check: Require user identification for all orders
+        if not user_id:
+            logger.error("Option order attempt without user identification - SECURITY RISK")
+            raise HTTPException(status_code=401, detail="User identification required for order placement")
         
         # 检查是否为批量下单
         if request.bulk_place:
@@ -725,6 +743,8 @@ async def place_option_order(
                 raise HTTPException(status_code=400, detail=order_data["error"])
             return order_data
             
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error in place_option_order: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -813,12 +833,17 @@ async def buy_stock(
 ):
     """Quick buy stock endpoint - supports bulk placement"""
     try:
-        # Extract user information from auth_data
+        # Extract user information from auth_data - REQUIRED for security
         user_id = None
         if auth_data and auth_data.get("user"):
             user_id = auth_data["user"].get("user_id")
         elif auth_data and auth_data.get("internal"):
             user_id = "internal_user"
+        
+        # Security check: Require user identification for all orders
+        if not user_id:
+            logger.error("Buy stock attempt without user identification - SECURITY RISK")
+            raise HTTPException(status_code=401, detail="User identification required for order placement")
         
         # 检查是否为批量下单
         if bulk_place:
