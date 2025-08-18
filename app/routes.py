@@ -3,10 +3,11 @@ from typing import List, Optional
 from app.models import (
     StockQuoteRequest, MultiStockQuoteRequest, StockOrderRequest, 
     OptionOrderRequest, OptionsChainRequest, OptionQuoteRequest, MultiOptionQuoteRequest,
-    StockQuoteResponse, OrderResponse, PositionResponse, AccountResponse
+    StockQuoteResponse, OrderResponse, PositionResponse, AccountResponse,
+    BulkOrderResponse, BulkOrderResult
 )
 from app.alpaca_client import AlpacaClient, pooled_client
-from app.middleware import get_current_context, RequestContext
+from app.middleware import get_current_context, RequestContext, internal_or_jwt_auth, role_required
 from config import settings
 from loguru import logger
 
@@ -512,9 +513,12 @@ async def get_options_chain_by_symbol(
 @router.post("/stocks/order", 
     summary="Place Stock Order",
     description="""
-    🔐 **JWT AUTHENTICATION REQUIRED** - Protected endpoint
+    🔐 **AUTHENTICATION REQUIRED** - Protected endpoint (Internal network or JWT)
     
     Place a stock order with various order types and time in force options.
+    
+    **Bulk Place Feature:**
+    Set `bulk_place: true` to place the same order for all configured accounts.
     
     **Order Types:**
     - market: Execute immediately at current market price
@@ -528,30 +532,31 @@ async def get_options_chain_by_symbol(
     - ioc: Immediate or Cancel
     - fok: Fill or Kill
     
-    **Example Market Order:**
+    **Example Single Account Order:**
     ```json
     {
         "symbol": "AAPL",
         "qty": 10,
         "side": "buy", 
         "type": "market",
-        "time_in_force": "day"
+        "time_in_force": "day",
+        "bulk_place": false
     }
     ```
     
-    **Example Limit Order:**
+    **Example Bulk Order (All Accounts):**
     ```json
     {
         "symbol": "AAPL",
-        "qty": 5,
-        "side": "sell",
-        "type": "limit",
-        "limit_price": 215.50,
-        "time_in_force": "gtc"
+        "qty": 10,
+        "side": "buy",
+        "type": "market",
+        "time_in_force": "day",
+        "bulk_place": true
     }
     ```
     
-    **Example Response:**
+    **Single Account Response:**
     ```json
     {
         "id": "1b7d6894-7040-4284-b7a4-2f900e30b6aa",
@@ -564,50 +569,144 @@ async def get_options_chain_by_symbol(
         "submitted_at": "2024-01-15T15:30:00Z"
     }
     ```
-    """,
-    response_model=OrderResponse,
-    dependencies=[Depends(get_current_context)])
-async def place_stock_order(request: StockOrderRequest, routing_info: dict = Depends(get_routing_info)):
-    """Place a stock order - uses connection pool"""
+    
+    **Bulk Order Response:**
+    ```json
+    {
+        "bulk_place": true,
+        "total_accounts": 3,
+        "successful_orders": 2,
+        "failed_orders": 1,
+        "results": [
+            {
+                "account_id": "account_1",
+                "account_name": "Trading Account 1",
+                "success": true,
+                "order": { "id": "order_123", "symbol": "AAPL", "qty": 10, "side": "buy" }
+            },
+            {
+                "account_id": "account_2",
+                "success": false,
+                "error": "Insufficient buying power"
+            }
+        ]
+    }
+    ```
+    """)
+async def place_stock_order(
+    request: StockOrderRequest, 
+    routing_info: dict = Depends(get_routing_info),
+    auth_data: dict = Depends(internal_or_jwt_auth)
+):
+    """Place a stock order - supports both single account and bulk placement"""
     try:
-        order_data = await pooled_client.place_stock_order(
-            symbol=request.symbol.upper(),
-            qty=request.qty,
-            side=request.side.value,
-            order_type=request.type.value,
-            limit_price=request.limit_price,
-            stop_price=request.stop_price,
-            time_in_force=request.time_in_force.value,
-            account_id=routing_info["account_id"],
-            routing_key=routing_info["routing_key"]
-        )
-        if "error" in order_data:
-            raise HTTPException(status_code=400, detail=order_data["error"])
-        return OrderResponse(**order_data)
+        # 检查是否为批量下单
+        if request.bulk_place:
+            logger.info(f"Processing bulk stock order: {request.symbol} {request.qty} {request.side.value}")
+            
+            bulk_result = await pooled_client.bulk_place_stock_order(
+                symbol=request.symbol.upper(),
+                qty=request.qty,
+                side=request.side.value,
+                order_type=request.type.value,
+                limit_price=request.limit_price,
+                stop_price=request.stop_price,
+                time_in_force=request.time_in_force.value
+            )
+            
+            return BulkOrderResponse(**bulk_result)
+        
+        # 单账户下单
+        else:
+            order_data = await pooled_client.place_stock_order(
+                symbol=request.symbol.upper(),
+                qty=request.qty,
+                side=request.side.value,
+                order_type=request.type.value,
+                limit_price=request.limit_price,
+                stop_price=request.stop_price,
+                time_in_force=request.time_in_force.value,
+                account_id=routing_info["account_id"],
+                routing_key=routing_info["routing_key"]
+            )
+            if "error" in order_data:
+                raise HTTPException(status_code=400, detail=order_data["error"])
+            return OrderResponse(**order_data)
+            
     except Exception as e:
         logger.error(f"Error in place_stock_order: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/options/order",
     summary="Place Options Order",
-    description="🔐 **JWT AUTHENTICATION REQUIRED** - Place an options order",
-    dependencies=[Depends(get_current_context)])
-async def place_option_order(request: OptionOrderRequest, routing_info: dict = Depends(get_routing_info)):
-    """Place an options order - uses connection pool"""
+    description="""
+    🔐 **AUTHENTICATION REQUIRED** - Place an options order (Internal network or JWT)
+    
+    **Bulk Place Feature:**
+    Set `bulk_place: true` to place the same order for all configured accounts.
+    
+    **Example Single Account Order:**
+    ```json
+    {
+        "option_symbol": "AAPL240216C00190000",
+        "qty": 1,
+        "side": "buy",
+        "type": "market",
+        "time_in_force": "day",
+        "bulk_place": false
+    }
+    ```
+    
+    **Example Bulk Order (All Accounts):**
+    ```json
+    {
+        "option_symbol": "AAPL240216C00190000",
+        "qty": 1,
+        "side": "buy",
+        "type": "market",
+        "time_in_force": "day",
+        "bulk_place": true
+    }
+    ```
+    """)
+async def place_option_order(
+    request: OptionOrderRequest, 
+    routing_info: dict = Depends(get_routing_info),
+    auth_data: dict = Depends(internal_or_jwt_auth)
+):
+    """Place an options order - supports both single account and bulk placement"""
     try:
-        order_data = await pooled_client.place_option_order(
-            option_symbol=request.option_symbol.upper(),
-            qty=request.qty,
-            side=request.side.value,
-            order_type=request.type.value,
-            limit_price=request.limit_price,
-            time_in_force=request.time_in_force.value,
-            account_id=routing_info["account_id"],
-            routing_key=routing_info["routing_key"]
-        )
-        if "error" in order_data:
-            raise HTTPException(status_code=400, detail=order_data["error"])
-        return order_data
+        # 检查是否为批量下单
+        if request.bulk_place:
+            logger.info(f"Processing bulk option order: {request.option_symbol} {request.qty} {request.side.value}")
+            
+            bulk_result = await pooled_client.bulk_place_option_order(
+                option_symbol=request.option_symbol.upper(),
+                qty=request.qty,
+                side=request.side.value,
+                order_type=request.type.value,
+                limit_price=request.limit_price,
+                time_in_force=request.time_in_force.value
+            )
+            
+            return BulkOrderResponse(**bulk_result)
+        
+        # 单账户下单
+        else:
+            order_data = await pooled_client.place_option_order(
+                option_symbol=request.option_symbol.upper(),
+                qty=request.qty,
+                side=request.side.value,
+                order_type=request.type.value,
+                limit_price=request.limit_price,
+                time_in_force=request.time_in_force.value,
+                account_id=routing_info["account_id"],
+                routing_key=routing_info["routing_key"]
+            )
+            if "error" in order_data:
+                raise HTTPException(status_code=400, detail=order_data["error"])
+            return order_data
+            
     except Exception as e:
         logger.error(f"Error in place_option_order: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -615,13 +714,13 @@ async def place_option_order(request: OptionOrderRequest, routing_info: dict = D
 # Order management endpoints
 @router.get("/orders", 
     summary="Get Orders",
-    description="🔐 **JWT AUTHENTICATION REQUIRED** - Get user's orders",
-    response_model=List[OrderResponse],
-    dependencies=[Depends(get_current_context)])
+    description="🔐 **AUTHENTICATION REQUIRED** - Get user's orders (Internal network or JWT)",
+    response_model=List[OrderResponse])
 async def get_orders(
     status: Optional[str] = None, 
     limit: int = 100,
-    routing_info: dict = Depends(get_routing_info)
+    routing_info: dict = Depends(get_routing_info),
+    auth_data: dict = Depends(internal_or_jwt_auth)
 ):
     """Get orders - uses connection pool"""
     try:
@@ -640,9 +739,12 @@ async def get_orders(
 
 @router.delete("/orders/{order_id}",
     summary="Cancel Order", 
-    description="🔐 **JWT AUTHENTICATION REQUIRED** - Cancel an order",
-    dependencies=[Depends(get_current_context)])
-async def cancel_order(order_id: str, routing_info: dict = Depends(get_routing_info)):
+    description="🔐 **AUTHENTICATION REQUIRED** - Cancel an order (Internal network or JWT)")
+async def cancel_order(
+    order_id: str, 
+    routing_info: dict = Depends(get_routing_info),
+    auth_data: dict = Depends(internal_or_jwt_auth)
+):
     """Cancel an order - uses connection pool"""
     try:
         result = await pooled_client.cancel_order(
@@ -660,58 +762,104 @@ async def cancel_order(order_id: str, routing_info: dict = Depends(get_routing_i
 # Quick trading endpoints for convenience
 @router.post("/stocks/{symbol}/buy",
     summary="Quick Buy Stock",
-    description="🔐 **JWT AUTHENTICATION REQUIRED** - Quick buy stock order",
-    dependencies=[Depends(get_current_context)])
+    description="""
+    🔐 **AUTHENTICATION REQUIRED** - Quick buy stock order (Internal network or JWT)
+    
+    **Query Parameters:**
+    - `bulk_place`: Set to `true` to place order for all accounts
+    """)
 async def buy_stock(
     symbol: str,
     qty: float,
     order_type: str = "market",
     limit_price: Optional[float] = None,
-    routing_info: dict = Depends(get_routing_info)
+    bulk_place: bool = Query(False, description="Place order for all accounts"),
+    routing_info: dict = Depends(get_routing_info),
+    auth_data: dict = Depends(internal_or_jwt_auth)
 ):
-    """Quick buy stock endpoint - uses connection pool"""
+    """Quick buy stock endpoint - supports bulk placement"""
     try:
-        order_data = await pooled_client.place_stock_order(
-            symbol=symbol.upper(),
-            qty=qty,
-            side="buy",
-            order_type=order_type,
-            limit_price=limit_price,
-            account_id=routing_info["account_id"],
-            routing_key=routing_info["routing_key"]
-        )
-        if "error" in order_data:
-            raise HTTPException(status_code=400, detail=order_data["error"])
-        return OrderResponse(**order_data)
+        # 检查是否为批量下单
+        if bulk_place:
+            logger.info(f"Processing bulk buy order: {symbol} {qty}")
+            
+            bulk_result = await pooled_client.bulk_place_stock_order(
+                symbol=symbol.upper(),
+                qty=qty,
+                side="buy",
+                order_type=order_type,
+                limit_price=limit_price
+            )
+            
+            return BulkOrderResponse(**bulk_result)
+        
+        # 单账户下单
+        else:
+            order_data = await pooled_client.place_stock_order(
+                symbol=symbol.upper(),
+                qty=qty,
+                side="buy",
+                order_type=order_type,
+                limit_price=limit_price,
+                account_id=routing_info["account_id"],
+                routing_key=routing_info["routing_key"]
+            )
+            if "error" in order_data:
+                raise HTTPException(status_code=400, detail=order_data["error"])
+            return OrderResponse(**order_data)
+            
     except Exception as e:
         logger.error(f"Error in buy_stock: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/stocks/{symbol}/sell",
     summary="Quick Sell Stock", 
-    description="🔐 **JWT AUTHENTICATION REQUIRED** - Quick sell stock order",
-    dependencies=[Depends(get_current_context)])
+    description="""
+    🔐 **AUTHENTICATION REQUIRED** - Quick sell stock order (Internal network or JWT)
+    
+    **Query Parameters:**
+    - `bulk_place`: Set to `true` to place order for all accounts
+    """)
 async def sell_stock(
     symbol: str,
     qty: float,
     order_type: str = "market",
     limit_price: Optional[float] = None,
-    routing_info: dict = Depends(get_routing_info)
+    bulk_place: bool = Query(False, description="Place order for all accounts"),
+    routing_info: dict = Depends(get_routing_info),
+    auth_data: dict = Depends(internal_or_jwt_auth)
 ):
-    """Quick sell stock endpoint - uses connection pool"""
+    """Quick sell stock endpoint - supports bulk placement"""
     try:
-        order_data = await pooled_client.place_stock_order(
-            symbol=symbol.upper(),
-            qty=qty,
-            side="sell",
-            order_type=order_type,
-            limit_price=limit_price,
-            account_id=routing_info["account_id"],
-            routing_key=routing_info["routing_key"]
-        )
-        if "error" in order_data:
-            raise HTTPException(status_code=400, detail=order_data["error"])
-        return OrderResponse(**order_data)
+        # 检查是否为批量下单
+        if bulk_place:
+            logger.info(f"Processing bulk sell order: {symbol} {qty}")
+            
+            bulk_result = await pooled_client.bulk_place_stock_order(
+                symbol=symbol.upper(),
+                qty=qty,
+                side="sell",
+                order_type=order_type,
+                limit_price=limit_price
+            )
+            
+            return BulkOrderResponse(**bulk_result)
+        
+        # 单账户下单
+        else:
+            order_data = await pooled_client.place_stock_order(
+                symbol=symbol.upper(),
+                qty=qty,
+                side="sell",
+                order_type=order_type,
+                limit_price=limit_price,
+                account_id=routing_info["account_id"],
+                routing_key=routing_info["routing_key"]
+            )
+            if "error" in order_data:
+                raise HTTPException(status_code=400, detail=order_data["error"])
+            return OrderResponse(**order_data)
+            
     except Exception as e:
         logger.error(f"Error in sell_stock: {e}")
         raise HTTPException(status_code=500, detail=str(e))
