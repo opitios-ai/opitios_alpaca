@@ -8,9 +8,10 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Dict, Optional
 from pydantic import BaseModel
 
-from app.middleware import verify_jwt_token
+from app.middleware import verify_jwt_token, create_jwt_token, is_internal_ip, internal_or_jwt_auth
 from app.demo_jwt import generate_demo_jwt_token, get_demo_user_info
 from config import settings
+from fastapi import Request
 
 # 创建认证路由
 auth_router = APIRouter(prefix="/auth", tags=["authentication"])
@@ -99,6 +100,45 @@ async def get_system_health():
         }
     }
 
+
+@auth_router.get("/admin-token")
+async def get_admin_token(request: Request):
+    """生成管理员JWT Token - 仅限内网访问"""
+    client_ip = request.client.host if request.client else "unknown"
+    
+    # 检查是否为内网IP
+    if not is_internal_ip(client_ip):
+        raise HTTPException(
+            status_code=403, 
+            detail="Admin token generation is only allowed from internal network"
+        )
+    
+    # 创建管理员token
+    admin_user_data = {
+        "user_id": "admin_user",
+        "account_id": "admin_account",
+        "permissions": ["trading", "market_data", "admin", "bulk_place"],
+        "role": "admin",
+        "permission_group": "admin"
+    }
+    
+    token = create_jwt_token(admin_user_data)
+    
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "expires_in": 24 * 3600,  # 24小时
+        "user_info": admin_user_data,
+        "client_ip": client_ip,
+        "usage_instructions": [
+            "1. 复制 access_token 的值",
+            "2. 在API请求中添加 Authorization header: Bearer <token>",
+            "3. 或在 Swagger UI 中点击 'Authorize' 按钮输入token",
+            "4. 现在可以访问所有管理员端点，包括批量下单功能"
+        ],
+        "permissions": admin_user_data["permissions"],
+        "note": "这是管理员token，拥有所有权限，包括批量下单功能。仅限内网生成。"
+    }
 
 @auth_router.get("/alpaca-credentials")
 async def get_alpaca_credentials():

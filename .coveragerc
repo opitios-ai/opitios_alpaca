@@ -1,0 +1,30 @@
+[run]
+source = app
+omit = 
+    */tests/*
+    */venv/*
+    */__pycache__/*
+    */migrations/*
+    */.pytest_cache/*
+    */htmlcov/*
+    */test-reports/*
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise AssertionError
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    @abstractmethod
+    @abc.abstractmethod
+
+[html]
+directory = htmlcov
+title = Opitios Alpaca Test Coverage Report
+
+[xml]
+output = test-reports/coverage.xml
+
+[json]
+output = test-reports/coverage.json
