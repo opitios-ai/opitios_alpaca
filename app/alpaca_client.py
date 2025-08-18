@@ -9,6 +9,7 @@ from config import settings
 from loguru import logger
 from typing import Optional, List, Dict, Any
 import pandas as pd
+import asyncio
 from datetime import datetime, timedelta
 
 class AlpacaClient:
@@ -282,6 +283,53 @@ class AlpacaClient:
             logger.error(f"Error getting option quote for {option_symbol}: {e}")
             return {"error": f"Failed to retrieve real option data for {option_symbol}: {str(e)}"}
     
+    def _validate_option_symbol(self, option_symbol: str) -> bool:
+        """Validate option symbol format for trading"""
+        try:
+            # Option symbol format: SYMBOL[YY]MMDD[C/P]XXXXXXXX
+            # Example: AAPL240216C00190000
+            
+            if len(option_symbol) < 15:  # Minimum length check
+                return False
+            
+            # Find where the date starts by looking for the first digit after letters
+            underlying = ""
+            date_start_idx = 0
+            
+            for i, char in enumerate(option_symbol):
+                if char.isdigit():
+                    underlying = option_symbol[:i]
+                    date_start_idx = i
+                    break
+            
+            if not underlying or date_start_idx == 0:
+                return False
+            
+            if len(option_symbol) < date_start_idx + 9:  # Need at least YYMMDD + C/P + price
+                return False
+                
+            date_part = option_symbol[date_start_idx:date_start_idx+6]
+            option_type_char = option_symbol[date_start_idx+6]
+            strike_part = option_symbol[date_start_idx+7:]
+            
+            # Validate date part (6 digits)
+            if not date_part.isdigit() or len(date_part) != 6:
+                return False
+            
+            # Validate option type (C or P)
+            if option_type_char.upper() not in ['C', 'P']:
+                return False
+            
+            # Validate strike price part (8 digits)
+            if not strike_part.isdigit() or len(strike_part) != 8:
+                return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error validating option symbol {option_symbol}: {e}")
+            return False
+
     def _parse_option_symbol(self, option_symbol: str):
         """Parse option symbol to extract components for real data validation"""
         try:
@@ -393,10 +441,12 @@ class AlpacaClient:
                 return {"error": "Invalid order type or missing required price parameters"}
             
             # Submit order
+            price_info = f" at ${limit_price}" if limit_price else f" at ${stop_price} (stop)" if stop_price else ""
+            logger.info(f"Placing stock order: {symbol} x{qty} {side.upper()} {order_type.upper()}{price_info}")
             order = self.trading_client.submit_order(order_data)
             
-            return {
-                "id": order.id,
+            order_result = {
+                "id": str(order.id),  # 确保ID是字符串类型
                 "symbol": order.symbol,
                 "qty": float(order.qty),
                 "side": order.side.value,
@@ -408,26 +458,78 @@ class AlpacaClient:
                 "filled_at": order.filled_at
             }
             
+            # 详细的成功日志
+            price_str = f" at ${limit_price}" if limit_price else f" at ${stop_price} (stop)" if stop_price else ""
+            logger.info(f"✅ Stock order placed successfully: {order_result['symbol']} x{order_result['qty']} {order_result['side'].upper()}{price_str} | Order ID: {order_result['id']} | Status: {order_result['status']}")
+            
+            return order_result
+            
         except Exception as e:
             logger.error(f"Error placing stock order: {e}")
             return {"error": str(e)}
 
     async def place_option_order(self, option_symbol: str, qty: int, side: str, order_type: str = "market",
                                limit_price: Optional[float] = None, time_in_force: str = "day") -> Dict[str, Any]:
-        """Place an options order"""
+        """Place an options order using Alpaca's options trading API"""
         try:
-            # Note: Options trading implementation depends on Alpaca's options trading API
-            # This is a placeholder implementation
-            return {
-                "message": "Options trading requires additional implementation based on Alpaca's options trading capabilities",
-                "option_symbol": option_symbol,
-                "qty": qty,
-                "side": side,
-                "order_type": order_type
+            # Convert string parameters to Alpaca enums
+            order_side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
+            tif = TimeInForce.DAY if time_in_force.lower() == "day" else TimeInForce.GTC
+            
+            # Validate option symbol format (e.g., AAPL240216C00190000)
+            if not self._validate_option_symbol(option_symbol):
+                return {"error": f"Invalid option symbol format: {option_symbol}. Expected format: SYMBOL[YY]MMDD[C/P]XXXXXXXX"}
+            
+            # Create option order request based on type
+            # Note: For options, we don't need to specify AssetClass explicitly
+            # Alpaca automatically detects options based on the symbol format
+            if order_type.lower() == "market":
+                order_data = MarketOrderRequest(
+                    symbol=option_symbol,
+                    qty=qty,
+                    side=order_side,
+                    time_in_force=tif
+                )
+            elif order_type.lower() == "limit" and limit_price:
+                order_data = LimitOrderRequest(
+                    symbol=option_symbol,
+                    qty=qty,
+                    side=order_side,
+                    time_in_force=tif,
+                    limit_price=limit_price
+                )
+            else:
+                return {"error": "Invalid order type or missing required price parameters for options"}
+            
+            # Submit option order
+            price_info = f" at ${limit_price}" if limit_price else ""
+            logger.info(f"Placing option order: {option_symbol} x{qty} {side.upper()} {order_type.upper()}{price_info}")
+            order = self.trading_client.submit_order(order_data)
+            
+            # 详细的成功日志
+            order_result = {
+                "id": str(order.id),  # 确保ID是字符串类型
+                "symbol": order.symbol,
+                "qty": float(order.qty),
+                "side": order.side.value,
+                "order_type": order.order_type.value,
+                "status": order.status.value,
+                "filled_qty": float(order.filled_qty) if order.filled_qty else 0,
+                "filled_avg_price": float(order.filled_avg_price) if order.filled_avg_price else None,
+                "submitted_at": order.submitted_at,
+                "filled_at": order.filled_at,
+                "limit_price": float(order.limit_price) if order.limit_price else None,
+                "asset_class": "option"
             }
             
+            # 详细的成功日志
+            price_str = f" at ${limit_price}" if limit_price else ""
+            logger.info(f"✅ Option order placed successfully: {order.symbol} x{order_result['qty']} {order_result['side'].upper()}{price_str} | Order ID: {order_result['id']} | Status: {order_result['status']}")
+            
+            return order_result
+            
         except Exception as e:
-            logger.error(f"Error placing option order: {e}")
+            logger.error(f"Error placing option order for {option_symbol}: {e}")
             return {"error": str(e)}
 
     # Account and Position Methods
@@ -483,7 +585,7 @@ class AlpacaClient:
             for order in orders:
                 if status is None or order.status.value == status:
                     order_list.append({
-                        "id": order.id,
+                        "id": str(order.id),  # 确保ID是字符串类型
                         "symbol": order.symbol,
                         "qty": float(order.qty),
                         "side": order.side.value,
@@ -605,8 +707,194 @@ class PooledAlpacaClient:
     async def cancel_order(self, order_id: str, account_id: Optional[str] = None, 
                          routing_key: Optional[str] = None) -> Dict[str, Any]:
         """取消订单 - 使用连接池"""
-        async with self.pool.get_account_connection(account_id, routing_key or order_id) as connection:
+        async with self.pool.get_account_connection(account_id, routing_key) as connection:
             return await connection.alpaca_client.cancel_order(order_id)
+    
+    async def bulk_place_stock_order(self, symbol: str, qty: float, side: str, order_type: str = "market", 
+                                   limit_price: Optional[float] = None, stop_price: Optional[float] = None,
+                                   time_in_force: str = "day") -> Dict[str, Any]:
+        """为所有账户批量下股票订单"""
+        from app.models import BulkOrderResult
+        
+        # 获取所有可用账户
+        pool_stats = self.pool.get_pool_stats()
+        account_stats = pool_stats.get("account_stats", {})
+        
+        results = []
+        successful_orders = 0
+        failed_orders = 0
+        
+        logger.info(f"Starting bulk stock order for {len(account_stats)} accounts: {symbol} {qty} {side}")
+        
+        # 为每个账户下单
+        for account_id, stats in account_stats.items():
+            account_name = stats.get("account_name")
+            
+            try:
+                # 使用指定账户下单
+                order_result = await self.place_stock_order(
+                    symbol=symbol,
+                    qty=qty,
+                    side=side,
+                    order_type=order_type,
+                    limit_price=limit_price,
+                    stop_price=stop_price,
+                    time_in_force=time_in_force,
+                    account_id=account_id
+                )
+                
+                if "error" in order_result:
+                    failed_orders += 1
+                    results.append(BulkOrderResult(
+                        account_id=account_id,
+                        account_name=account_name,
+                        success=False,
+                        error=order_result["error"]
+                    ))
+                    logger.warning(f"Failed to place order for account {account_id}: {order_result['error']}")
+                else:
+                    successful_orders += 1
+                    from app.models import OrderResponse
+                    
+                    # 确保ID是字符串类型（Alpaca可能返回UUID对象）
+                    if 'id' in order_result and order_result['id'] is not None:
+                        order_result['id'] = str(order_result['id'])
+                    
+                    results.append(BulkOrderResult(
+                        account_id=account_id,
+                        account_name=account_name,
+                        success=True,
+                        order=OrderResponse(**order_result)
+                    ))
+                    
+                    # 详细的成功日志
+                    price_str = f" at ${order_result.get('limit_price')}" if order_result.get('limit_price') else f" at ${order_result.get('stop_price')} (stop)" if order_result.get('stop_price') else ""
+                    logger.info(f"✅ Stock order placed for {account_name}: {order_result['symbol']} x{order_result['qty']} {order_result['side'].upper()}{price_str} | Order ID: {order_result['id']}")
+                    
+                    # 发送Discord通知
+                    try:
+                        from app.discord_notifier import send_trade_notification
+                        asyncio.create_task(send_trade_notification(order_result, account_name, is_bulk=True))
+                    except Exception as e:
+                        logger.warning(f"Failed to send Discord notification: {e}")
+                    
+            except Exception as e:
+                failed_orders += 1
+                error_msg = str(e)
+                results.append(BulkOrderResult(
+                    account_id=account_id,
+                    account_name=account_name,
+                    success=False,
+                    error=error_msg
+                ))
+                logger.error(f"Exception placing order for account {account_id}: {error_msg}")
+        
+        logger.info(f"Bulk stock order completed: {successful_orders} successful, {failed_orders} failed")
+        
+        # 发送批量交易汇总通知
+        if successful_orders > 0:
+            try:
+                from app.discord_notifier import send_bulk_trade_summary
+                asyncio.create_task(send_bulk_trade_summary(
+                    [r.dict() for r in results], symbol, qty, side, "stock"
+                ))
+            except Exception as e:
+                logger.warning(f"Failed to send Discord bulk summary: {e}")
+        
+        return {
+            "bulk_place": True,
+            "total_accounts": len(account_stats),
+            "successful_orders": successful_orders,
+            "failed_orders": failed_orders,
+            "results": results
+        }
+    
+    async def bulk_place_option_order(self, option_symbol: str, qty: int, side: str, order_type: str = "market",
+                                    limit_price: Optional[float] = None, time_in_force: str = "day") -> Dict[str, Any]:
+        """为所有账户批量下期权订单"""
+        from app.models import BulkOrderResult
+        
+        # 获取所有可用账户
+        pool_stats = self.pool.get_pool_stats()
+        account_stats = pool_stats.get("account_stats", {})
+        
+        results = []
+        successful_orders = 0
+        failed_orders = 0
+        
+        logger.info(f"Starting bulk option order for {len(account_stats)} accounts: {option_symbol} {qty} {side}")
+        
+        # 为每个账户下单
+        for account_id, stats in account_stats.items():
+            account_name = stats.get("account_name")
+            
+            try:
+                # 使用指定账户下单
+                order_result = await self.place_option_order(
+                    option_symbol=option_symbol,
+                    qty=qty,
+                    side=side,
+                    order_type=order_type,
+                    limit_price=limit_price,
+                    time_in_force=time_in_force,
+                    account_id=account_id
+                )
+                
+                if "error" in order_result:
+                    failed_orders += 1
+                    results.append(BulkOrderResult(
+                        account_id=account_id,
+                        account_name=account_name,
+                        success=False,
+                        error=order_result["error"]
+                    ))
+                    logger.warning(f"Failed to place option order for account {account_id}: {order_result['error']}")
+                else:
+                    successful_orders += 1
+                    from app.models import OrderResponse
+                    
+                    # 确保ID是字符串类型（Alpaca可能返回UUID对象）
+                    if 'id' in order_result and order_result['id'] is not None:
+                        order_result['id'] = str(order_result['id'])
+                    
+                    results.append(BulkOrderResult(
+                        account_id=account_id,
+                        account_name=account_name,
+                        success=True,
+                        order=OrderResponse(**order_result)
+                    ))
+                    
+                    # 详细的成功日志
+                    price_str = f" at ${order_result.get('limit_price')}" if order_result.get('limit_price') else ""
+                    logger.info(f"✅ Option order placed for {account_name}: {order_result['symbol']} x{order_result['qty']} {order_result['side'].upper()}{price_str} | Order ID: {order_result['id']}")
+                    
+                    # 发送Discord通知
+                    try:
+                        from app.discord_notifier import send_trade_notification
+                        asyncio.create_task(send_trade_notification(order_result, account_name, is_bulk=True))
+                    except Exception as e:
+                        logger.warning(f"Failed to send Discord notification: {e}")
+                    
+            except Exception as e:
+                failed_orders += 1
+                error_msg = str(e)
+                results.append(BulkOrderResult(
+                    account_id=account_id,
+                    account_name=account_name,
+                    success=False,
+                    error=error_msg
+                ))
+                logger.error(f"Exception placing option order for account {account_id}: {error_msg}")
+        
+        logger.info(f"Bulk option order completed: {successful_orders} successful, {failed_orders} failed")
+        
+        return {
+            "bulk_place": True,
+            "total_accounts": len(account_stats),
+            "successful_orders": successful_orders,
+            "failed_orders": failed_orders,
+            "results": results
+        }
     
     async def test_connection(self, account_id: Optional[str] = None, routing_key: Optional[str] = None) -> Dict[str, Any]:
         """测试连接 - 使用连接池"""
