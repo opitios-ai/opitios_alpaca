@@ -683,24 +683,36 @@ class SingletonWebSocketManager:
             return
         
         # 构造广播消息
+        timestamp_value = data.get("t", datetime.now().isoformat())
+        # 确保timestamp是字符串格式
+        if hasattr(timestamp_value, '__str__') and not isinstance(timestamp_value, str):
+            timestamp_value = str(timestamp_value)
+        
         broadcast_msg = {
             "type": "quote" if data.get("T") == "q" else "trade",
             "data_type": data_type,
             "symbol": symbol,
-            "timestamp": data.get("t", datetime.now().isoformat())
+            "timestamp": timestamp_value
         }
+        
+        def safe_get_value(data, key, default=None):
+            """安全获取值，确保Timestamp对象被转换为字符串"""
+            value = data.get(key, default)
+            if hasattr(value, '__str__') and not isinstance(value, (str, int, float, type(None))):
+                return str(value)
+            return value
         
         if data.get("T") == "q":  # 报价数据
             broadcast_msg.update({
-                "bid_price": data.get("bp"),
-                "ask_price": data.get("ap"),
-                "bid_size": data.get("bs"),
-                "ask_size": data.get("as")
+                "bid_price": safe_get_value(data, "bp"),
+                "ask_price": safe_get_value(data, "ap"),
+                "bid_size": safe_get_value(data, "bs"),
+                "ask_size": safe_get_value(data, "as")
             })
         else:  # 交易数据
             broadcast_msg.update({
-                "price": data.get("p"),
-                "size": data.get("s")
+                "price": safe_get_value(data, "p"),
+                "size": safe_get_value(data, "s")
             })
         
         # 获取需要广播的客户端列表（在锁内快速获取快照）
