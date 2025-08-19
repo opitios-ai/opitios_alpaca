@@ -78,7 +78,7 @@ class AlpacaClient:
                     "ask_price": float(quote.ask_price) if quote.ask_price else None,
                     "bid_size": quote.bid_size,
                     "ask_size": quote.ask_size,
-                    "timestamp": quote.timestamp
+                    "timestamp": str(quote.timestamp) if quote.timestamp else None
                 }
             else:
                 return {"error": f"No quote data found for {symbol}"}
@@ -106,7 +106,7 @@ class AlpacaClient:
                         "ask_price": float(quote.ask_price) if quote.ask_price else None,
                         "bid_size": quote.bid_size,
                         "ask_size": quote.ask_size,
-                        "timestamp": quote.timestamp
+                        "timestamp": str(quote.timestamp) if quote.timestamp else None
                     })
                 else:
                     results.append({
@@ -150,7 +150,7 @@ class AlpacaClient:
                 bars_data = []
                 for bar in bars[symbol]:
                     bars_data.append({
-                        "timestamp": bar.timestamp,
+                        "timestamp": str(bar.timestamp) if bar.timestamp else None,
                         "open": float(bar.open),
                         "high": float(bar.high),
                         "low": float(bar.low),
@@ -275,7 +275,7 @@ class AlpacaClient:
                     "ask_size": quote.ask_size if hasattr(quote, 'ask_size') else None,
                     "last_price": float(quote.last_price) if hasattr(quote, 'last_price') and quote.last_price else None,
                     "implied_volatility": float(quote.implied_volatility) if hasattr(quote, 'implied_volatility') and quote.implied_volatility else None,
-                    "timestamp": quote.timestamp
+                    "timestamp": str(quote.timestamp) if quote.timestamp else None
                 }
             else:
                 logger.warning(f"No real options data available for {option_symbol}")
@@ -456,8 +456,8 @@ class AlpacaClient:
                 "status": order.status.value,
                 "filled_qty": float(order.filled_qty) if order.filled_qty else 0,
                 "filled_avg_price": float(order.filled_avg_price) if order.filled_avg_price else None,
-                "submitted_at": order.submitted_at,
-                "filled_at": order.filled_at
+                "submitted_at": str(order.submitted_at) if order.submitted_at else None,
+                "filled_at": str(order.filled_at) if order.filled_at else None
             }
             
             # 详细的成功日志 - 包含用户信息
@@ -526,8 +526,8 @@ class AlpacaClient:
                 "status": order.status.value,
                 "filled_qty": float(order.filled_qty) if order.filled_qty else 0,
                 "filled_avg_price": float(order.filled_avg_price) if order.filled_avg_price else None,
-                "submitted_at": order.submitted_at,
-                "filled_at": order.filled_at,
+                "submitted_at": str(order.submitted_at) if order.submitted_at else None,
+                "filled_at": str(order.filled_at) if order.filled_at else None,
                 "limit_price": float(order.limit_price) if order.limit_price else None,
                 "asset_class": "option"
             }
@@ -604,8 +604,8 @@ class AlpacaClient:
                         "status": order.status.value,
                         "filled_qty": float(order.filled_qty) if order.filled_qty else 0,
                         "filled_avg_price": float(order.filled_avg_price) if order.filled_avg_price else None,
-                        "submitted_at": order.submitted_at,
-                        "filled_at": order.filled_at,
+                        "submitted_at": str(order.submitted_at) if order.submitted_at else None,
+                        "filled_at": str(order.filled_at) if order.filled_at else None,
                         "limit_price": float(order.limit_price) if order.limit_price else None,
                         "stop_price": float(order.stop_price) if order.stop_price else None
                     })
