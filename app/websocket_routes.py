@@ -13,11 +13,26 @@ import weakref
 from typing import Dict, List, Set, Optional
 from datetime import datetime
 from loguru import logger
+import pandas as pd
 
 from config import settings
 
 # WebSocket路由
 ws_router = APIRouter(prefix="/ws", tags=["websocket"])
+
+def convert_timestamps_to_strings(obj):
+    """递归将对象中的Timestamp转换为字符串，确保JSON序列化兼容性"""
+    if isinstance(obj, pd.Timestamp):
+        return str(obj)
+    elif isinstance(obj, dict):
+        return {key: convert_timestamps_to_strings(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_timestamps_to_strings(item) for item in obj]
+    elif hasattr(obj, '__dict__'):
+        # 处理其他对象的属性
+        return convert_timestamps_to_strings(obj.__dict__)
+    else:
+        return obj
 
 # 全局订阅符号和客户端连接 - 使用线程安全锁保护
 _global_lock = asyncio.Lock()
@@ -568,14 +583,18 @@ class SingletonWebSocketManager:
                         logger.warning(f"⚠️ 股票数据JSON解析失败: {e}")
                         continue
                     
-                    # 广播数据
+                    # 处理Timestamp对象并广播数据
                     if isinstance(data, list):
                         for item in data:
                             if item:  # 确保数据不为空
-                                await self._broadcast_data(item, "stock")
+                                # 确保数据中的Timestamp对象被转换
+                                processed_item = convert_timestamps_to_strings(item)
+                                await self._broadcast_data(processed_item, "stock")
                     else:
                         if data:  # 确保数据不为空
-                            await self._broadcast_data(data, "stock")
+                            # 确保数据中的Timestamp对象被转换
+                            processed_data = convert_timestamps_to_strings(data)
+                            await self._broadcast_data(processed_data, "stock")
                         
                 except websockets.exceptions.ConnectionClosed:
                     logger.warning("📡 股票WebSocket连接断开")
@@ -621,14 +640,18 @@ class SingletonWebSocketManager:
                             logger.warning(f"⚠️ 期权数据解析失败: {e}")
                             continue
                     
-                    # 广播数据
+                    # 处理Timestamp对象并广播数据
                     if isinstance(data, list):
                         for item in data:
                             if item:  # 确保数据不为空
-                                await self._broadcast_data(item, "option")
+                                # 确保数据中的Timestamp对象被转换
+                                processed_item = convert_timestamps_to_strings(item)
+                                await self._broadcast_data(processed_item, "option")
                     else:
                         if data:  # 确保数据不为空
-                            await self._broadcast_data(data, "option")
+                            # 确保数据中的Timestamp对象被转换
+                            processed_data = convert_timestamps_to_strings(data)
+                            await self._broadcast_data(processed_data, "option")
                         
                 except websockets.exceptions.ConnectionClosed:
                     logger.warning("📡 期权WebSocket连接断开")
@@ -690,8 +713,10 @@ class SingletonWebSocketManager:
         # 在锁外进行实际的广播操作
         if not clients_to_notify:
             return
-            
-        message_json = json.dumps(broadcast_msg)
+        
+        # 确保所有Timestamp对象转换为字符串，防止JSON序列化错误
+        serializable_msg = convert_timestamps_to_strings(broadcast_msg)
+        message_json = json.dumps(serializable_msg)
         disconnected_clients = []
         
         # 并发发送消息给所有客户端
