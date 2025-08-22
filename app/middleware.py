@@ -26,7 +26,7 @@ JWT_SECRET = (
     settings.jwt_secret if hasattr(settings, 'jwt_secret')
     else "your-secret-key"
 )
-JWT_ALGORITHM = "HS256"
+JWT_ALGORITHM = "HS512"
 JWT_EXPIRATION_HOURS = 24
 
 # Redis连接 (用于分布式rate limiting)
@@ -253,11 +253,21 @@ def is_internal_ip(ip: str) -> bool:
 def verify_jwt_token(token: str) -> dict:
     """验证JWT token - 支持外部token"""
     try:
+        logger.info(f"Verifying JWT token with secret: {JWT_SECRET[:10]}... algorithm: {JWT_ALGORITHM}")
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        logger.info(f"JWT verification successful for user: {payload.get('username', 'unknown')}")
         return payload
-    except jwt.ExpiredSignatureError:
+    except jwt.ExpiredSignatureError as e:
+        logger.error(f"JWT token expired: {e}")
         raise HTTPException(status_code=401, detail="Token expired")
-    except (jwt.DecodeError, jwt.ExpiredSignatureError, jwt.InvalidTokenError, Exception):
+    except jwt.DecodeError as e:
+        logger.error(f"JWT decode error: {e}")
+        raise HTTPException(status_code=401, detail="Invalid token")
+    except jwt.InvalidTokenError as e:
+        logger.error(f"JWT invalid token error: {e}")
+        raise HTTPException(status_code=401, detail="Invalid token")
+    except Exception as e:
+        logger.error(f"JWT verification unexpected error: {e}")
         raise HTTPException(status_code=401, detail="Invalid token")
 
 

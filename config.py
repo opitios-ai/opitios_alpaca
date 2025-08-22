@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     log_level: str = secrets.get('app', {}).get('log_level', "INFO")
     
     # JWT Configuration
-    jwt_secret: str = secrets.get('jwt', {}).get('secret', "CHANGE_THIS_SECRET_KEY_IN_PRODUCTION")
+    jwt_secret: str = secrets.get('jwt', {}).get('secret_key', "CHANGE_THIS_SECRET_KEY_IN_PRODUCTION")
     jwt_algorithm: str = secrets.get('jwt', {}).get('algorithm', "HS256")
     jwt_expiration_hours: int = secrets.get('jwt', {}).get('expiration_hours', 24)
     
