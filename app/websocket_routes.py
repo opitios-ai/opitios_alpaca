@@ -113,7 +113,7 @@ class SingletonWebSocketManager:
                 if not self._stock_account or not self._option_account:
                     await self._load_dedicated_accounts()
                     
-                # 原子化启动重连任务
+                # 原子化启动重连任务 - 修复事件循环问题
                 if not self._reconnection_task or self._reconnection_task.done():
                     if self._reconnection_task and not self._reconnection_task.done():
                         self._reconnection_task.cancel()
@@ -121,7 +121,9 @@ class SingletonWebSocketManager:
                             await self._reconnection_task
                         except asyncio.CancelledError:
                             pass
-                    self._reconnection_task = asyncio.create_task(self._reconnection_manager())
+                    # 获取当前运行的事件循环来创建任务
+                    loop = asyncio.get_running_loop()
+                    self._reconnection_task = loop.create_task(self._reconnection_manager())
                     
                 # 如果有订阅且连接断开，重新连接
                 async with _global_lock:
@@ -187,7 +189,7 @@ class SingletonWebSocketManager:
     async def _ensure_stock_connection(self):
         """确保股票WebSocket连接存在 - 原子化连接管理"""
         async with self._stock_connection_lock:
-            if self.stock_connected and self.stock_ws and not self.stock_ws.closed:
+            if self.stock_connected and self.stock_ws:
                 return
                 
             if self._shutdown_event.is_set():
@@ -257,8 +259,11 @@ class SingletonWebSocketManager:
                     self._stock_listener = None
             
             # 关闭WebSocket连接
-            if self.stock_ws and not self.stock_ws.closed:
-                await self.stock_ws.close()
+            if self.stock_ws:
+                try:
+                    await self.stock_ws.close()
+                except Exception:
+                    pass
             self.stock_ws = None
             self.stock_connected = False
             
@@ -280,13 +285,15 @@ class SingletonWebSocketManager:
                 except asyncio.CancelledError:
                     pass
                     
-            self._stock_listener = asyncio.create_task(self._listen_stock_data())
+            # 获取当前运行的事件循环来创建任务
+            loop = asyncio.get_running_loop()
+            self._stock_listener = loop.create_task(self._listen_stock_data())
             logger.info("✅ 股票监听任务已启动")
     
     async def _ensure_option_connection(self):
         """确保期权WebSocket连接存在 - 原子化连接管理"""
         async with self._option_connection_lock:
-            if self.option_connected and self.option_ws and not self.option_ws.closed:
+            if self.option_connected and self.option_ws:
                 return
                 
             if self._shutdown_event.is_set():
@@ -360,8 +367,11 @@ class SingletonWebSocketManager:
                     self._option_listener = None
             
             # 关闭WebSocket连接
-            if self.option_ws and not self.option_ws.closed:
-                await self.option_ws.close()
+            if self.option_ws:
+                try:
+                    await self.option_ws.close()
+                except Exception:
+                    pass
             self.option_ws = None
             self.option_connected = False
             
@@ -383,7 +393,9 @@ class SingletonWebSocketManager:
                 except asyncio.CancelledError:
                     pass
                     
-            self._option_listener = asyncio.create_task(self._listen_option_data())
+            # 获取当前运行的事件循环来创建任务
+            loop = asyncio.get_running_loop()
+            self._option_listener = loop.create_task(self._listen_option_data())
             logger.info("✅ 期权监听任务已启动")
     
     async def add_client_subscription(self, client_id: str, symbols: List[str]):
@@ -461,7 +473,7 @@ class SingletonWebSocketManager:
         if stock_symbols:
             try:
                 await self._ensure_stock_connection()
-                if self.stock_connected and self.stock_ws and not self.stock_ws.closed:
+                if self.stock_connected and self.stock_ws:
                     subscribe_msg = {
                         "action": "subscribe",
                         "quotes": stock_symbols,
@@ -476,7 +488,7 @@ class SingletonWebSocketManager:
         if option_symbols:
             try:
                 await self._ensure_option_connection()
-                if self.option_connected and self.option_ws and not self.option_ws.closed:
+                if self.option_connected and self.option_ws:
                     subscribe_msg = {
                         "action": "subscribe",
                         "quotes": option_symbols,
@@ -567,12 +579,11 @@ class SingletonWebSocketManager:
         logger.info("🎧 开始监听股票数据")
         
         try:
-            while (self.stock_connected and self.stock_ws and 
-                   not self.stock_ws.closed and not self._shutdown_event.is_set()):
+            while (self.stock_connected and self.stock_ws and not self._shutdown_event.is_set()):
                 try:
                     # 使用recv锁确保同一时间只有一个协程在recv
                     async with self._stock_recv_lock:
-                        if not self.stock_connected or not self.stock_ws or self.stock_ws.closed:
+                        if not self.stock_connected or not self.stock_ws:
                             break
                         message = await self.stock_ws.recv()
                     
@@ -621,12 +632,11 @@ class SingletonWebSocketManager:
         logger.info("🎧 开始监听期权数据")
         
         try:
-            while (self.option_connected and self.option_ws and 
-                   not self.option_ws.closed and not self._shutdown_event.is_set()):
+            while (self.option_connected and self.option_ws and not self._shutdown_event.is_set()):
                 try:
                     # 使用recv锁确保同一时间只有一个协程在recv
                     async with self._option_recv_lock:
-                        if not self.option_connected or not self.option_ws or self.option_ws.closed:
+                        if not self.option_connected or not self.option_ws:
                             break
                         message = await self.option_ws.recv()
                     
@@ -820,24 +830,65 @@ DEFAULT_OPTIONS = [
 
 @ws_router.websocket("/market-data")
 async def websocket_market_data(websocket: WebSocket):
-    """WebSocket端点 - 实时市场数据（单例架构）- 线程安全"""
+    """WebSocket端点 - 实时市场数据（单例架构）- JWT认证 - 线程安全"""
     global active_connections, client_subscriptions
     
-    await websocket.accept()
-    client_id = f"client_{datetime.now().timestamp()}"
+    # JWT认证 - 从查询参数获取token
+    token = None
+    user_info = None
     
-    # 线程安全地添加连接
-    async with _global_lock:
-        active_connections[client_id] = websocket
-    
-    logger.info(f"🔗 WebSocket客户端连接: {client_id}")
+    try:
+        # 从查询参数获取token
+        query_params = dict(websocket.query_params)
+        token = query_params.get("token")
+        
+        if not token:
+            await websocket.close(code=4001, reason="Missing JWT token")
+            logger.warning("WebSocket连接被拒绝: 缺少JWT token")
+            return
+            
+        # 验证JWT token - 所有有效登录用户都可以接收价格推送
+        from app.middleware import verify_jwt_token
+        logger.info(f"WebSocket JWT验证开始 - Token: {token[:20]}...")
+        payload = verify_jwt_token(token)
+        logger.info(f"WebSocket JWT验证成功 - 用户: {payload.get('username', 'unknown')}")
+        user_info = {
+            "user_id": payload.get("user_id"),
+            "username": payload.get("username", payload.get("sub")),
+            "account_id": payload.get("account_id"),
+            "alpaca_account": payload.get("alpaca_account"),
+            "broker_type": payload.get("broker_type"),
+            "permission_group": payload.get("permission_group")
+        }
+        
+        # 所有有效JWT用户都允许连接接收价格推送
+        
+        # JWT验证成功，接受连接
+        await websocket.accept()
+        client_id = f"{user_info.get('username', 'unknown')}_{datetime.now().timestamp()}"
+        
+        # 线程安全地添加连接
+        async with _global_lock:
+            active_connections[client_id] = websocket
+        
+        logger.info(f"🔗 WebSocket客户端连接成功: {client_id} (用户: {user_info.get('username')}, 账户: {user_info.get('alpaca_account')})")
+            
+    except Exception as e:
+        await websocket.close(code=4002, reason=f"JWT validation failed: {str(e)}")
+        logger.warning(f"WebSocket连接被拒绝: JWT验证失败 - {e}")
+        return
     
     try:
         # 发送欢迎消息
         welcome_message = {
             "type": "welcome",
             "client_id": client_id,
-            "message": "连接成功！使用单例架构的Alpaca WebSocket数据流",
+            "message": f"连接成功！欢迎 {user_info.get('username')}，使用单例架构的Alpaca WebSocket数据流",
+            "user_info": {
+                "username": user_info.get("username"),
+                "broker_type": user_info.get("broker_type"),
+                "permission_group": user_info.get("permission_group")
+            },
             "default_stocks": DEFAULT_STOCKS,
             "default_options": DEFAULT_OPTIONS,
             "architecture": "singleton",
@@ -845,7 +896,9 @@ async def websocket_market_data(websocket: WebSocket):
                 "single_stock_connection": True,
                 "single_option_connection": True,
                 "dynamic_subscription_management": True,
-                "broadcast_to_all_clients": True
+                "broadcast_to_all_clients": True,
+                "jwt_authenticated": True,
+                "open_to_all_users": True
             }
         }
         await websocket.send_text(json.dumps(welcome_message))
