@@ -1,0 +1,327 @@
+"""
+持仓管理器
+负责获取、过滤和处理所有账户的期权持仓
+"""
+
+import asyncio
+from typing import List, Dict, Optional
+from datetime import datetime, date
+from loguru import logger
+from app.account_pool import AccountPool
+from app.alpaca_client import AlpacaClient
+
+
+class Position:
+    """持仓数据类"""
+    def __init__(self, data: dict):
+        self.account_id = data.get('account_id')
+        self.symbol = data.get('symbol')
+        self.asset_id = data.get('asset_id')
+        
+        # Handle invalid numeric data gracefully
+        try:
+            self.qty = float(data.get('qty', 0))
+        except (ValueError, TypeError):
+            self.qty = 0.0
+            
+        try:
+            self.avg_entry_price = float(data.get('avg_entry_price', 0))
+        except (ValueError, TypeError):
+            self.avg_entry_price = 0.0
+            
+        try:
+            self.market_value = float(data.get('market_value', 0))
+        except (ValueError, TypeError):
+            self.market_value = 0.0
+            
+        try:
+            self.cost_basis = float(data.get('cost_basis', 0))
+        except (ValueError, TypeError):
+            self.cost_basis = 0.0
+            
+        try:
+            self.unrealized_pl = float(data.get('unrealized_pl', 0))
+        except (ValueError, TypeError):
+            self.unrealized_pl = 0.0
+            
+        try:
+            self.unrealized_plpc = float(data.get('unrealized_plpc', 0))
+        except (ValueError, TypeError):
+            self.unrealized_plpc = 0.0
+            
+        self.side = data.get('side')  # 'long' or 'short'
+        
+        # 期权特定字段 - 基于symbol解析
+        if self.is_option:
+            # 从期权symbol解析信息: NVDA250822P00170000
+            self.underlying_symbol = self._parse_underlying_symbol()
+            self.expiration_date = self._parse_expiration_date()
+            self.strike_price = self._parse_strike_price()
+            self.option_type = self._parse_option_type()
+        else:
+            self.underlying_symbol = None
+            self.expiration_date = None
+            self.strike_price = None
+            self.option_type = None
+    
+    @property
+    def is_option(self) -> bool:
+        """是否为期权 - 基于symbol模式判断"""
+        if not self.symbol:
+            return False
+        # 期权symbol模式: NVDA250822P00170000 (至少12位，包含日期和C/P标识)
+        return (len(self.symbol) >= 12 and 
+                any(char in self.symbol for char in ['C', 'P']) and
+                any(char.isdigit() for char in self.symbol[-8:]))  # 最后8位包含数字
+    
+    @property
+    def is_long(self) -> bool:
+        """是否为多头持仓"""
+        return self.qty > 0
+    
+    @property
+    def is_short(self) -> bool:
+        """是否为空头持仓"""
+        return self.qty < 0
+    
+    @property
+    def is_zero_day_option(self) -> bool:
+        """是否为零日期权（当日到期）"""
+        if not self.is_option or not self.expiration_date:
+            return False
+        try:
+            exp_date = datetime.strptime(self.expiration_date, '%Y-%m-%d').date()
+            return exp_date == date.today()
+        except:
+            return False
+    
+    def _parse_underlying_symbol(self) -> str:
+        """从期权symbol解析标的股票"""
+        if not self.is_option:
+            return None
+        # NVDA250822P00170000 -> NVDA
+        # 查找第一个数字的位置
+        for i, char in enumerate(self.symbol):
+            if char.isdigit():
+                return self.symbol[:i]
+        return None
+    
+    def _parse_expiration_date(self) -> str:
+        """从期权symbol解析到期日"""
+        if not self.is_option:
+            return None
+        try:
+            # NVDA250822P00170000 -> 250822 -> 2025-08-22
+            underlying = self._parse_underlying_symbol()
+            if not underlying:
+                return None
+            date_part = self.symbol[len(underlying):len(underlying)+6]  # 6位日期
+            if len(date_part) == 6 and date_part.isdigit():
+                year = "20" + date_part[:2]
+                month = date_part[2:4]
+                day = date_part[4:6]
+                return f"{year}-{month}-{day}"
+        except:
+            pass
+        return None
+    
+    def _parse_option_type(self) -> str:
+        """从期权symbol解析期权类型"""
+        if not self.is_option:
+            return None
+        try:
+            # 需要找到正确的C或P位置（在日期之后）
+            underlying = self._parse_underlying_symbol()
+            if not underlying:
+                return None
+                
+            # 跳过标的和6位日期，找到C或P
+            start_pos = len(underlying) + 6  # 标的 + 6位日期
+            for i in range(start_pos, len(self.symbol)):
+                if self.symbol[i] == 'C':
+                    return 'C'
+                elif self.symbol[i] == 'P':
+                    return 'P'
+        except:
+            pass
+        return None
+    
+    def _parse_strike_price(self) -> float:
+        """从期权symbol解析行权价格"""
+        if not self.is_option:
+            return None
+        try:
+            # AAPL250815P00150000 -> 00150000 -> 150.00
+            # 需要找到正确的C或P位置（在日期之后）
+            underlying = self._parse_underlying_symbol()
+            if not underlying:
+                return None
+                
+            # 跳过标的和6位日期，找到C或P
+            start_pos = len(underlying) + 6  # 标的 + 6位日期
+            cp_pos = -1
+            for i in range(start_pos, len(self.symbol)):
+                if self.symbol[i] in ['C', 'P']:
+                    cp_pos = i
+                    break
+            
+            if cp_pos > 0 and cp_pos + 1 < len(self.symbol):
+                strike_part = self.symbol[cp_pos + 1:]  # C/P之后的部分
+                if len(strike_part) == 8 and strike_part.isdigit():
+                    # 整个8位数字表示价格，最后3位是小数部分
+                    strike_value = int(strike_part)
+                    return strike_value / 1000.0
+        except:
+            pass
+        return None
+
+
+class PositionManager:
+    def __init__(self, account_pool: AccountPool):
+        if account_pool is None:
+            raise TypeError("account_pool cannot be None")
+        self.account_pool = account_pool
+    
+    async def get_all_positions(self) -> List[Position]:
+        """
+        High-performance concurrent retrieval of positions from all accounts
+        
+        Returns:
+            List of all account positions
+        """
+        try:
+            # Optimized account retrieval and task creation
+            accounts = await self.account_pool.get_all_accounts()
+            
+            if not accounts:
+                return []
+            
+            # High-concurrency position fetching
+            tasks = [
+                self._get_account_positions(account_id, connection)
+                for account_id, connection in accounts.items()
+            ]
+            
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Optimized result aggregation
+            all_positions = []
+            for result in results:
+                if not isinstance(result, Exception):
+                    all_positions.extend(result)
+            
+            # Fast position counting
+            option_count = sum(1 for pos in all_positions if pos.is_option)
+            logger.debug(f"Retrieved {len(all_positions)} positions ({option_count} options) from {len(accounts)} accounts")
+            
+            return all_positions
+            
+        except Exception as e:
+            logger.error(f"Failed to get all positions: {e}")
+            # Re-raise the exception instead of masking it with empty list
+            # This ensures tests fail when there are real errors
+            raise RuntimeError(f"Position retrieval failed: {e}") from e
+    
+    async def _get_account_positions(self, account_id: str, connection) -> List[Position]:
+        """
+        High-performance single account position retrieval
+        
+        Args:
+            account_id: Account ID
+            connection: Account connection object
+            
+        Returns:
+            List of positions for the account
+        """
+        try:
+            # Streamlined position retrieval
+            positions_data = await connection.alpaca_client.get_positions()
+            
+            # Optimized position creation
+            positions = []
+            for pos_data in positions_data:
+                pos_data['account_id'] = account_id
+                position = Position(pos_data)
+                positions.append(position)
+                
+                # Simplified logging for important positions only
+                if position.is_option and position.is_zero_day_option:
+                    logger.warning(f"Zero-day option detected: {position.symbol} in {account_id}")
+            
+            return positions
+            
+        except Exception as e:
+            logger.error(f"Failed to get positions for account {account_id}: {e}")
+            return []
+    
+    def filter_long_positions(self, positions: List[Position]) -> List[Position]:
+        """
+        High-performance filtering for long positions
+        
+        Args:
+            positions: All positions list
+            
+        Returns:
+            Long positions (qty > 0)
+        """
+        return [pos for pos in positions if pos.is_long]
+    
+    async def handle_short_positions(self, positions: List[Position]):
+        """
+        High-performance async handling of short positions (auto-close)
+        
+        Args:
+            positions: All positions list
+        """
+        short_positions = [pos for pos in positions if pos.is_option and pos.is_short]
+        
+        if not short_positions:
+            return
+        
+        logger.warning(f"Found {len(short_positions)} short option positions, closing concurrently")
+        
+        # High-concurrency position closing
+        tasks = [self._close_short_position(position) for position in short_positions]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Count failures
+        failed_count = sum(1 for result in results if isinstance(result, Exception))
+        if failed_count > 0:
+            logger.error(f"{failed_count}/{len(short_positions)} short positions failed to close")
+    
+    async def _close_short_position(self, position: Position):
+        """
+        High-performance short position closing
+        
+        Args:
+            position: Short position to close
+        """
+        try:
+            # Streamlined connection and order placement
+            connection = await self.account_pool.get_connection(position.account_id)
+            
+            result = await connection.alpaca_client.submit_order(
+                symbol=position.symbol,
+                qty=abs(position.qty),
+                side='buy',
+                type='market',
+                time_in_force='day'
+            )
+            
+            logger.info(f"Short position closed: {position.symbol} in {position.account_id}")
+            
+        except Exception as e:
+            logger.error(f"Failed to close short position {position.symbol}: {e}")
+            raise
+    
+    def get_zero_day_positions(self, positions: List[Position]) -> List[Position]:
+        """
+        High-performance filtering for zero-day option positions
+        
+        Args:
+            positions: Position list
+            
+        Returns:
+            Zero-day option positions
+        """
+        return [pos for pos in positions if pos.is_option and pos.is_zero_day_option]
