@@ -78,7 +78,7 @@ class ConnectionManager:
             self._locks[ConnectionType.TRADING_CLIENT] = asyncio.Lock()
             self._in_use[ConnectionType.TRADING_CLIENT] = False
             
-            logger.info(f"Trading Client initialized successfully (user: {self.user_id})")
+            # logger.info(f"Trading Client initialized successfully (user: {self.user_id})")
             
             # Verify account access to ensure API is working
             self._verify_account_access()
@@ -285,6 +285,7 @@ class ConnectionManager:
                 account_type = 'Paper Trading' if getattr(account_info, 'pattern_day_trader', None) is not None else 'Live'
                 
                 # Log successful account verification - One line format for easy tracking
+                logger.info('================')
                 logger.info(f"OK {self.user_id}: {status} | Account#{account_id[:8]}... | Equity=${equity:,.2f} | Cash=${cash:,.2f} | BuyPower=${buying_power:,.2f} | Type={account_type}")
                 
                 # Check account status
@@ -295,7 +296,7 @@ class ConnectionManager:
                 if equity < 0:
                     logger.warning(f"Account equity is negative (user: {self.user_id}): ${equity:,.2f}")
                     
-                logger.info(f"API connection verification complete, account running normally (user: {self.user_id})")
+                # logger.info(f"API connection verification complete, account running normally (user: {self.user_id})")
                 
             else:
                 logger.error(f"Cannot get account information, API may be abnormal (user: {self.user_id})")
