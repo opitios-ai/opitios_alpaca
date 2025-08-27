@@ -52,7 +52,7 @@ class PriceTracker:
         
     async def get_option_quotes(self, symbols: List[str]) -> Dict[str, OptionQuote]:
         """
-        获取期权报价
+        获取期权报价 - 使用指定的stock_ws账户
         
         Args:
             symbols: 期权符号列表
@@ -66,16 +66,27 @@ class PriceTracker:
         quotes = {}
         
         try:
-            # 使用第一个可用的账户获取报价
-            # 因为报价是公共数据，使用任意账户都可以
+            # 优先使用stock_ws账户获取报价（避免冲突）
             accounts = await self.account_pool.get_all_accounts()
             if not accounts:
                 logger.error("没有可用的账户连接")
                 return quotes
             
-            # 获取第一个账户的客户端
-            first_connection = list(accounts.values())[0]
-            first_client = first_connection.alpaca_client
+            # 查找stock_ws账户
+            stock_ws_connection = None
+            for account_id, connection in accounts.items():
+                if account_id == 'stock_ws':
+                    stock_ws_connection = connection
+                    logger.debug(f"使用stock_ws账户进行期权询价")
+                    break
+            
+            # 如果没有stock_ws账户，使用第一个可用账户
+            if stock_ws_connection is None:
+                stock_ws_connection = list(accounts.values())[0]
+                first_account_id = list(accounts.keys())[0]
+                logger.warning(f"未找到stock_ws账户，使用 {first_account_id} 进行询价")
+            
+            first_client = stock_ws_connection.alpaca_client
             
             # 分批获取报价（避免单次请求太多符号）
             batch_size = 50

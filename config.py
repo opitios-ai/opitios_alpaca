@@ -1,28 +1,87 @@
 import os
 import yaml
-from pydantic_settings import BaseSettings
+from pathlib import Path
 from typing import Optional, List, Dict
 
+try:
+    from pydantic_settings import BaseSettings
+except ImportError:
+    try:
+        from pydantic import BaseSettings
+    except ImportError:
+        raise ImportError("Neither pydantic_settings nor pydantic.BaseSettings could be imported. Please install pydantic[dotenv] or pydantic-settings")
+
+
+def find_project_root() -> Path:
+    """Find project root directory by looking for secrets.yml or secrets.example.yml"""
+    current_path = Path(__file__).parent.absolute()
+    
+    # Walk up the directory tree looking for project root markers
+    for path in [current_path] + list(current_path.parents):
+        # Check for secrets files (primary indicators)
+        if (path / "secrets.yml").exists() or (path / "secrets.example.yml").exists():
+            return path
+        # Check for other project markers
+        if (path / "main.py").exists() and (path / "app").exists():
+            return path
+    
+    # Fallback to current directory
+    return current_path
+
+
+def load_accounts_from_database(database_url: str) -> Dict[str, Dict]:
+    """Load accounts from database - REQUIRED"""
+    try:
+        from app.database_models import load_accounts_from_database
+        accounts = load_accounts_from_database(database_url)
+        if not accounts:
+            raise ValueError("No accounts found in database - database must contain account configurations")
+        return accounts
+    except Exception as e:
+        raise RuntimeError(f"Failed to load accounts from database: {e}")
+
+
 def load_secrets():
-    """Load secrets from secrets.yml file"""
-    secrets_file = "secrets.yml"
-    if os.path.exists(secrets_file):
-        try:
-            with open(secrets_file, 'r', encoding='utf-8') as f:
-                return yaml.safe_load(f)
-        except Exception as e:
-            print(f"Error loading secrets.yml: {e}")
-            return {}
-    else:
-        print("Warning: secrets.yml not found. Please copy secrets.example.yml to secrets.yml and configure your API keys.")
-        return {}
+    """Load configuration - accounts MUST come from database, other settings from YAML"""
+    # Load YAML configuration for database URL and other settings
+    project_root = find_project_root()
+    secrets_file = project_root / "secrets.yml"
+    
+    if not secrets_file.exists():
+        raise FileNotFoundError(f"Configuration file not found: {secrets_file}")
+    
+    try:
+        with open(secrets_file, 'r', encoding='utf-8') as f:
+            yaml_config = yaml.safe_load(f) or {}
+    except Exception as e:
+        raise RuntimeError(f"Failed to load secrets.yml: {e}")
+    
+    # Database URL is REQUIRED
+    database_url = yaml_config.get('database', {}).get('url')
+    if not database_url:
+        raise ValueError("Database URL is required in secrets.yml under 'database.url'")
+    
+    # Load accounts from database (REQUIRED)
+    try:
+        database_accounts = load_accounts_from_database(database_url)
+        print(f"Database: Loaded {len(database_accounts)} accounts")
+    except Exception as e:
+        raise RuntimeError(f"Database account loading failed: {e}")
+    
+    # Merge database accounts with YAML configuration
+    final_config = yaml_config.copy()
+    final_config['accounts'] = database_accounts
+    
+    return final_config
+
 
 # Load secrets at module level
 secrets = load_secrets()
 
+
 class Settings(BaseSettings):
     
-    # Multi-Account Configuration
+    # Multi-Account Configuration (FROM DATABASE ONLY)
     accounts: Dict = secrets.get('accounts', {})
     
     # FastAPI Configuration
@@ -74,15 +133,25 @@ class Settings(BaseSettings):
         'transaction_channel': None
     })
     
+    # Sell Module Configuration
+    sell_module: Dict = secrets.get('sell_module', {
+        'enabled': True,
+        'check_interval': 5,
+        'order_cancel_minutes': 3,
+        'zero_day_handling': True,
+        'strategy_one': {
+            'enabled': True,
+            'profit_rate': 1.1,
+            'stop_loss_rate': 0.8
+        }
+    })
+    
     class Config:
         env_file = ".env"
         case_sensitive = False
 
+
 # 创建设置实例
 settings = Settings()
 
-# 配置加载状态反馈
-if secrets:
-    print("Loaded configuration from: secrets.yml")
-else:
-    print("Warning: secrets.yml not found, using default configuration.")
+print(f"Configuration loaded: {len(settings.accounts)} accounts from database")
