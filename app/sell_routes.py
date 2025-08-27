@@ -8,7 +8,7 @@ from typing import Dict, Any
 from datetime import datetime
 from loguru import logger
 
-from app.middleware import jwt_required, RoleRequired
+from app.middleware import verify_jwt_token, internal_or_jwt_auth
 from app.sell_module.sell_watcher import SellWatcher
 from app.account_pool import get_account_pool
 
@@ -26,7 +26,7 @@ def get_sell_watcher():
 # 创建路由器
 sell_router = APIRouter(prefix="/sell", tags=["sell_module"])
 
-@sell_router.get("/status", dependencies=[Depends(jwt_required)])
+@sell_router.get("/status", dependencies=[Depends(internal_or_jwt_auth)])
 async def get_sell_status() -> Dict[str, Any]:
     """
     获取卖出模块状态
@@ -45,7 +45,7 @@ async def get_sell_status() -> Dict[str, Any]:
         logger.error(f"获取卖出模块状态失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@sell_router.post("/start", dependencies=[Depends(RoleRequired(min_role="admin"))])
+@sell_router.post("/start", dependencies=[Depends(internal_or_jwt_auth)])
 async def start_sell_monitoring() -> Dict[str, str]:
     """
     启动卖出监控
@@ -73,7 +73,7 @@ async def start_sell_monitoring() -> Dict[str, str]:
         logger.error(f"启动卖出监控失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@sell_router.post("/stop", dependencies=[Depends(RoleRequired(min_role="admin"))])
+@sell_router.post("/stop", dependencies=[Depends(internal_or_jwt_auth)])
 async def stop_sell_monitoring() -> Dict[str, str]:
     """
     停止卖出监控
@@ -99,7 +99,7 @@ async def stop_sell_monitoring() -> Dict[str, str]:
         logger.error(f"停止卖出监控失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@sell_router.post("/run-once", dependencies=[Depends(RoleRequired(min_role="admin"))])
+@sell_router.post("/run-once", dependencies=[Depends(internal_or_jwt_auth)])
 async def run_sell_check_once() -> Dict[str, str]:
     """
     执行一次卖出检查
@@ -118,7 +118,7 @@ async def run_sell_check_once() -> Dict[str, str]:
         logger.error(f"执行卖出检查失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@sell_router.get("/config", dependencies=[Depends(jwt_required)])
+@sell_router.get("/config", dependencies=[Depends(internal_or_jwt_auth)])
 async def get_sell_config() -> Dict[str, Any]:
     """
     获取卖出模块配置
@@ -143,7 +143,7 @@ async def get_sell_config() -> Dict[str, Any]:
         logger.error(f"获取卖出配置失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@sell_router.get("/positions", dependencies=[Depends(jwt_required)])
+@sell_router.get("/positions", dependencies=[Depends(internal_or_jwt_auth)])
 async def get_monitored_positions() -> Dict[str, Any]:
     """
     获取正在监控的持仓

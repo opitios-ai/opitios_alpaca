@@ -293,3 +293,94 @@ async def send_trade_notification(order_data: Dict[str, Any], account_name: str,
 async def send_bulk_trade_summary(results: list, symbol: str, qty: int, side: str, asset_class: str = "stock") -> bool:
     """发送批量交易汇总的便捷函数"""
     return await discord_notifier.send_bulk_trade_summary(results, symbol, qty, side, asset_class)
+
+
+async def send_sell_module_notification(status: str, message: str, details: Dict[str, Any] = None) -> bool:
+    """发送卖出模块状态通知"""
+    if not discord_notifier.webhook_url:
+        logger.warning("Discord webhook URL not configured, skipping sell module notification")
+        return False
+    
+    try:
+        await discord_notifier._ensure_session()
+        
+        # 根据状态确定颜色和图标
+        if status == "started":
+            color = 0x00FF00  # 绿色
+            icon = "🚀"
+            title = "卖出模块已启动"
+        elif status == "stopped":
+            color = 0xFF0000  # 红色
+            icon = "⏹️"
+            title = "卖出模块已停止"
+        elif status == "error":
+            color = 0xFF9900  # 橙色
+            icon = "⚠️"
+            title = "卖出模块异常"
+        else:
+            color = 0x0099FF  # 蓝色
+            icon = "📊"
+            title = f"卖出模块 - {status}"
+        
+        embed = {
+            "title": f"{icon} {title}",
+            "description": message,
+            "color": color,
+            "timestamp": datetime.utcnow().isoformat(),
+            "footer": {
+                "text": "Opitios Alpaca Sell Module",
+                "icon_url": "https://alpaca.markets/favicon.ico"
+            }
+        }
+        
+        # 添加详细信息
+        if details:
+            fields = []
+            
+            if details.get('accounts_count'):
+                fields.append({
+                    "name": "📊 账户信息",
+                    "value": f"**监控账户数:** {details['accounts_count']}\n**询价账户:** stock_ws",
+                    "inline": True
+                })
+            
+            if details.get('strategy_config'):
+                strategy = details['strategy_config']
+                fields.append({
+                    "name": "⚙️ 策略配置", 
+                    "value": f"**策略一:** {'启用' if strategy.get('enabled') else '禁用'}\n**止盈率:** {strategy.get('profit_rate', 'N/A')}\n**止损率:** {strategy.get('stop_loss_rate', 'N/A')}",
+                    "inline": True
+                })
+            
+            if details.get('check_interval'):
+                fields.append({
+                    "name": "⏰ 监控设置",
+                    "value": f"**检查间隔:** {details['check_interval']}秒\n**订单取消:** {details.get('cancel_minutes', 'N/A')}分钟",
+                    "inline": True
+                })
+            
+            if fields:
+                embed["fields"] = fields
+        
+        payload = {
+            "embeds": [embed],
+            "username": "Alpaca Sell Module Bot",
+            "avatar_url": "https://alpaca.markets/favicon.ico"
+        }
+        
+        async with discord_notifier.session.post(
+            discord_notifier.webhook_url,
+            json=payload,
+            headers={"Content-Type": "application/json"}
+        ) as response:
+            if response.status == 204:
+                logger.info(f"Discord sell module notification sent successfully: {status}")
+                return True
+            else:
+                error_text = await response.text()
+                logger.error(f"Discord sell module notification failed: {response.status} - {error_text}")
+                return False
+                
+    except Exception as e:
+        logger.error(f"Failed to send Discord sell module notification: {e}")
+        return False

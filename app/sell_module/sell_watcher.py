@@ -10,6 +10,7 @@ import arrow
 from loguru import logger
 from config import settings
 from app.account_pool import AccountPool
+from app.utils.discord_notifier import send_sell_module_notification
 from .config_manager import ConfigManager
 from .position_manager import PositionManager, Position
 from .order_manager import OrderManager
@@ -56,6 +57,28 @@ class SellWatcher:
         self.is_running = True
         logger.info("=== 卖出监控器启动 ===")
         
+        # 发送Discord启动通知
+        try:
+            accounts_count = len(self.account_pool.account_configs) if self.account_pool else 0
+            strategy_config = {
+                'enabled': self.config_manager.is_strategy_enabled(),
+                'profit_rate': getattr(settings, 'sell_module', {}).get('strategy_one', {}).get('profit_rate', 1.1),
+                'stop_loss_rate': getattr(settings, 'sell_module', {}).get('strategy_one', {}).get('stop_loss_rate', 0.8)
+            }
+            
+            await send_sell_module_notification(
+                status="started",
+                message="卖出模块已成功启动，开始监控期权持仓并执行自动卖出策略",
+                details={
+                    'accounts_count': accounts_count,
+                    'strategy_config': strategy_config,
+                    'check_interval': self.config_manager.get_check_interval(),
+                    'cancel_minutes': self.config_manager.get_order_cancel_minutes()
+                }
+            )
+        except Exception as e:
+            logger.error(f"发送Discord启动通知失败: {e}")
+        
         try:
             while self.is_running:
                 # 检查间隔 - 分割为更小的睡眠间隔以便快速响应停止信号
@@ -81,6 +104,15 @@ class SellWatcher:
         finally:
             logger.info("=== 卖出监控器停止 ===")
             self.is_running = False
+            
+            # 发送Discord停止通知
+            try:
+                await send_sell_module_notification(
+                    status="stopped",
+                    message="卖出模块已停止运行"
+                )
+            except Exception as e:
+                logger.error(f"发送Discord停止通知失败: {e}")
     
     async def stop_monitoring(self):
         """
