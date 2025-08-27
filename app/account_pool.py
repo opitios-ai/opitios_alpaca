@@ -463,6 +463,12 @@ class AccountPool:
         
         return stats
     
+    async def get_all_accounts(self) -> Dict[str, Any]:
+        """Get all account connections for position management"""
+        if not self._initialized:
+            await self.initialize()
+        return self.account_connections
+    
     async def shutdown(self):
         """Shutdown account pool"""
         logger.info("Shutting down account pool...")
