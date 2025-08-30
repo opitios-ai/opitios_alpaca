@@ -428,6 +428,7 @@ class SingletonWebSocketManager:
     
     async def remove_client_subscription(self, client_id: str):
         """移除客户端订阅（客户端断开时调用）- 线程安全"""
+        global subscribed_symbols
         
         symbols_to_remove = set()
         
