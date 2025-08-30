@@ -189,11 +189,16 @@ class AccountPool:
         accounts_config = getattr(settings, 'accounts', {})
         
         if not accounts_config:
-            logger.error("No account configurations found in secrets.yml. Please configure multi-account setup.")
+            logger.error("No account configurations found. Please configure accounts in database or secrets.yml.")
             raise ValueError("No account configurations found. Multi-account setup required.")
         
         # Load multi-account configurations
         for account_id, config in accounts_config.items():
+            # 防护：检查config是否为None（由于配置格式错误可能导致）
+            if config is None:
+                logger.error(f"Account {account_id} has invalid configuration (None). Check database or YAML formatting.")
+                continue
+                
             if not config.get('enabled', True):
                 logger.info(f"Skipping disabled account: {account_id}")
                 continue
@@ -229,7 +234,7 @@ class AccountPool:
             if not account_config.enabled:
                 continue
                 
-            logger.info(f"Creating connection for account {account_id}")
+            # logger.info(f"Creating connection for account {account_id}")
             
             self.usage_queues[account_id] = deque()
             
@@ -238,7 +243,7 @@ class AccountPool:
                 
                 if await connection.test_connection():
                     self.account_connections[account_id] = connection
-                    logger.debug(f"Account {account_id} connection created successfully")
+                    # logger.debug(f"Account {account_id} connection created successfully")
                 else:
                     logger.error(f"Account {account_id} connection test failed")
                     
@@ -462,6 +467,12 @@ class AccountPool:
             stats["account_stats"][account_id] = account_stats
         
         return stats
+    
+    async def get_all_accounts(self) -> Dict[str, Any]:
+        """Get all account connections for position management"""
+        if not self._initialized:
+            await self.initialize()
+        return self.account_connections
     
     async def shutdown(self):
         """Shutdown account pool"""

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
@@ -140,10 +141,42 @@ async def lifespan(app: FastAPI):
             "no mock or calculated data will be returned"
         )
     
+    # Initialize and start sell module if enabled
+    sell_watcher = None
+    try:
+        from app.sell_module.sell_watcher import SellWatcher
+        
+        # Check if sell module is enabled in configuration
+        sell_config = getattr(settings, 'sell_module', {})
+        if sell_config.get('enabled', True):
+            logger.info("🚀 Initializing sell module...")
+            sell_watcher = SellWatcher(account_pool)
+            
+            # Start sell monitoring in background
+            import asyncio
+            asyncio.create_task(sell_watcher.start_monitoring())
+            logger.info("✓ Sell module started in background")
+        else:
+            logger.info("Sell module is disabled in configuration")
+            
+    except Exception as e:
+        logger.error(f"Failed to initialize sell module: {e}")
+        # Don't raise - let the main service continue running
+    
     yield
     
     # Shutdown
     logger.info(f"Shutting down {settings.app_name}")
+    
+    # Shutdown sell module if running
+    if sell_watcher and sell_watcher.is_running:
+        logger.info("Stopping sell module...")
+        try:
+            await sell_watcher.stop_monitoring()
+            logger.info("✓ Sell module stopped")
+        except Exception as e:
+            logger.error(f"Error stopping sell module: {e}")
+    
     await account_pool.shutdown()
 
 # Create FastAPI application with JWT security scheme
@@ -210,11 +243,13 @@ app.add_middleware(
 from app.auth_routes import auth_router, admin_router
 from app.websocket_routes import ws_router
 from app.health_routes import health_router
+from app.sell_routes import sell_router
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(router, prefix="/api/v1", tags=["trading"])
 app.include_router(ws_router, prefix="/api/v1", tags=["websocket"])
+app.include_router(sell_router, prefix="/api/v1", tags=["sell_module"])
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -228,6 +263,30 @@ async def root():
         "version": "1.0.0",
         "docs": "/docs",
         "health": "/api/v1/health"
+    }
+
+@app.get("/health")
+async def basic_health_check():
+    """Basic health check endpoint - fast response < 100ms"""
+    import time
+    from datetime import datetime
+    start_time = time.time()
+    
+    # Quick configuration check only
+    config_status = {
+        "real_data_only": settings.real_data_only,
+        "accounts_configured": len(settings.accounts),
+        "multi_account_mode": len(settings.accounts) > 1
+    }
+    
+    response_time = (time.time() - start_time) * 1000  # Convert to milliseconds
+    
+    return {
+        "status": "healthy", 
+        "service": "Opitios Alpaca Trading Service",
+        "response_time_ms": round(response_time, 2),
+        "configuration": config_status,
+        "timestamp": datetime.now().isoformat()
     }
 
 # Event handlers moved to lifespan context manager above
