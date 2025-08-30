@@ -837,13 +837,16 @@ class PooledAlpacaClient:
         successful_orders = 0
         failed_orders = 0
         
-        logger.info(f"Starting bulk option order for {len(account_stats)} accounts: {option_symbol} {qty} {side}")
+        logger.info(f"🚀 Starting bulk option order for {len(account_stats)} accounts: {option_symbol} {qty} {side}")
+        logger.info(f"📊 Account stats: {list(account_stats.keys())}")
         
         # 为每个账户下单
-        for account_id, stats in account_stats.items():
+        for i, (account_id, stats) in enumerate(account_stats.items()):
             account_name = stats.get("account_name")
+            logger.info(f"🔄 Processing account {i+1}/{len(account_stats)}: {account_id} ({account_name})")
             
             try:
+                logger.info(f"📞 About to place option order for account {account_id}")
                 # 使用指定账户下单
                 order_result = await self.place_option_order(
                     option_symbol=option_symbol,
@@ -855,6 +858,7 @@ class PooledAlpacaClient:
                     account_id=account_id,
                     user_id=user_id
                 )
+                logger.info(f"📄 Order result received for account {account_id}: {type(order_result)} keys: {list(order_result.keys()) if isinstance(order_result, dict) else 'N/A'}")
                 
                 if "error" in order_result:
                     failed_orders += 1
@@ -864,9 +868,10 @@ class PooledAlpacaClient:
                         success=False,
                         error=order_result["error"]
                     ))
-                    logger.warning(f"Failed to place option order for account {account_id}: {order_result['error']}")
+                    logger.warning(f"❌ Failed to place option order for account {account_id}: {order_result['error']}")
                 else:
                     successful_orders += 1
+                    logger.info(f"✅ Successfully processed order for account {account_id}")
                     from app.models import OrderResponse
                     
                     # 确保ID是字符串类型（Alpaca可能返回UUID对象）
@@ -895,15 +900,18 @@ class PooledAlpacaClient:
             except Exception as e:
                 failed_orders += 1
                 error_msg = str(e)
+                logger.error(f"💥 Exception placing option order for account {account_id}: {error_msg}")
+                logger.error(f"💥 Exception type: {type(e).__name__}")
                 results.append(BulkOrderResult(
                     account_id=account_id,
                     account_name=account_name,
                     success=False,
                     error=error_msg
                 ))
-                logger.error(f"Exception placing option order for account {account_id}: {error_msg}")
+            
+            logger.info(f"🏁 Completed processing account {account_id} ({i+1}/{len(account_stats)})")
         
-        logger.info(f"Bulk option order completed: {successful_orders} successful, {failed_orders} failed")
+        logger.info(f"🎯 Bulk option order COMPLETED: {successful_orders} successful, {failed_orders} failed out of {len(account_stats)} accounts")
 
         # 发送批量交易汇总通知
         if successful_orders > 0:
