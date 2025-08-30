@@ -400,7 +400,6 @@ class SingletonWebSocketManager:
     
     async def add_client_subscription(self, client_id: str, symbols: List[str]):
         """添加客户端订阅 - 线程安全"""
-        global subscribed_symbols, client_subscriptions
         
         if self._shutdown_event.is_set():
             logger.warning("WebSocket管理器已关闭，无法添加订阅")
@@ -429,7 +428,6 @@ class SingletonWebSocketManager:
     
     async def remove_client_subscription(self, client_id: str):
         """移除客户端订阅（客户端断开时调用）- 线程安全"""
-        global subscribed_symbols, client_subscriptions
         
         symbols_to_remove = set()
         
@@ -831,7 +829,6 @@ DEFAULT_OPTIONS = [
 @ws_router.websocket("/market-data")
 async def websocket_market_data(websocket: WebSocket):
     """WebSocket端点 - 实时市场数据（单例架构）- JWT认证 - 线程安全"""
-    global active_connections, client_subscriptions
     
     # JWT认证 - 从查询参数获取token
     token = None
