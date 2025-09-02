@@ -9,7 +9,8 @@ from typing import Dict, Optional
 from pydantic import BaseModel
 
 from app.middleware import verify_jwt_token, create_jwt_token, is_internal_ip, internal_or_jwt_auth
-from app.demo_jwt import generate_demo_jwt_token, get_demo_user_info
+# Demo JWT imports only for development - not used in production
+# from app.demo_jwt import generate_demo_jwt_token, get_demo_user_info
 from config import settings
 from fastapi import Request
 
@@ -48,27 +49,14 @@ async def verify_token(
         )
 
 
-# 演示JWT端点
-@auth_router.get("/demo-token")
-async def get_demo_jwt_token():
-    """获取演示JWT Token - 用于Swagger UI快速测试"""
-    token = generate_demo_jwt_token(expire_hours=168)  # 7天有效期
-    user_info = get_demo_user_info()
-    
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "expires_in": 168 * 3600,  # 7天转换为秒
-        "demo_user": user_info,
-        "usage_instructions": [
-            "1. 复制 access_token 的值",
-            "2. 点击 Swagger UI 右上角的 'Authorize' 按钮",
-            "3. 输入: Bearer 后面跟上token (例如: Bearer eyJ0eXAiOiJKV1Q...)",
-            "4. 点击 'Authorize' 按钮",
-            "5. 现在可以测试所有需要JWT认证的端点"
-        ],
-        "note": "这是一个演示token，仅用于测试目的。实际使用中请通过外部系统获取有效token。"
-    }
+# Demo JWT endpoint DISABLED for production security
+# @auth_router.get("/demo-token")
+# async def get_demo_jwt_token():
+#     """DISABLED: Demo JWT Token endpoint - disabled for production security"""
+#     raise HTTPException(
+#         status_code=404,
+#         detail="Demo token endpoint has been disabled for production security"
+#     )
 
 
 # 简化的管理员路由

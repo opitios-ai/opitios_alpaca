@@ -55,13 +55,38 @@ class AccountConnection:
         self._in_use = False
         
     async def test_connection(self) -> bool:
-        """Test connection health"""
+        """Test connection health, validate account type, and check minimum balance"""
         try:
             async with self._lock:
                 trading_client = await self.connection_manager.get_connection(ConnectionType.TRADING_CLIENT)
                 try:
                     account = trading_client.get_account()
-                    return account is not None
+                    if account is not None:
+                        # Account type detection: Check if account number starts with "PA" (paper) or not (live)
+                        account_number = account.account_number
+                        is_paper_account = account_number.startswith("PA")
+                        expected_paper = self.account_config.paper_trading
+                        
+                        if is_paper_account != expected_paper:
+                            logger.warning(f"Account type mismatch for {self.account_config.account_id}: "
+                                         f"Expected paper_trading={expected_paper}, but account {account_number} is "
+                                         f"{'paper' if is_paper_account else 'live'}")
+                        
+                        # Balance validation: Check minimum balance requirement
+                        from config import settings
+                        min_balance = settings.minimum_balance
+                        current_balance = float(account.portfolio_value) if account.portfolio_value else 0.0
+                        
+                        if current_balance < min_balance:
+                            logger.error(f"Account {self.account_config.account_id} balance ${current_balance:,.2f} "
+                                       f"is below minimum required ${min_balance:,.2f}")
+                            return False
+                        
+                        logger.info(f"Account {self.account_config.account_id} ({account_number}) validated: "
+                                  f"{'paper' if is_paper_account else 'live'} trading, "
+                                  f"balance ${current_balance:,.2f}")
+                        return True
+                    return False
                 finally:
                     self.connection_manager.release_connection(ConnectionType.TRADING_CLIENT)
         except Exception as e:
