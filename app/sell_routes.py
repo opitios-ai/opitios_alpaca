@@ -86,7 +86,6 @@ async def get_sell_comprehensive_status() -> Dict[str, Any]:
         uptime_str = "Unknown"
         if status.get("started_at"):
             try:
-                from datetime import datetime
                 started = datetime.fromisoformat(status["started_at"].replace("Z", "+00:00"))
                 uptime_delta = datetime.now() - started.replace(tzinfo=None)
                 hours = int(uptime_delta.total_seconds() // 3600)
