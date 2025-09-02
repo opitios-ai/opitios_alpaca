@@ -830,52 +830,72 @@ DEFAULT_OPTIONS = [
 
 @ws_router.websocket("/market-data")
 async def websocket_market_data(websocket: WebSocket):
-    """WebSocket端点 - 实时市场数据（单例架构）- JWT认证 - 线程安全"""
+    """WebSocket端点 - 实时市场数据（单例架构）- 内网免认证，外网JWT认证 - 线程安全"""
     global active_connections, client_subscriptions
+    
+    # 检查是否为内网访问
+    from app.middleware import is_internal_ip
+    client_ip = websocket.client.host if websocket.client else "unknown"
+    is_internal = is_internal_ip(client_ip)
     
     # JWT认证 - 从查询参数获取token
     token = None
     user_info = None
     
     try:
-        # 从查询参数获取token
-        query_params = dict(websocket.query_params)
-        token = query_params.get("token")
-        
-        if not token:
-            await websocket.close(code=4001, reason="Missing JWT token")
-            logger.warning("WebSocket连接被拒绝: 缺少JWT token")
-            return
+        # 内网访问无需JWT认证
+        if is_internal:
+            logger.info(f"✅ 检测到内网访问: {client_ip}")
+            user_info = {
+                "user_id": "internal",
+                "username": "internal_user",
+                "account_id": None,
+                "alpaca_account": "internal_access",
+                "broker_type": "internal",
+                "permission_group": "internal"
+            }
             
-        # 验证JWT token - 所有有效登录用户都可以接收价格推送
-        from app.middleware import verify_jwt_token
-        logger.info(f"WebSocket JWT验证开始 - Token: {token[:20]}...")
-        payload = verify_jwt_token(token)
-        logger.info(f"WebSocket JWT验证成功 - 用户: {payload.get('username', 'unknown')}")
-        user_info = {
-            "user_id": payload.get("user_id"),
-            "username": payload.get("username", payload.get("sub")),
-            "account_id": payload.get("account_id"),
-            "alpaca_account": payload.get("alpaca_account"),
-            "broker_type": payload.get("broker_type"),
-            "permission_group": payload.get("permission_group")
-        }
-        
-        # 所有有效JWT用户都允许连接接收价格推送
-        
-        # JWT验证成功，接受连接
-        await websocket.accept()
-        client_id = f"{user_info.get('username', 'unknown')}_{datetime.now().timestamp()}"
+            # 内网访问直接接受连接
+            await websocket.accept()
+            client_id = f"internal_{client_ip}_{datetime.now().timestamp()}"
+            
+        else:
+            # 外网访问需要JWT认证
+            query_params = dict(websocket.query_params)
+            token = query_params.get("token")
+            
+            if not token:
+                await websocket.close(code=4001, reason="Missing JWT token")
+                logger.warning("WebSocket连接被拒绝: 缺少JWT token")
+                return
+                
+            # 验证JWT token - 所有有效登录用户都可以接收价格推送
+            from app.middleware import verify_jwt_token
+            logger.info(f"WebSocket JWT验证开始 - Token: {token[:20]}...")
+            payload = verify_jwt_token(token)
+            logger.info(f"WebSocket JWT验证成功 - 用户: {payload.get('username', 'unknown')}")
+            user_info = {
+                "user_id": payload.get("user_id"),
+                "username": payload.get("username", payload.get("sub")),
+                "account_id": payload.get("account_id"),
+                "alpaca_account": payload.get("alpaca_account"),
+                "broker_type": payload.get("broker_type"),
+                "permission_group": payload.get("permission_group")
+            }
+            
+            # JWT验证成功，接受连接
+            await websocket.accept()
+            client_id = f"{user_info.get('username', 'unknown')}_{datetime.now().timestamp()}"
         
         # 线程安全地添加连接
         async with _global_lock:
             active_connections[client_id] = websocket
         
-        logger.info(f"🔗 WebSocket客户端连接成功: {client_id} (用户: {user_info.get('username')}, 账户: {user_info.get('alpaca_account')})")
+        logger.info(f"🔗 WebSocket客户端连接成功: {client_id} (用户: {user_info.get('username')}, 账户: {user_info.get('alpaca_account')}, 访问类型: {'内网' if is_internal else '外网'})")
             
     except Exception as e:
-        await websocket.close(code=4002, reason=f"JWT validation failed: {str(e)}")
-        logger.warning(f"WebSocket连接被拒绝: JWT验证失败 - {e}")
+        await websocket.close(code=4002, reason=f"Authentication failed: {str(e)}")
+        logger.warning(f"WebSocket连接被拒绝: 认证失败 - {e}")
         return
     
     try:

@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
+from fastapi.openapi.docs import get_swagger_ui_html
 from app.routes import router
 from app.middleware import (
-    AuthenticationMiddleware, RateLimitMiddleware, LoggingMiddleware
+    AuthenticationMiddleware, RateLimitMiddleware, LoggingMiddleware, is_internal_ip
 )
 from app.logging_config import logging_config
 from app.account_pool import account_pool
@@ -22,79 +24,6 @@ import os
 # Configure enhanced logging
 logging_config.setup_logging()
 
-def clear_port_8090():
-    """Clear any processes using port 8090"""
-    logger.info("Checking for processes using port 8090...")
-    
-    try:
-        if os.name == 'nt':  # Windows
-            # Find processes using port 8090
-            result = subprocess.run(
-                ['netstat', '-ano', '-p', 'TCP'],
-                capture_output=True, text=True, check=False
-            )
-            
-            lines = result.stdout.split('\n')
-            pids_to_kill = []
-            
-            for line in lines:
-                if ':8090' in line and 'LISTENING' in line:
-                    parts = line.split()
-                    if len(parts) >= 5:
-                        pid = parts[-1]
-                        if pid.isdigit():
-                            pids_to_kill.append(pid)
-                            logger.warning(f"Found process PID {pid} using port 8090")
-            
-            # Kill the processes
-            for pid in pids_to_kill:
-                try:
-                    subprocess.run(
-                        ['taskkill', '/F', '/PID', pid], check=True
-                    )
-                    logger.success(f"Killed process PID {pid}")
-                except subprocess.CalledProcessError as e:
-                    logger.error(f"Failed to kill PID {pid}: {e}")
-                    
-        else:  # Linux/Mac
-            try:
-                result = subprocess.run(
-                    ['lsof', '-ti:8090'], 
-                    capture_output=True, text=True, check=False
-                )
-                
-                if result.stdout.strip():
-                    pids = result.stdout.strip().split('\n')
-                    for pid in pids:
-                        if pid.strip():
-                            try:
-                                subprocess.run(
-                                    ['kill', '-9', pid.strip()], check=True
-                                )
-                                logger.success(
-                                    f"Killed process PID {pid.strip()}"
-                                )
-                            except subprocess.CalledProcessError as e:
-                                logger.error(
-                                    f"Failed to kill PID {pid.strip()}: {e}"
-                                )
-                else:
-                    logger.info("No processes found using port 8090")
-                    
-            except FileNotFoundError:
-                logger.info("lsof command not found, trying alternative method...")
-                try:
-                    subprocess.run(['fuser', '-k', '8090/tcp'], check=True)
-                    logger.success("Killed processes using port 8090 with fuser")
-                except (subprocess.CalledProcessError, FileNotFoundError):
-                    logger.warning("Could not kill processes automatically")
-        
-        # Wait for processes to close
-        time.sleep(2)
-        logger.info("Port 8090 cleanup completed")
-        
-    except Exception as e:
-        logger.error(f"Error while cleaning port 8090: {e}")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -186,6 +115,7 @@ app = FastAPI(
     version="1.0.0",
     debug=settings.debug,
     lifespan=lifespan,
+    docs_url=None,  # Disable default docs to use custom one
     # Don't apply global security - we'll apply it per endpoint
     # Define security schemes
     openapi_tags=[
@@ -224,6 +154,72 @@ def custom_openapi():
     return app.openapi_schema
 
 app.openapi = custom_openapi
+
+@app.get("/docs", include_in_schema=False)
+async def custom_swagger_ui_html(request: Request):
+    """Custom Swagger UI with opitios_alpaca branding"""
+    client_ip = request.client.host if request.client else "unknown"
+    is_internal = is_internal_ip(client_ip)
+    
+    html = get_swagger_ui_html(
+        openapi_url=app.openapi_url,
+        title=f"{app.title} - {'Internal' if is_internal else 'External'}",
+        swagger_favicon_url="https://fastapi.tiangolo.com/img/favicon.png"
+    ).body.decode("utf-8")
+    
+    if is_internal:
+        # Internal access - add colored header and WebSocket test link
+        header_html = '''
+        <style>
+        #opitios-alpaca-header { 
+            background: linear-gradient(90deg, #4a90a4 0%, #357a8a 100%); 
+            color: white; 
+            padding: 15px 20px; 
+            margin: 0; 
+            font-family: Arial, sans-serif;
+            border-bottom: 3px solid #2d5f6f;
+        }
+        .ws-test-link {
+            background: #28a745;
+            color: white;
+            padding: 8px 16px;
+            text-decoration: none;
+            border-radius: 4px;
+            font-weight: bold;
+            margin-left: 15px;
+            display: inline-block;
+        }
+        .ws-test-link:hover {
+            background: #218838;
+            color: white;
+            text-decoration: none;
+        }
+        </style>
+        <div id="opitios-alpaca-header">
+            <h3 style="margin: 0; display: inline-block;">🚀 Opitios Alpaca Trading Service - Internal Access</h3>
+            <a href="/static/websocket_test.html" target="_blank" class="ws-test-link">📡 WebSocket Testing</a>
+        </div>
+        '''
+    else:
+        # External access - gray header
+        header_html = '''
+        <style>
+        #opitios-alpaca-header { 
+            background: linear-gradient(90deg, #6c757d 0%, #495057 100%); 
+            color: white; 
+            padding: 15px 20px; 
+            margin: 0; 
+            font-family: Arial, sans-serif;
+            border-bottom: 3px solid #495057;
+        }
+        </style>
+        <div id="opitios-alpaca-header">
+            <h3 style="margin: 0;">🚀 Opitios Alpaca Trading Service - External Access</h3>
+        </div>
+        '''
+    
+    html = html.replace("<body>", "<body>" + header_html)
+    return HTMLResponse(html)
 
 # Add middleware in order (last added = first executed)
 app.add_middleware(LoggingMiddleware)
@@ -293,8 +289,7 @@ async def basic_health_check():
 
 if __name__ == "__main__":
     # Clear port 8090 before starting server
-    logger.info(f"Starting {settings.app_name} on port {settings.port}")
-    clear_port_8090()
+    logger.info(f"Starting {settings.app_name} on port {settings.port}")    
     
     uvicorn.run(
         "main:app",
