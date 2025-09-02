@@ -124,51 +124,84 @@ class AlpacaClient:
             logger.error(f"Error getting multiple stock quotes: {e}")
             return {"error": str(e)}
 
-    async def get_stock_bars(self, symbol: str, timeframe: str = "1Day", limit: int = 100) -> Dict[str, Any]:
-        """Get historical price bars for a stock"""
+    async def get_stock_bars(self, symbol: str, timeframe: str = "1Day", limit: int = 100, 
+                           start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict[str, Any]:
+        """Get historical price bars for a stock using real Alpaca market data"""
         try:
-            # Convert timeframe string to TimeFrame enum
+            # Convert timeframe string to TimeFrame enum with proper multipliers
             tf_map = {
                 "1Min": TimeFrame.Minute,
-                "5Min": TimeFrame.Minute,  # Simplified for now
-                "15Min": TimeFrame.Minute,  # Simplified for now  
+                "5Min": TimeFrame(5, TimeFrame.Minute),
+                "15Min": TimeFrame(15, TimeFrame.Minute),
                 "1Hour": TimeFrame.Hour,
                 "1Day": TimeFrame.Day
             }
             
             timeframe_obj = tf_map.get(timeframe, TimeFrame.Day)
             
+            # Set default date range if not provided (last 30 days for daily, last 5 days for intraday)
+            if not start_date or not end_date:
+                from datetime import datetime, timedelta
+                end_dt = datetime.now()
+                logger.debug(f"end_dt: {end_dt}")
+                if timeframe in ["1Min", "5Min", "15Min", "1Hour"]:
+                    start_dt = end_dt - timedelta(days=5)  # 5 days for intraday
+                else:
+                    start_dt = end_dt - timedelta(days=30)  # 30 days for daily
+                    
+                start_date = start_dt.strftime("%Y-%m-%d")
+                end_date = end_dt.strftime("%Y-%m-%d")
+            
+            # Use different feed for paper trading vs live trading
+            feed_type = "iex" if self.paper_trading else "sip"
+            
             request = StockBarsRequest(
                 symbol_or_symbols=[symbol],
                 timeframe=timeframe_obj,
-                limit=limit
+                start=start_date,
+                end=end_date,
+                limit=limit,
+                adjustment="raw",
+                feed=feed_type,
+                sort="asc"
             )
             
             bars = self.stock_data_client.get_stock_bars(request)
+            logger.debug(f"bars: len{bars}")
             
-            if symbol in bars:
+            # BarSet object has data dict, check there
+            if hasattr(bars, 'data') and symbol in bars.data and len(bars.data[symbol]) > 0:
                 bars_data = []
-                for bar in bars[symbol]:
+                for bar in bars.data[symbol]:
                     bars_data.append({
                         "timestamp": str(bar.timestamp) if bar.timestamp else None,
                         "open": float(bar.open),
                         "high": float(bar.high),
                         "low": float(bar.low),
                         "close": float(bar.close),
-                        "volume": bar.volume
+                        "volume": bar.volume,
+                        "trade_count": bar.trade_count if hasattr(bar, 'trade_count') else None,
+                        "vwap": float(bar.vwap) if hasattr(bar, 'vwap') and bar.vwap else None
                     })
                 
                 return {
                     "symbol": symbol,
                     "timeframe": timeframe,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "bars_count": len(bars_data),
                     "bars": bars_data
                 }
             else:
+                logger.warning(f"No bar data found for {symbol} with timeframe {timeframe}")
                 return {"error": f"No bar data found for {symbol}"}
                 
         except Exception as e:
-            logger.error(f"Error getting stock bars for {symbol}: {e}")
-            return {"error": str(e)}
+            error_msg = str(e)
+            logger.error(f"Error getting stock bars for {symbol}: {error_msg}")
+            
+            # Pass through the original error for better handling in routes.py
+            return {"error": error_msg}
 
     # Options Methods
     async def get_options_chain(self, underlying_symbol: str, expiration_date: Optional[str] = None) -> Dict[str, Any]:
@@ -178,44 +211,64 @@ class AlpacaClient:
             request = OptionChainRequest(underlying_symbol=underlying_symbol)
             chain = self.option_data_client.get_option_chain(request)
             
-            if chain and hasattr(chain, 'option_contracts'):
+            if chain and isinstance(chain, dict) and len(chain) > 0:
                 options_data = []
                 exp_dates = set()
                 quote_failures = 0
                 
-                for contract in chain.option_contracts:
+                # SDK returns dict with option symbols as keys and contract objects as values
+                for option_symbol, contract in chain.items():
+                    # Parse option symbol to extract contract details
+                    underlying, strike_price, exp_date, option_type = self._parse_option_symbol(option_symbol)
+                    
+                    # Skip if parsing failed
+                    if not underlying or not strike_price or not option_type:
+                        continue
+                    
                     # Filter by expiration date if specified
-                    if expiration_date and str(contract.expiration_date) != expiration_date:
+                    if expiration_date and exp_date != expiration_date:
                         continue
                         
-                    exp_dates.add(str(contract.expiration_date))
+                    exp_dates.add(exp_date)
                     
                     option_data = {
-                        "symbol": contract.symbol,
+                        "symbol": option_symbol,
                         "underlying_symbol": underlying_symbol,
-                        "strike_price": float(contract.strike_price),
-                        "expiration_date": str(contract.expiration_date),
-                        "option_type": contract.style.value.lower() if hasattr(contract, 'style') else "unknown"
+                        "strike_price": strike_price,
+                        "expiration_date": exp_date,
+                        "option_type": option_type
                     }
                     
-                    # Try to get real quote data for each contract
+                    # Extract quote data directly from the OptionsSnapshot object
                     try:
-                        quote_data = await self.get_option_quote(contract.symbol)
-                        if "error" not in quote_data:
+                        if hasattr(contract, 'latest_quote') and contract.latest_quote:
+                            quote = contract.latest_quote
                             option_data.update({
-                                "bid_price": quote_data.get("bid_price"),
-                                "ask_price": quote_data.get("ask_price"),
-                                "bid_size": quote_data.get("bid_size"),
-                                "ask_size": quote_data.get("ask_size"),
-                                "last_price": quote_data.get("last_price"),
-                                "implied_volatility": quote_data.get("implied_volatility")
+                                "bid_price": float(quote.bid_price) if quote.bid_price else None,
+                                "ask_price": float(quote.ask_price) if quote.ask_price else None,
+                                "bid_size": quote.bid_size if hasattr(quote, 'bid_size') else None,
+                                "ask_size": quote.ask_size if hasattr(quote, 'ask_size') else None
                             })
-                        else:
-                            quote_failures += 1
-                            logger.warning(f"No real quote data available for option {contract.symbol}")
+                        
+                        if hasattr(contract, 'latest_trade') and contract.latest_trade:
+                            trade = contract.latest_trade
+                            option_data["last_price"] = float(trade.price) if trade.price else None
+                        
+                        if hasattr(contract, 'implied_volatility') and contract.implied_volatility:
+                            option_data["implied_volatility"] = float(contract.implied_volatility)
+                            
+                        if hasattr(contract, 'greeks') and contract.greeks:
+                            greeks = contract.greeks
+                            option_data["greeks"] = {
+                                "delta": float(greeks.delta) if hasattr(greeks, 'delta') and greeks.delta else None,
+                                "gamma": float(greeks.gamma) if hasattr(greeks, 'gamma') and greeks.gamma else None,
+                                "theta": float(greeks.theta) if hasattr(greeks, 'theta') and greeks.theta else None,
+                                "vega": float(greeks.vega) if hasattr(greeks, 'vega') and greeks.vega else None,
+                                "rho": float(greeks.rho) if hasattr(greeks, 'rho') and greeks.rho else None
+                            }
                     except Exception as quote_error:
                         quote_failures += 1
-                        logger.warning(f"Failed to get quote for option {contract.symbol}: {quote_error}")
+                        logger.warning(f"Failed to extract quote data for option {option_symbol}: {quote_error}")
                     
                     options_data.append(option_data)
                 
@@ -238,7 +291,7 @@ class AlpacaClient:
                     "options": options_data[:100]  # Limit results for performance
                 }
             else:
-                logger.error(f"No options chain contracts found for {underlying_symbol}")
+                logger.error(f"No options chain data found for {underlying_symbol}")
                 return {"error": f"No real options chain data available for {underlying_symbol}"}
             
         except Exception as e:
@@ -657,10 +710,11 @@ class PooledAlpacaClient:
             return await connection.alpaca_client.get_multiple_stock_quotes(symbols)
     
     async def get_stock_bars(self, symbol: str, timeframe: str = "1Day", limit: int = 100, 
+                           start_date: Optional[str] = None, end_date: Optional[str] = None,
                            account_id: Optional[str] = None, routing_key: Optional[str] = None) -> Dict[str, Any]:
         """获取股票K线数据 - 使用连接池"""
         async with self.pool.get_account_connection(account_id, routing_key or symbol) as connection:
-            return await connection.alpaca_client.get_stock_bars(symbol, timeframe, limit)
+            return await connection.alpaca_client.get_stock_bars(symbol, timeframe, limit, start_date, end_date)
     
     async def get_options_chain(self, underlying_symbol: str, expiration_date: Optional[str] = None,
                               account_id: Optional[str] = None, routing_key: Optional[str] = None) -> Dict[str, Any]:
@@ -837,13 +891,16 @@ class PooledAlpacaClient:
         successful_orders = 0
         failed_orders = 0
         
-        logger.info(f"Starting bulk option order for {len(account_stats)} accounts: {option_symbol} {qty} {side}")
+        logger.info(f"🚀 Starting bulk option order for {len(account_stats)} accounts: {option_symbol} {qty} {side}")
+        logger.info(f"📊 Account stats: {list(account_stats.keys())}")
         
         # 为每个账户下单
-        for account_id, stats in account_stats.items():
+        for i, (account_id, stats) in enumerate(account_stats.items()):
             account_name = stats.get("account_name")
+            logger.info(f"🔄 Processing account {i+1}/{len(account_stats)}: {account_id} ({account_name})")
             
             try:
+                logger.info(f"📞 About to place option order for account {account_id}")
                 # 使用指定账户下单
                 order_result = await self.place_option_order(
                     option_symbol=option_symbol,
@@ -855,6 +912,7 @@ class PooledAlpacaClient:
                     account_id=account_id,
                     user_id=user_id
                 )
+                logger.info(f"📄 Order result received for account {account_id}: {type(order_result)} keys: {list(order_result.keys()) if isinstance(order_result, dict) else 'N/A'}")
                 
                 if "error" in order_result:
                     failed_orders += 1
@@ -864,9 +922,10 @@ class PooledAlpacaClient:
                         success=False,
                         error=order_result["error"]
                     ))
-                    logger.warning(f"Failed to place option order for account {account_id}: {order_result['error']}")
+                    logger.warning(f"❌ Failed to place option order for account {account_id}: {order_result['error']}")
                 else:
                     successful_orders += 1
+                    logger.info(f"✅ Successfully processed order for account {account_id}")
                     from app.models import OrderResponse
                     
                     # 确保ID是字符串类型（Alpaca可能返回UUID对象）
@@ -895,15 +954,18 @@ class PooledAlpacaClient:
             except Exception as e:
                 failed_orders += 1
                 error_msg = str(e)
+                logger.error(f"💥 Exception placing option order for account {account_id}: {error_msg}")
+                logger.error(f"💥 Exception type: {type(e).__name__}")
                 results.append(BulkOrderResult(
                     account_id=account_id,
                     account_name=account_name,
                     success=False,
                     error=error_msg
                 ))
-                logger.error(f"Exception placing option order for account {account_id}: {error_msg}")
+            
+            logger.info(f"🏁 Completed processing account {account_id} ({i+1}/{len(account_stats)})")
         
-        logger.info(f"Bulk option order completed: {successful_orders} successful, {failed_orders} failed")
+        logger.info(f"🎯 Bulk option order COMPLETED: {successful_orders} successful, {failed_orders} failed out of {len(account_stats)} accounts")
 
         # 发送批量交易汇总通知
         if successful_orders > 0:

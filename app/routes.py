@@ -45,12 +45,20 @@ async def health_check():
 
 # Connection test endpoint
 @router.get("/test-connection")
-async def test_connection(client: AlpacaClient = Depends(get_alpaca_client)):
-    """Test connection to Alpaca API"""
-    result = await client.test_connection()
-    if result.get("status") == "failed":
-        raise HTTPException(status_code=500, detail=result.get("error"))
-    return result
+async def test_connection(routing_info: dict = Depends(get_routing_info)):
+    """Test connection to Alpaca API - uses connection pool with option_ws account"""
+    try:
+        # Use option_ws account for options-related testing
+        account_data = await pooled_client.get_account(
+            account_id="option_ws",
+            routing_key="test_connection"
+        )
+        if "error" in account_data:
+            raise HTTPException(status_code=500, detail=account_data["error"])
+        return {"status": "success", "message": "Connection to Alpaca API successful", "account_tested": "option_ws"}
+    except Exception as e:
+        logger.error(f"Error in test_connection: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Account endpoints
 @router.get("/account", response_model=AccountResponse)
@@ -237,6 +245,8 @@ async def get_stock_bars(
     symbol: str, 
     timeframe: str = "1Day", 
     limit: int = 100,
+    start_date: Optional[str] = Query(None, description="Start date in YYYY-MM-DD format"),
+    end_date: Optional[str] = Query(None, description="End date in YYYY-MM-DD format"),
     routing_info: dict = Depends(get_routing_info)
 ):
     """Get historical price bars for a stock - uses connection pool"""
@@ -245,15 +255,55 @@ async def get_stock_bars(
             symbol=symbol.upper(), 
             timeframe=timeframe, 
             limit=limit,
+            start_date=start_date,
+            end_date=end_date,
             account_id=routing_info["account_id"],
             routing_key=routing_info["routing_key"] or symbol
         )
         if "error" in bars_data:
-            raise HTTPException(status_code=400, detail=bars_data["error"])
+            error_msg = bars_data.get("error", "Unknown error")
+            
+            # Check if it's a subscription/permission error (handle JSON string format)
+            error_str = str(error_msg).lower()
+            if "subscription does not permit" in error_str or "subscription" in error_str:
+                logger.warning(f"Paper trading subscription limit for {symbol}: {error_msg}")
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "error": "Paper trading accounts have limited data access",
+                        "error_code": "SUBSCRIPTION_LIMIT",
+                        "symbol": symbol.upper(),
+                        "timeframe": timeframe,
+                        "message": "Historical bar data requires live trading subscription. Paper trading accounts have limited market data access.",
+                        "alpaca_error": str(error_msg)
+                    }
+                )
+            else:
+                logger.warning(f"Stock bars unavailable for {symbol}: {error_msg}")
+                raise HTTPException(
+                    status_code=404, 
+                    detail={
+                        "error": error_msg,
+                        "error_code": "STOCK_BARS_UNAVAILABLE", 
+                        "symbol": symbol.upper(),
+                        "timeframe": timeframe,
+                        "message": "No historical bar data available from Alpaca for this symbol and timeframe"
+                    }
+                )
         return bars_data
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error in get_stock_bars: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error in get_stock_bars for {symbol}: {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail={
+                "error": f"Internal server error while retrieving stock bars: {str(e)}",
+                "error_code": "INTERNAL_ERROR",
+                "symbol": symbol.upper(),
+                "timeframe": timeframe
+            }
+        )
 
 # Options endpoints
 @router.post("/options/chain",
@@ -296,22 +346,43 @@ async def get_stock_bars(
     }
     ```
     """)
-async def get_options_chain(request: OptionsChainRequest, client: AlpacaClient = Depends(get_alpaca_client)):
-    """Get options chain for an underlying symbol using only real market data"""
+async def get_options_chain(request: OptionsChainRequest, routing_info: dict = Depends(get_routing_info)):
+    """Get options chain for an underlying symbol using only real market data - uses option_ws account"""
     try:
-        chain_data = await client.get_options_chain(request.underlying_symbol, request.expiration_date)
+        chain_data = await pooled_client.get_options_chain(
+            underlying_symbol=request.underlying_symbol,
+            expiration_date=request.expiration_date,
+            account_id="option_ws",
+            routing_key=request.underlying_symbol
+        )
         if "error" in chain_data:
-            logger.warning(f"Options chain unavailable for {request.underlying_symbol}: {chain_data['error']}")
-            raise HTTPException(
-                status_code=404, 
-                detail={
-                    "error": chain_data["error"],
-                    "error_code": "OPTIONS_CHAIN_UNAVAILABLE",
-                    "underlying_symbol": request.underlying_symbol,
-                    "expiration_date": request.expiration_date,
-                    "message": "No real options chain data available from Alpaca for this symbol"
-                }
-            )
+            error_msg = chain_data.get("error", "Unknown error")
+            logger.warning(f"Options chain unavailable for {request.underlying_symbol}: {error_msg}")
+            
+            # Provide helpful error message
+            if "no real options chain data" in str(error_msg).lower():
+                raise HTTPException(
+                    status_code=404, 
+                    detail={
+                        "error": error_msg,
+                        "error_code": "OPTIONS_CHAIN_UNAVAILABLE",
+                        "underlying_symbol": request.underlying_symbol,
+                        "expiration_date": request.expiration_date,
+                        "message": "Options chain data may be temporarily unavailable. Try again in a few moments.",
+                        "suggestion": "Options data availability varies by market hours and symbol liquidity"
+                    }
+                )
+            else:
+                raise HTTPException(
+                    status_code=404, 
+                    detail={
+                        "error": error_msg,
+                        "error_code": "OPTIONS_CHAIN_UNAVAILABLE",
+                        "underlying_symbol": request.underlying_symbol,
+                        "expiration_date": request.expiration_date,
+                        "message": "No real options chain data available from Alpaca for this symbol"
+                    }
+                )
         return chain_data
     except HTTPException:
         raise
@@ -376,10 +447,14 @@ async def get_options_chain(request: OptionsChainRequest, client: AlpacaClient =
     }
     ```
     """)
-async def get_option_quote(request: OptionQuoteRequest, client: AlpacaClient = Depends(get_alpaca_client)):
-    """Get quote for a specific option contract using only real market data"""
+async def get_option_quote(request: OptionQuoteRequest, routing_info: dict = Depends(get_routing_info)):
+    """Get quote for a specific option contract using only real market data - uses option_ws account"""
     try:
-        quote_data = await client.get_option_quote(request.option_symbol)
+        quote_data = await pooled_client.get_option_quote(
+            option_symbol=request.option_symbol,
+            account_id="option_ws",
+            routing_key=request.option_symbol
+        )
         if "error" in quote_data:
             logger.warning(f"Real data unavailable for option {request.option_symbol}: {quote_data['error']}")
             raise HTTPException(
@@ -448,8 +523,8 @@ async def get_option_quote(request: OptionQuoteRequest, client: AlpacaClient = D
     }
     ```
     """)
-async def get_multiple_option_quotes(request: MultiOptionQuoteRequest, client: AlpacaClient = Depends(get_alpaca_client)):
-    """Get quotes for multiple option contracts using only real market data"""
+async def get_multiple_option_quotes(request: MultiOptionQuoteRequest, routing_info: dict = Depends(get_routing_info)):
+    """Get quotes for multiple option contracts using only real market data - uses option_ws account"""
     try:
         if len(request.option_symbols) > settings.max_option_symbols_per_request:
             logger.warning(f"Batch request exceeded limit: {len(request.option_symbols)} symbols (max {settings.max_option_symbols_per_request})")
@@ -463,7 +538,11 @@ async def get_multiple_option_quotes(request: MultiOptionQuoteRequest, client: A
                 }
             )
             
-        quotes_data = await client.get_multiple_option_quotes(request.option_symbols)
+        quotes_data = await pooled_client.get_multiple_option_quotes(
+            option_symbols=request.option_symbols,
+            account_id="option_ws",
+            routing_key=request.option_symbols[0] if request.option_symbols else "batch_options"
+        )
         if "error" in quotes_data:
             logger.error(f"Batch option quotes request failed: {quotes_data['error']}")
             raise HTTPException(
@@ -497,17 +576,58 @@ async def get_multiple_option_quotes(request: MultiOptionQuoteRequest, client: A
 async def get_options_chain_by_symbol(
     underlying_symbol: str,
     expiration_date: Optional[str] = None,
-    client: AlpacaClient = Depends(get_alpaca_client)
+    routing_info: dict = Depends(get_routing_info)
 ):
-    """Get options chain for an underlying symbol"""
+    """Get options chain for an underlying symbol - uses option_ws account"""
     try:
-        chain_data = await client.get_options_chain(underlying_symbol.upper(), expiration_date)
+        chain_data = await pooled_client.get_options_chain(
+            underlying_symbol=underlying_symbol.upper(),
+            expiration_date=expiration_date,
+            account_id="option_ws",
+            routing_key=underlying_symbol
+        )
         if "error" in chain_data:
-            raise HTTPException(status_code=400, detail=chain_data["error"])
+            error_msg = chain_data.get("error", "Unknown error")
+            logger.warning(f"Options chain unavailable for {underlying_symbol}: {error_msg}")
+            
+            # Provide helpful error message
+            if "no real options chain data" in str(error_msg).lower():
+                raise HTTPException(
+                    status_code=404, 
+                    detail={
+                        "error": error_msg,
+                        "error_code": "OPTIONS_CHAIN_UNAVAILABLE", 
+                        "underlying_symbol": underlying_symbol,
+                        "expiration_date": expiration_date,
+                        "message": "Options chain data may be temporarily unavailable. Try again in a few moments.",
+                        "suggestion": "Options data availability varies by market hours and symbol liquidity"
+                    }
+                )
+            else:
+                raise HTTPException(
+                    status_code=404, 
+                    detail={
+                        "error": error_msg,
+                        "error_code": "OPTIONS_CHAIN_UNAVAILABLE",
+                        "underlying_symbol": underlying_symbol,
+                        "expiration_date": expiration_date,
+                        "message": "No real options chain data available from Alpaca for this symbol"
+                    }
+                )
         return chain_data
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error in get_options_chain_by_symbol: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error in get_options_chain_by_symbol for {underlying_symbol}: {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail={
+                "error": f"Internal server error while retrieving options chain: {str(e)}",
+                "error_code": "INTERNAL_ERROR",
+                "underlying_symbol": underlying_symbol,
+                "expiration_date": expiration_date
+            }
+        )
 
 # Trading endpoints
 @router.post("/stocks/order", 
