@@ -686,23 +686,53 @@ class AlpacaClient:
             request = GetOrdersRequest(limit=limit)
             orders = self.trading_client.get_orders(request)
             
+            logger.debug(f"Retrieved {len(orders)} total orders from Alpaca API (status filter: {status})")
+            
+            # Define open order statuses that should be considered "open"
+            open_statuses = {'new', 'accepted', 'pending_new', 'accepted_for_bidding', 'pending_cancel', 'pending_replace'}
+            
             order_list = []
+            filtered_count = 0
+            status_counts = {}
+            
             for order in orders:
-                if status is None or order.status.value == status:
+                # Track order status counts for debugging
+                order_status = order.status.value
+                status_counts[order_status] = status_counts.get(order_status, 0) + 1
+                # If status is 'open', include all open statuses; otherwise match exact status
+                if status is None:
+                    include_order = True
+                elif status == 'open':
+                    include_order = order.status.value in open_statuses
+                else:
+                    include_order = order.status.value == status
+                
+                if include_order:
+                    filtered_count += 1
                     order_list.append({
                         "id": str(order.id),  # 确保ID是字符串类型
+                        "client_order_id": str(order.client_order_id) if order.client_order_id else None,
                         "symbol": order.symbol,
+                        "asset_id": str(order.asset_id) if order.asset_id else None,
+                        "asset_class": order.asset_class.value if order.asset_class else None,
                         "qty": float(order.qty),
                         "side": order.side.value,
                         "order_type": order.order_type.value,
+                        "time_in_force": order.time_in_force.value if order.time_in_force else None,
                         "status": order.status.value,
                         "filled_qty": float(order.filled_qty) if order.filled_qty else 0,
                         "filled_avg_price": float(order.filled_avg_price) if order.filled_avg_price else None,
-                        "submitted_at": str(order.submitted_at) if order.submitted_at else None,
-                        "filled_at": str(order.filled_at) if order.filled_at else None,
                         "limit_price": float(order.limit_price) if order.limit_price else None,
-                        "stop_price": float(order.stop_price) if order.stop_price else None
+                        "stop_price": float(order.stop_price) if order.stop_price else None,
+                        "created_at": str(order.created_at) if order.created_at else None,
+                        "updated_at": str(order.updated_at) if order.updated_at else None,
+                        "submitted_at": str(order.submitted_at) if order.submitted_at else None,
+                        "filled_at": str(order.filled_at) if order.filled_at else None
                     })
+            
+            # Log detailed debugging information
+            logger.debug(f"Order status breakdown: {status_counts}")
+            logger.debug(f"Filtered {filtered_count}/{len(orders)} orders for status='{status}'")
             
             return order_list
             
