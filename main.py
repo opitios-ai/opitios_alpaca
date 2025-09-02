@@ -70,26 +70,20 @@ async def lifespan(app: FastAPI):
             "no mock or calculated data will be returned"
         )
     
-    # Initialize and start sell module if enabled
-    sell_watcher = None
+    # Initialize and start sell background service
     try:
-        from app.sell_module.sell_watcher import SellWatcher
+        from app.sell_background_service import get_sell_background_service
         
-        # Check if sell module is enabled in configuration
-        sell_config = getattr(settings, 'sell_module', {})
-        if sell_config.get('enabled', True):
-            logger.info("🚀 Initializing sell module...")
-            sell_watcher = SellWatcher(account_pool)
-            
-            # Start sell monitoring in background
-            import asyncio
-            asyncio.create_task(sell_watcher.start_monitoring())
-            logger.info("✓ Sell module started in background")
+        sell_service = get_sell_background_service()
+        service_started = await sell_service.start()
+        
+        if service_started:
+            logger.info("✓ Sell background service started successfully")
         else:
-            logger.info("Sell module is disabled in configuration")
+            logger.info("Sell background service not started (disabled or failed)")
             
     except Exception as e:
-        logger.error(f"Failed to initialize sell module: {e}")
+        logger.error(f"Failed to initialize sell background service: {e}")
         # Don't raise - let the main service continue running
     
     yield
@@ -97,14 +91,17 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info(f"Shutting down {settings.app_name}")
     
-    # Shutdown sell module if running
-    if sell_watcher and sell_watcher.is_running:
-        logger.info("Stopping sell module...")
-        try:
-            await sell_watcher.stop_monitoring()
-            logger.info("✓ Sell module stopped")
-        except Exception as e:
-            logger.error(f"Error stopping sell module: {e}")
+    # Shutdown sell background service
+    try:
+        from app.sell_background_service import get_sell_background_service
+        
+        sell_service = get_sell_background_service()
+        if sell_service.is_running:
+            logger.info("Stopping sell background service...")
+            await sell_service.stop()
+            logger.info("✓ Sell background service stopped")
+    except Exception as e:
+        logger.error(f"Error stopping sell background service: {e}")
     
     await account_pool.shutdown()
 

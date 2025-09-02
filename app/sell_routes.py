@@ -1,6 +1,6 @@
 """
-卖出模块API路由
-提供卖出模块的控制和监控接口
+Sell Module API Routes
+Provides control and monitoring interfaces for the sell background service
 """
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,31 +9,25 @@ from datetime import datetime
 from loguru import logger
 
 from app.middleware import verify_jwt_token, internal_or_jwt_auth
-from app.sell_module.sell_watcher import SellWatcher
-from app.account_pool import get_account_pool
+from app.sell_background_service import (
+    get_sell_background_service,
+    get_sell_service_status,
+    restart_sell_service,
+    start_sell_service,
+    stop_sell_service
+)
 
-# 全局卖出监控器实例
-_sell_watcher: SellWatcher = None
-
-def get_sell_watcher():
-    """获取卖出监控器实例"""
-    global _sell_watcher
-    if _sell_watcher is None:
-        account_pool = get_account_pool()
-        _sell_watcher = SellWatcher(account_pool)
-    return _sell_watcher
-
-# 创建路由器
+# Create router
 sell_router = APIRouter(prefix="/sell", tags=["sell_module"])
+
 
 @sell_router.get("/status", dependencies=[Depends(internal_or_jwt_auth)])
 async def get_sell_status() -> Dict[str, Any]:
     """
-    获取卖出模块状态
+    Get sell background service status
     """
     try:
-        sell_watcher = get_sell_watcher()
-        status = sell_watcher.get_status()
+        status = await get_sell_service_status()
         
         return {
             "status": "success",
@@ -42,86 +36,84 @@ async def get_sell_status() -> Dict[str, Any]:
         }
         
     except Exception as e:
-        logger.error(f"获取卖出模块状态失败: {e}")
+        logger.error(f"Failed to get sell service status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @sell_router.post("/start", dependencies=[Depends(internal_or_jwt_auth)])
-async def start_sell_monitoring() -> Dict[str, str]:
+async def start_sell_monitoring() -> Dict[str, Any]:
     """
-    启动卖出监控
-    需要管理员权限
+    Start sell background service
+    Requires admin privileges
     """
     try:
-        sell_watcher = get_sell_watcher()
+        result = await start_sell_service()
         
-        if sell_watcher.is_running:
+        if result:
+            return {
+                "status": "success", 
+                "message": "Sell background service started successfully"
+            }
+        else:
             return {
                 "status": "warning",
-                "message": "卖出监控器已经在运行中"
+                "message": "Sell background service was not started (disabled or already running)"
             }
         
-        # 在后台启动监控
-        import asyncio
-        asyncio.create_task(sell_watcher.start_monitoring())
-        
-        return {
-            "status": "success", 
-            "message": "卖出监控器已启动"
-        }
-        
     except Exception as e:
-        logger.error(f"启动卖出监控失败: {e}")
+        logger.error(f"Failed to start sell service: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @sell_router.post("/stop", dependencies=[Depends(internal_or_jwt_auth)])
-async def stop_sell_monitoring() -> Dict[str, str]:
+async def stop_sell_monitoring() -> Dict[str, Any]:
     """
-    停止卖出监控
-    需要管理员权限
+    Stop sell background service
+    Requires admin privileges
     """
     try:
-        sell_watcher = get_sell_watcher()
-        
-        if not sell_watcher.is_running:
-            return {
-                "status": "warning", 
-                "message": "卖出监控器未在运行"
-            }
-        
-        await sell_watcher.stop_monitoring()
+        result = await stop_sell_service()
         
         return {
             "status": "success",
-            "message": "卖出监控器已停止"
+            "message": "Sell background service stopped successfully",
+            "data": result
         }
         
     except Exception as e:
-        logger.error(f"停止卖出监控失败: {e}")
+        logger.error(f"Failed to stop sell service: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@sell_router.post("/run-once", dependencies=[Depends(internal_or_jwt_auth)])
-async def run_sell_check_once() -> Dict[str, str]:
+
+@sell_router.post("/restart", dependencies=[Depends(internal_or_jwt_auth)])
+async def restart_sell_monitoring() -> Dict[str, Any]:
     """
-    执行一次卖出检查
-    需要管理员权限
+    Restart sell background service
+    Requires admin privileges
     """
     try:
-        sell_watcher = get_sell_watcher()
-        await sell_watcher.run_once()
+        result = await restart_sell_service()
         
-        return {
-            "status": "success",
-            "message": "卖出检查执行完成"
-        }
+        if result:
+            return {
+                "status": "success",
+                "message": "Sell background service restarted successfully"
+            }
+        else:
+            return {
+                "status": "error",
+                "message": "Failed to restart sell background service"
+            }
         
     except Exception as e:
-        logger.error(f"执行卖出检查失败: {e}")
+        logger.error(f"Failed to restart sell service: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @sell_router.get("/config", dependencies=[Depends(internal_or_jwt_auth)])
 async def get_sell_config() -> Dict[str, Any]:
     """
-    获取卖出模块配置
+    Get sell module configuration
     """
     try:
         from config import settings
@@ -130,50 +122,92 @@ async def get_sell_config() -> Dict[str, Any]:
         return {
             "status": "success",
             "data": {
-                "enabled": sell_config.get('enabled', True),
-                "check_interval": sell_config.get('check_interval', 5),
+                "enabled": sell_config.get('enabled', False),
+                "check_interval": sell_config.get('check_interval', 30),
                 "order_cancel_minutes": sell_config.get('order_cancel_minutes', 3),
                 "zero_day_handling": sell_config.get('zero_day_handling', True),
-                "strategy_one": sell_config.get('strategy_one', {})
+                "strategy_one": sell_config.get('strategy_one', {
+                    "enabled": True,
+                    "profit_rate": 1.1,
+                    "stop_loss_rate": 0.8
+                })
             },
             "timestamp": datetime.now().isoformat()
         }
         
     except Exception as e:
-        logger.error(f"获取卖出配置失败: {e}")
+        logger.error(f"Failed to get sell config: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@sell_router.get("/positions", dependencies=[Depends(internal_or_jwt_auth)])
-async def get_monitored_positions() -> Dict[str, Any]:
+
+@sell_router.get("/service-info", dependencies=[Depends(internal_or_jwt_auth)])
+async def get_service_info() -> Dict[str, Any]:
     """
-    获取正在监控的持仓
+    Get detailed sell service information
     """
     try:
-        sell_watcher = get_sell_watcher()
+        sell_service = get_sell_background_service()
+        status = sell_service.get_status()
         
-        # 获取监控的持仓信息
-        track_list = getattr(sell_watcher, 'track_list', {})
-        
-        positions_info = []
-        for symbol, data in track_list.items():
-            positions_info.append({
-                "symbol": symbol,
-                "current_price": data.get('current_price', 0),
-                "entry_price": data.get('entry_price', 0),
-                "quantity": data.get('quantity', 0),
-                "unrealized_pnl": data.get('unrealized_pnl', 0),
-                "last_updated": data.get('last_updated', 'N/A')
-            })
+        # Additional service information
+        service_info = {
+            "service_type": "background_async",
+            "integration": "fastapi_lifespan",
+            "non_blocking": True,
+            "thread_safe": True,
+            "status_details": status
+        }
         
         return {
             "status": "success",
-            "data": {
-                "total_positions": len(positions_info),
-                "positions": positions_info
+            "data": service_info,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get service info: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@sell_router.get("/health", dependencies=[Depends(internal_or_jwt_auth)])
+async def get_sell_service_health() -> Dict[str, Any]:
+    """
+    Health check for sell background service
+    """
+    try:
+        sell_service = get_sell_background_service()
+        status = sell_service.get_status()
+        
+        # Determine health status
+        is_healthy = (
+            status["enabled"] and 
+            status["running"] and 
+            status["task_status"] == "running" and
+            status["sell_watcher_initialized"] and
+            status["account_pool_initialized"]
+        )
+        
+        health_status = "healthy" if is_healthy else "unhealthy"
+        
+        return {
+            "health": health_status,
+            "status": "success" if is_healthy else "warning",
+            "data": status,
+            "checks": {
+                "service_enabled": status["enabled"],
+                "service_running": status["running"],
+                "task_running": status["task_status"] == "running",
+                "watcher_initialized": status["sell_watcher_initialized"],
+                "account_pool_ready": status["account_pool_initialized"]
             },
             "timestamp": datetime.now().isoformat()
         }
         
     except Exception as e:
-        logger.error(f"获取监控持仓失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Sell service health check failed: {e}")
+        return {
+            "health": "unhealthy",
+            "status": "error",
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }

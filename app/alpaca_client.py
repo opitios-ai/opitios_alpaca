@@ -12,6 +12,7 @@ from loguru import logger
 from typing import Optional, List, Dict, Any
 import pandas as pd
 import asyncio
+import time
 from datetime import datetime, timedelta
 
 class AlpacaClient:
@@ -462,13 +463,18 @@ class AlpacaClient:
     async def place_stock_order(self, symbol: str, qty: float, side: str, order_type: str = "market", 
                               limit_price: Optional[float] = None, stop_price: Optional[float] = None,
                               time_in_force: str = "day", user_id: Optional[str] = None) -> Dict[str, Any]:
-        """Place a stock order"""
+        """Place a stock order with timing measurements"""
+        start_time = time.time()
+        order_prep_time = None
+        order_submit_time = None
+        
         try:
             # Convert string parameters to Alpaca enums
             order_side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
             tif = TimeInForce.DAY if time_in_force.lower() == "day" else TimeInForce.GTC
             
             # Create order request based on type
+            prep_start = time.time()
             if order_type.lower() == "market":
                 order_data = MarketOrderRequest(
                     symbol=symbol,
@@ -495,10 +501,17 @@ class AlpacaClient:
             else:
                 return {"error": "Invalid order type or missing required price parameters"}
             
-            # Submit order
+            order_prep_time = (time.time() - prep_start) * 1000  # Convert to milliseconds
+            
+            # Submit order with timing
             price_info = f" at ${limit_price}" if limit_price else f" at ${stop_price} (stop)" if stop_price else ""
             logger.info(f"Placing stock order: {symbol} x{qty} {side.upper()} {order_type.upper()}{price_info}")
+            
+            submit_start = time.time()
             order = self.trading_client.submit_order(order_data)
+            order_submit_time = (time.time() - submit_start) * 1000  # Convert to milliseconds
+            
+            total_time = (time.time() - start_time) * 1000  # Convert to milliseconds
             
             order_result = {
                 "id": str(order.id),  # 确保ID是字符串类型
@@ -510,13 +523,19 @@ class AlpacaClient:
                 "filled_qty": float(order.filled_qty) if order.filled_qty else 0,
                 "filled_avg_price": float(order.filled_avg_price) if order.filled_avg_price else None,
                 "submitted_at": str(order.submitted_at) if order.submitted_at else None,
-                "filled_at": str(order.filled_at) if order.filled_at else None
+                "filled_at": str(order.filled_at) if order.filled_at else None,
+                "timing": {
+                    "prep_time_ms": round(order_prep_time, 2),
+                    "submit_time_ms": round(order_submit_time, 2),
+                    "total_time_ms": round(total_time, 2)
+                }
             }
             
-            # 详细的成功日志 - 包含用户信息
+            # 详细的成功日志 - 包含用户信息和时间信息
             price_str = f" at ${limit_price}" if limit_price else f" at ${stop_price} (stop)" if stop_price else ""
             user_info = f"User: {user_id} | " if user_id else ""
-            logger.info(f"✅ Stock order placed successfully: {user_info}{order_result['symbol']} x{order_result['qty']} {order_result['side'].upper()}{price_str} | Order ID: {order_result['id']} | Status: {order_result['status']}")
+            timing_info = f"[Prep: {order_prep_time:.2f}ms, Submit: {order_submit_time:.2f}ms, Total: {total_time:.2f}ms]"
+            logger.info(f"✅ Stock order placed successfully: {user_info}{order_result['symbol']} x{order_result['qty']} {order_result['side'].upper()}{price_str} | Order ID: {order_result['id']} | Status: {order_result['status']} | Timing: {timing_info}")
 
             # 发送Discord通知
             # try:
@@ -527,25 +546,32 @@ class AlpacaClient:
             return order_result
             
         except Exception as e:
-            logger.error(f"Error placing stock order: {e}")
+            total_time = (time.time() - start_time) * 1000
+            logger.error(f"Error placing stock order after {total_time:.2f}ms: {e}")
             return {"error": str(e)}
 
     async def place_option_order(self, option_symbol: str, qty: int, side: str, order_type: str = "market",
                                limit_price: Optional[float] = None, time_in_force: str = "day", 
                                user_id: Optional[str] = None,account_id: str = None) -> Dict[str, Any]:
-        """Place an options order using Alpaca's options trading API"""
+        """Place an options order using Alpaca's options trading API with timing measurements"""
+        start_time = time.time()
+        validation_time = None
+        order_prep_time = None
+        order_submit_time = None
+        
         try:
             # Convert string parameters to Alpaca enums
             order_side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
             tif = TimeInForce.DAY if time_in_force.lower() == "day" else TimeInForce.GTC
             
             # Validate option symbol format (e.g., AAPL240216C00190000)
+            validation_start = time.time()
             if not self._validate_option_symbol(option_symbol):
                 return {"error": f"Invalid option symbol format: {option_symbol}. Expected format: SYMBOL[YY]MMDD[C/P]XXXXXXXX"}
+            validation_time = (time.time() - validation_start) * 1000  # Convert to milliseconds
             
             # Create option order request based on type
-            # Note: For options, we don't need to specify AssetClass explicitly
-            # Alpaca automatically detects options based on the symbol format
+            prep_start = time.time()
             if order_type.lower() == "market":
                 order_data = MarketOrderRequest(
                     symbol=option_symbol,
@@ -564,10 +590,17 @@ class AlpacaClient:
             else:
                 return {"error": "Invalid order type or missing required price parameters for options"}
             
+            order_prep_time = (time.time() - prep_start) * 1000  # Convert to milliseconds
+            
             # Submit option order
             price_info = f" at ${limit_price}" if limit_price else ""
             logger.info(f"Placing option order: {option_symbol} x{qty} {side.upper()} {order_type.upper()}{price_info}")
+            
+            submit_start = time.time()
             order = self.trading_client.submit_order(order_data)
+            order_submit_time = (time.time() - submit_start) * 1000  # Convert to milliseconds
+            
+            total_time = (time.time() - start_time) * 1000  # Convert to milliseconds
             
             # 详细的成功日志
             order_result = {
@@ -582,18 +615,26 @@ class AlpacaClient:
                 "submitted_at": str(order.submitted_at) if order.submitted_at else None,
                 "filled_at": str(order.filled_at) if order.filled_at else None,
                 "limit_price": float(order.limit_price) if order.limit_price else None,
-                "asset_class": "option"
+                "asset_class": "option",
+                "timing": {
+                    "validation_time_ms": round(validation_time, 2),
+                    "prep_time_ms": round(order_prep_time, 2),
+                    "submit_time_ms": round(order_submit_time, 2),
+                    "total_time_ms": round(total_time, 2)
+                }
             }
             
-            # 详细的成功日志 - 包含用户信息
+            # 详细的成功日志 - 包含用户信息和时间信息
             price_str = f" at ${limit_price}" if limit_price else ""
             user_info = f"User: {user_id} | " if user_id else ""
-            logger.info(f"✅ Option order placed successfully: account {account_id} {user_info}{order.symbol} x{order_result['qty']} {order_result['side'].upper()}{price_str} | Order ID: {order_result['id']} | Status: {order_result['status']}")
+            timing_info = f"[Validation: {validation_time:.2f}ms, Prep: {order_prep_time:.2f}ms, Submit: {order_submit_time:.2f}ms, Total: {total_time:.2f}ms]"
+            logger.info(f"✅ Option order placed successfully: account {account_id} {user_info}{order.symbol} x{order_result['qty']} {order_result['side'].upper()}{price_str} | Order ID: {order_result['id']} | Status: {order_result['status']} | Timing: {timing_info}")
 
             return order_result
             
         except Exception as e:
-            logger.error(f"Error placing option order for {option_symbol}: {e}")
+            total_time = (time.time() - start_time) * 1000
+            logger.error(f"Error placing option order for {option_symbol} after {total_time:.2f}ms: {e}")
             return {"error": str(e)}
 
     # Account and Position Methods

@@ -95,6 +95,7 @@ class Settings(BaseSettings):
     enable_mock_data: bool = secrets.get('trading', {}).get('enable_mock_data', False)
     strict_error_handling: bool = secrets.get('trading', {}).get('strict_error_handling', True)
     max_option_symbols_per_request: int = secrets.get('trading', {}).get('max_option_symbols_per_request', 20)
+    minimum_balance: float = secrets.get('trading', {}).get('minimum_balance', 5000.0)
     
     # Logging Configuration
     log_data_failures: bool = True
