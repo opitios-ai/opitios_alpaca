@@ -161,13 +161,31 @@ class OrderManager:
                 logger.info(f"No {side} orders to cancel (>{minutes}min) - completed in {elapsed:.1f}ms")
                 return
             
-            logger.info(f"Cancelling {len(orders_to_cancel)} orders concurrently")
+            # Group orders by account to avoid connection conflicts
+            orders_by_account = {}
+            for order in orders_to_cancel:
+                account_id = order.account_id
+                if account_id not in orders_by_account:
+                    orders_by_account[account_id] = []
+                orders_by_account[account_id].append(order)
             
-            # High-concurrency order cancellation
-            results = await asyncio.gather(
-                *[self._cancel_order(order) for order in orders_to_cancel], 
-                return_exceptions=True
-            )
+            logger.info(f"Cancelling {len(orders_to_cancel)} orders from {len(orders_by_account)} accounts (batched by account)")
+            
+            # Cancel orders sequentially per account, accounts processed in parallel
+            tasks = [
+                self._cancel_account_orders_sequential(account_id, orders)
+                for account_id, orders in orders_by_account.items()
+            ]
+            
+            account_results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Flatten results from all accounts
+            results = []
+            for account_result in account_results:
+                if isinstance(account_result, list):
+                    results.extend(account_result)
+                elif isinstance(account_result, Exception):
+                    results.append(account_result)
             
             # Optimized result processing
             success_count = sum(1 for r in results if not isinstance(r, Exception))
@@ -182,6 +200,51 @@ class OrderManager:
         except Exception as e:
             elapsed = (time.time() - start_time) * 1000
             logger.error(f"Batch order cancellation failed in {elapsed:.1f}ms: {e}")
+    
+    async def _cancel_account_orders_sequential(self, account_id: str, orders: List[Order]) -> List[bool]:
+        """
+        Cancel orders sequentially for a single account to avoid connection conflicts
+        
+        Args:
+            account_id: Account ID to cancel orders for
+            orders: List of orders to cancel for this account
+            
+        Returns:
+            List of cancellation results (True for success, Exception for failure)
+        """
+        results = []
+        order_count = len(orders)
+        
+        logger.debug(f"Cancelling {order_count} orders sequentially for account {account_id}")
+        
+        try:
+            # Get connection once for all orders in this account
+            connection = await self.account_pool.get_connection(account_id)
+            
+            # Cancel each order sequentially using the same connection
+            for i, order in enumerate(orders, 1):
+                try:
+                    result = await connection.alpaca_client.cancel_order(order.id)
+                    
+                    if "error" not in result:
+                        logger.debug(f"Order {order.id} cancelled successfully for {order.symbol} ({i}/{order_count})")
+                        results.append(True)
+                    else:
+                        logger.error(f"Failed to cancel order {order.id} for {order.symbol}: {result.get('error')}")
+                        results.append(Exception(f"Cancellation failed: {result.get('error')}"))
+                        
+                except Exception as e:
+                    logger.error(f"Error cancelling order {order.id} for {order.symbol}: {e}")
+                    results.append(e)
+                    
+            logger.debug(f"Account {account_id} batch complete: {sum(1 for r in results if r is True)}/{order_count} successful")
+            
+        except Exception as e:
+            logger.error(f"Failed to get connection for account {account_id}: {e}")
+            # Return failure for all orders if connection fails
+            results = [e] * order_count
+            
+        return results
     
     async def _cancel_order(self, order: Order) -> bool:
         """
