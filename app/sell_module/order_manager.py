@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from loguru import logger
 from app.account_pool import AccountPool
 from app.alpaca_client import AlpacaClient
+from .api_client import AlpacaAPIClient, get_api_client
 
 
 class Order:
@@ -62,12 +63,15 @@ class Order:
 
 
 class OrderManager:
-    def __init__(self, account_pool: AccountPool):
+    def __init__(self, account_pool: AccountPool, api_client: Optional[AlpacaAPIClient] = None):
         self.account_pool = account_pool
+        # API客户端用于替代直接连接池访问（可选）
+        self.api_client = api_client
+        self.use_api_client = api_client is not None
     
     async def get_all_orders(self, status: str = 'open') -> List[Order]:
         """
-        High-performance concurrent retrieval of orders from all accounts
+        获取所有账户的订单信息 - 支持API客户端或直接连接池访问
         
         Args:
             status: Order status filter ('open', 'closed', 'all')
@@ -75,6 +79,41 @@ class OrderManager:
         Returns:
             List of orders from all accounts
         """
+        if self.use_api_client:
+            return await self._get_all_orders_via_api(status)
+        else:
+            return await self._get_all_orders_via_pool(status)
+    
+    async def _get_all_orders_via_api(self, status: str = 'open') -> List[Order]:
+        """通过 API 客户端获取所有订单"""
+        try:
+            logger.debug(f"使用 API 客户端获取所有订单 (status={status})")
+            # 通过 HTTP API 获取所有订单数据
+            orders_data = await self.api_client.get_all_orders(status=status)
+            
+            if not orders_data:
+                logger.debug("未获取到任何订单数据")
+                return []
+            
+            # 转换为 Order 对象
+            all_orders = []
+            for order_data in orders_data:
+                try:
+                    order = Order(order_data)
+                    all_orders.append(order)
+                except Exception as e:
+                    logger.warning(f"Failed to parse order data: {e}")
+                    continue
+            
+            logger.debug(f"Retrieved {len(all_orders)} orders via API")
+            return all_orders
+            
+        except Exception as e:
+            logger.error(f"Failed to get all orders via API: {e}")
+            return []
+    
+    async def _get_all_orders_via_pool(self, status: str = 'open') -> List[Order]:
+        """通过连接池获取所有订单（原始方法）"""
         try:
             # Optimized account retrieval and task creation
             accounts = await self.account_pool.get_all_accounts()

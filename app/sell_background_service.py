@@ -11,18 +11,21 @@ from loguru import logger
 
 from config import settings
 from app.account_pool import AccountPool, get_account_pool
+from app.sell_module.api_client import AlpacaAPIClient, get_api_client
 from app.sell_module.sell_watcher import SellWatcher
 
 
 class SellBackgroundService:
     """Non-blocking background service for sell operations"""
     
-    def __init__(self):
+    def __init__(self, use_api_client: bool = True):
         self.sell_watcher: Optional[SellWatcher] = None
         self.account_pool: Optional[AccountPool] = None
+        self.api_client: Optional[AlpacaAPIClient] = None
         self.background_task: Optional[asyncio.Task] = None
         self.is_enabled = settings.sell_module.get('enabled', False)
         self.is_running = False
+        self.use_api_client = use_api_client
     
     async def start(self) -> bool:
         """Start the sell module background service"""
@@ -35,15 +38,29 @@ class SellBackgroundService:
             return False
         
         try:
-            logger.info("Starting sell module background service...")
-            
-            # Initialize account pool if not already done
-            self.account_pool = get_account_pool()
-            if not self.account_pool._initialized:
-                await self.account_pool.initialize()
-            
-            # Initialize sell watcher
-            self.sell_watcher = SellWatcher(self.account_pool)
+            if self.use_api_client:
+                logger.info("Starting sell module background service with API client architecture...")
+                
+                # Initialize API client
+                self.api_client = get_api_client()
+                
+                # Initialize account pool (still needed for some operations)
+                self.account_pool = get_account_pool()
+                if not self.account_pool._initialized:
+                    await self.account_pool.initialize()
+                
+                # Initialize sell watcher with API client
+                self.sell_watcher = SellWatcher(self.account_pool, self.api_client)
+            else:
+                logger.info("Starting sell module background service with original architecture...")
+                
+                # Initialize account pool if not already done
+                self.account_pool = get_account_pool()
+                if not self.account_pool._initialized:
+                    await self.account_pool.initialize()
+                
+                # Initialize sell watcher without API client
+                self.sell_watcher = SellWatcher(self.account_pool)
             
             # Start background monitoring task
             self.background_task = asyncio.create_task(
@@ -85,6 +102,14 @@ class SellBackgroundService:
                 logger.debug("Sell module background task cancelled")
             except Exception as e:
                 logger.error(f"Error cancelling sell module background task: {e}")
+        
+        # Close API client if used
+        if self.use_api_client and self.api_client:
+            try:
+                await self.api_client.close()
+                logger.debug("API client session closed")
+            except Exception as e:
+                logger.error(f"Error closing API client: {e}")
         
         logger.info("✅ Sell module background service stopped")
     
