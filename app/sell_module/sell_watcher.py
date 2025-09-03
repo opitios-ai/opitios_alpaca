@@ -4,12 +4,13 @@
 """
 
 import asyncio
-from typing import Dict, List
+from typing import Dict, List, Optional
 from datetime import datetime
 import arrow
 from loguru import logger
 from config import settings
 from app.account_pool import AccountPool
+from .api_client import AlpacaAPIClient, get_api_client
 from app.utils.discord_notifier import send_sell_module_notification
 from .config_manager import ConfigManager
 from .position_manager import PositionManager, Position
@@ -24,15 +25,27 @@ class SellWatcher:
     负责持续监控持仓并执行卖出策略
     """
     
-    def __init__(self, account_pool: AccountPool):
+    def __init__(self, account_pool: AccountPool, api_client: Optional[AlpacaAPIClient] = None):
         self.account_pool = account_pool
         self.settings = settings
         
+        # 如果提供了API客户端，则使用API架构，否则使用原始架构
+        self.use_api_client = api_client is not None
+        
         # 初始化各个组件
         self.config_manager = ConfigManager()
-        self.position_manager = PositionManager(account_pool)
-        self.order_manager = OrderManager(account_pool)
-        self.price_tracker = PriceTracker(account_pool)
+        if self.use_api_client:
+            # API 客户端架构 - 避免直接连接池访问
+            logger.info("使用 API 客户端架构初始化卖出监控器组件")
+            self.position_manager = PositionManager(account_pool, api_client)
+            self.order_manager = OrderManager(account_pool, api_client)
+            self.price_tracker = PriceTracker(account_pool, api_client)
+        else:
+            # 原始架构 - 直接连接池访问
+            logger.debug("使用原始架构初始化卖出监控器组件")
+            self.position_manager = PositionManager(account_pool)
+            self.order_manager = OrderManager(account_pool)
+            self.price_tracker = PriceTracker(account_pool)
         
         # 初始化策略
         self.strategy_one = StrategyOne(self.order_manager)

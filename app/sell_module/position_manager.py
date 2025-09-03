@@ -9,6 +9,7 @@ from datetime import datetime, date
 from loguru import logger
 from app.account_pool import AccountPool
 from app.alpaca_client import AlpacaClient
+from .api_client import AlpacaAPIClient, get_api_client
 
 
 class Position:
@@ -177,18 +178,64 @@ class Position:
 
 
 class PositionManager:
-    def __init__(self, account_pool: AccountPool):
+    def __init__(self, account_pool: AccountPool, api_client: Optional[AlpacaAPIClient] = None):
         if account_pool is None:
             raise TypeError("account_pool cannot be None")
         self.account_pool = account_pool
+        # API客户端用于替代直接连接池访问（可选）
+        self.api_client = api_client
+        self.use_api_client = api_client is not None
     
     async def get_all_positions(self) -> List[Position]:
         """
-        High-performance concurrent retrieval of positions from all accounts
+        获取所有账户的持仓信息 - 支持API客户端或直接连接池访问
         
         Returns:
             List of all account positions
         """
+        if self.use_api_client:
+            return await self._get_all_positions_via_api()
+        else:
+            return await self._get_all_positions_via_pool()
+    
+    async def _get_all_positions_via_api(self) -> List[Position]:
+        """通过 API 客户端获取所有持仓"""
+        try:
+            logger.debug("使用 API 客户端获取所有持仓")
+            # 通过 HTTP API 获取所有持仓数据
+            positions_data = await self.api_client.get_all_positions()
+            
+            if not positions_data:
+                logger.debug("未获取到任何持仓数据")
+                return []
+            
+            # 转换为 Position 对象
+            all_positions = []
+            for pos_data in positions_data:
+                try:
+                    position = Position(pos_data)
+                    all_positions.append(position)
+                    
+                    # 重要持仓日志
+                    if position.is_option and position.is_zero_day_option:
+                        logger.warning(f"Zero-day option detected: {position.symbol} in {position.account_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to parse position data: {e}")
+                    continue
+            
+            # 统计信息
+            option_count = sum(1 for pos in all_positions if pos.is_option)
+            logger.debug(f"Retrieved {len(all_positions)} positions ({option_count} options) via API")
+            
+            return all_positions
+            
+        except Exception as e:
+            logger.error(f"Failed to get all positions via API: {e}")
+            # 返回空列表而不是抛异常，保持服务稳定性
+            return []
+    
+    async def _get_all_positions_via_pool(self) -> List[Position]:
+        """通过连接池获取所有持仓（原始方法）"""
         try:
             # Optimized account retrieval and task creation
             accounts = await self.account_pool.get_all_accounts()
@@ -291,11 +338,40 @@ class PositionManager:
     
     async def _close_short_position(self, position: Position):
         """
-        High-performance short position closing
+        平仓空头持仓 - 支持API客户端或直接连接池访问
         
         Args:
             position: Short position to close
         """
+        if self.use_api_client:
+            await self._close_short_position_via_api(position)
+        else:
+            await self._close_short_position_via_pool(position)
+    
+    async def _close_short_position_via_api(self, position: Position):
+        """通过 API 客户端平仓空头持仓"""
+        try:
+            # 通过 API 下买单平仓空头持仓
+            result = await self.api_client.place_option_order(
+                account_id=position.account_id,
+                option_symbol=position.symbol,
+                qty=abs(int(position.qty)),
+                side='buy',
+                order_type='market'
+            )
+            
+            if "error" not in result:
+                logger.info(f"Short position closed via API: {position.symbol} in {position.account_id}")
+            else:
+                logger.error(f"Failed to close short position {position.symbol} via API: {result['error']}")
+                raise Exception(result['error'])
+            
+        except Exception as e:
+            logger.error(f"Failed to close short position {position.symbol} via API: {e}")
+            raise
+    
+    async def _close_short_position_via_pool(self, position: Position):
+        """通过连接池平仓空头持仓（原始方法）"""
         try:
             # Streamlined connection and order placement
             connection = await self.account_pool.get_connection(position.account_id)
