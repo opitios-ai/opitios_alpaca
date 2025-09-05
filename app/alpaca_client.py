@@ -663,7 +663,9 @@ class AlpacaClient:
             position_list = []
             
             for position in positions:
+                logger.info(position)
                 position_list.append({
+                    "asset_id": str(position.asset_id),
                     "symbol": position.symbol,
                     "qty": float(position.qty),
                     "side": position.side.value,
@@ -671,7 +673,11 @@ class AlpacaClient:
                     "cost_basis": float(position.cost_basis) if position.cost_basis else None,
                     "unrealized_pl": float(position.unrealized_pl) if position.unrealized_pl else None,
                     "unrealized_plpc": float(position.unrealized_plpc) if position.unrealized_plpc else None,
-                    "avg_entry_price": float(position.avg_entry_price) if position.avg_entry_price else None
+                    "avg_entry_price": float(position.avg_entry_price) if position.avg_entry_price and float(position.avg_entry_price) > 0 else None,
+                    "current_price": float(position.current_price) if position.current_price else None,
+                    "lastday_price": float(position.lastday_price) if position.lastday_price else None,
+                    "asset_class": position.asset_class.value if hasattr(position, 'asset_class') and position.asset_class else None,
+                    "qty_available": float(position.qty_available) if hasattr(position, 'qty_available') and position.qty_available else None
                 })
             
             return position_list

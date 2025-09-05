@@ -75,7 +75,7 @@ class AccountConnection:
                         # Balance validation: Check minimum balance requirement
                         from config import settings
                         min_balance = settings.minimum_balance
-                        current_balance = float(account.portfolio_value) if account.portfolio_value else 0.0
+                        current_balance = float(account.cash) if account.cash else 0.0
                         
                         if current_balance < min_balance:
                             logger.error(f"Account {self.account_config.account_id} balance ${current_balance:,.2f} "
@@ -533,8 +533,3 @@ account_pool = AccountPool(health_check_interval_seconds=300)
 def get_account_pool() -> AccountPool:
     """Get account pool instance"""
     return account_pool
-
-
-# Backward compatibility alias
-connection_pool = account_pool
-get_connection_pool = get_account_pool
