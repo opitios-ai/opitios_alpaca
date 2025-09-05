@@ -36,12 +36,13 @@ class SellWatcher:
         self.config_manager = ConfigManager()
         if self.use_api_client:
             # API 客户端架构 - 避免直接连接池访问
-            logger.info("使用 API 客户端架构初始化卖出监控器组件")
+            logger.info("使用 API 客户端架构初始化卖出监控器组件（OptimizedStrategy优先）")
             self.position_manager = PositionManager(account_pool, api_client)
             self.order_manager = OrderManager(account_pool, api_client)
+            # 只有在优化策略失败时才需要price_tracker作为回退
             self.price_tracker = PriceTracker(account_pool, api_client)
         else:
-            # 原始架构 - 直接连接池访问
+            # 原始架构 - 直接连接池访问（需要price_tracker）
             logger.debug("使用原始架构初始化卖出监控器组件")
             self.position_manager = PositionManager(account_pool)
             self.order_manager = OrderManager(account_pool)
@@ -49,6 +50,13 @@ class SellWatcher:
         
         # 初始化策略
         self.strategy_one = StrategyOne(self.order_manager)
+        
+        # 直接卖出策略配置 (使用position数据，无需单独的策略类)
+        self.direct_sell_config = {
+            'min_profit_threshold': 0.15,  # 15% profit target
+            'stop_loss_threshold': -0.30,  # -30% stop loss
+            'zero_day_profit_threshold': 0.05  # 5% for zero-day options
+        }
         
         # 运行状态
         self.is_running = False
@@ -186,10 +194,10 @@ class SellWatcher:
             logger.info("取消旧订单检查完成")
             
             # 5. 检查是否在交易时间内
-            if not self._is_market_open():
-                logger.info("市场未开放，跳过策略执行")
-                logger.info("=" * 60)
-                return
+            # if not self._is_market_open():
+            #     logger.info("市场未开放，跳过策略执行")
+            #     logger.info("=" * 60)
+            #     return
             
             # 6. 执行卖出策略
             await self._execute_sell_strategies(long_positions)
@@ -208,12 +216,178 @@ class SellWatcher:
     
     async def _execute_sell_strategies(self, positions: List[Position]):
         """
-        执行卖出策略
+        执行卖出策略 - 优先使用position数据直接计算，回退到price_tracker
         
         Args:
             positions: 多头期权持仓列表
         """
         logger.info("***** 开始执行卖出策略 *****")
+        
+        # 如果使用API客户端，优先使用position数据直接计算（无需额外API调用）
+        if self.use_api_client:
+            logger.info(f"使用position数据直接处理 {len(positions)} 个持仓（无需额外API调用）")
+            try:
+                await self._execute_direct_sell_strategy(positions)
+                logger.info("***** 直接卖出策略执行结束 *****")
+                return
+                
+            except Exception as e:
+                logger.error(f"直接卖出策略执行失败: {e}")
+                logger.error(f"继续处理错误，回退到传统策略")
+        
+        # 回退到传统策略（如果直接策略失败或不可用）
+        logger.info(f"回退到传统价格追踪策略处理 {len(positions)} 个持仓")
+        await self._execute_traditional_sell_strategies(positions)
+    
+    async def _execute_direct_sell_strategy(self, positions: List[Position]):
+        """
+        直接卖出策略 - 使用position中的数据直接计算和执行
+        
+        Args:
+            positions: 多头期权持仓列表
+        """
+        # 筛选出期权持仓
+        option_positions = [pos for pos in positions if pos.is_option and pos.is_long]
+        logger.info(f"发现 {len(option_positions)} 个多头期权持仓需要评估")
+        
+        # 评估每个持仓
+        positions_to_sell = []
+        for position in option_positions:
+            should_sell, reason = await self._should_sell_position(position)
+            
+            if should_sell:
+                logger.info(f"SELL DECISION: {position.symbol} - {reason} | "
+                           f"P&L: {position.unrealized_plpc:.2%} | Current: ${position.current_price} | "
+                           f"QtyAvailable: {position.qty_available}")
+                positions_to_sell.append(position)
+            else:
+                logger.debug(f"HOLD: {position.symbol} - {reason} | "
+                            f"P&L: {position.unrealized_plpc:.2%} | Current: ${position.current_price}")
+        
+        logger.info(f"策略评估完成: {len(positions_to_sell)}/{len(option_positions)} 个持仓需要卖出")
+        
+        # 执行卖出
+        if positions_to_sell:
+            await self._execute_direct_sells(positions_to_sell)
+        else:
+            logger.info("无持仓需要卖出")
+    
+    async def _should_sell_position(self, position: Position) -> tuple[bool, str]:
+        """
+        判断持仓是否应该卖出
+        
+        Args:
+            position: 持仓对象
+            
+        Returns:
+            (should_sell, reason)
+        """
+        try:
+            # 检查必需数据
+            if position.unrealized_plpc is None:
+                logger.error(f"Position {position.symbol}: Missing unrealized_plpc field")
+                return False, "Continue after error: Missing unrealized_plpc data"
+            
+            profit_loss_pct = position.unrealized_plpc
+            is_zero_day = position.is_zero_day_option
+            
+            # 零日期权特殊处理
+            if is_zero_day:
+                if profit_loss_pct >= self.direct_sell_config['zero_day_profit_threshold']:
+                    return True, f"Zero-day option profit target reached: {profit_loss_pct:.2%}"
+                elif profit_loss_pct <= self.direct_sell_config['stop_loss_threshold']:
+                    return True, f"Zero-day option stop loss triggered: {profit_loss_pct:.2%}"
+                else:
+                    return False, f"Zero-day option holding: P&L {profit_loss_pct:.2%} within range"
+            
+            # 普通期权策略
+            if profit_loss_pct >= self.direct_sell_config['min_profit_threshold']:
+                return True, f"Profit target reached: {profit_loss_pct:.2%}"
+            elif profit_loss_pct <= self.direct_sell_config['stop_loss_threshold']:
+                return True, f"Stop loss triggered: {profit_loss_pct:.2%}"
+            else:
+                return False, f"Holding: P&L {profit_loss_pct:.2%} within acceptable range"
+                
+        except Exception as e:
+            logger.error(f"Error evaluating sell decision for {position.symbol}: {e}")
+            return False, f"Continue after error: {str(e)}"
+    
+    async def _execute_direct_sells(self, positions_to_sell: List[Position]):
+        """
+        执行直接卖出操作
+        
+        Args:
+            positions_to_sell: 需要卖出的持仓列表
+        """
+        logger.info(f"执行直接卖出策略: {len(positions_to_sell)} 个持仓")
+        
+        successful_sells = 0
+        failed_sells = 0
+        
+        # 顺序执行卖单，严格避免并发下单
+        for position in positions_to_sell:
+            try:
+                result = await self._execute_single_direct_sell(position)
+                if isinstance(result, dict) and result.get("error"):
+                    failed_sells += 1
+                    logger.error(f"❌ Failed to place sell order for {position.symbol} (account {position.account_id}): {result['error']}")
+                else:
+                    successful_sells += 1
+                    logger.info(f"✅ Sell order placed successfully for {position.symbol} (account {position.account_id})")
+            except Exception as e:
+                failed_sells += 1
+                logger.error(f"Failed to sell {position.symbol} (account {position.account_id}): {e}")
+        
+        logger.info(f"直接卖出完成: {successful_sells} 成功, {failed_sells} 失败")
+    
+    async def _execute_single_direct_sell(self, position: Position) -> Dict[str, any]:
+        """
+        执行单个持仓的直接卖出
+        
+        Args:
+            position: 需要卖出的持仓
+            
+        Returns:
+            卖出结果
+        """
+        try:
+            # 使用qty_available确定正确的卖出数量
+            if position.qty_available is None or position.qty_available <= 0:
+                error_msg = f"Invalid qty_available: {position.qty_available}"
+                logger.error(f"Position {position.symbol}: {error_msg}")
+                return {"error": error_msg}
+            
+            qty_to_sell = abs(int(position.qty_available))
+            
+            # 通过API客户端下市价卖单（使用实际的 API 客户端实例，而非布尔标志）
+            api_client = getattr(self.order_manager, 'api_client', None)
+            if api_client is None:
+                error_msg = "API client is not configured"
+                logger.error(f"Position {position.symbol}: {error_msg}")
+                return {"error": error_msg}
+
+            result = await api_client.place_option_order(
+                account_id=position.account_id,
+                option_symbol=position.symbol,
+                qty=qty_to_sell,
+                side='sell',
+                order_type='market'
+            )
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Exception executing sell for {position.symbol}: {e}")
+            return {"error": str(e)}
+    
+    async def _execute_traditional_sell_strategies(self, positions: List[Position]):
+        """
+        传统卖出策略（使用price_tracker）- 作为OptimizedStrategy的回退
+        
+        Args:
+            positions: 多头期权持仓列表
+        """
+        logger.info("***** 使用传统策略（price_tracker）*****")
         
         # 获取所有持仓的价格
         logger.info(f"获取 {len(positions)} 个持仓的价格数据...")
@@ -221,7 +395,7 @@ class SellWatcher:
         
         if not quotes:
             logger.warning("未能获取期权价格数据，跳过策略执行")
-            logger.info("***** 卖出策略执行结束 *****")
+            logger.info("***** 传统策略执行结束 *****")
             return
         
         logger.info(f"成功获取 {len(quotes)} 个期权的价格数据")
@@ -237,7 +411,7 @@ class SellWatcher:
             except Exception as e:
                 logger.error(f"执行持仓策略失败 {position.symbol}: {e}")
         
-        logger.info("***** 卖出策略执行结束 *****")
+        logger.info("***** 传统策略执行结束 *****")
     
     async def _execute_position_strategy(self, position: Position, quotes: Dict):
         """
@@ -374,8 +548,9 @@ class SellWatcher:
                 'config_manager': 'ready',
                 'position_manager': 'ready', 
                 'order_manager': 'ready',
-                'price_tracker': 'ready',
-                'strategy_one': 'ready'
+                'price_tracker': 'ready (fallback only)' if self.use_api_client else 'ready',
+                'strategy_one': 'ready',
+                'direct_sell_strategy': 'ready' if self.use_api_client else 'not available'
             }
         }
     

@@ -104,12 +104,14 @@ class SellBackgroundService:
                 logger.error(f"Error cancelling sell module background task: {e}")
         
         # Close API client if used
-        if self.use_api_client and self.api_client:
+        if self.use_api_client and self.api_client is not None:
             try:
                 await self.api_client.close()
                 logger.debug("API client session closed")
             except Exception as e:
                 logger.error(f"Error closing API client: {e}")
+            finally:
+                self.api_client = None
         
         logger.info("✅ Sell module background service stopped")
     

@@ -30,7 +30,7 @@ class TokenVerificationResponse(BaseModel):
 
 @auth_router.post("/verify-token", response_model=TokenVerificationResponse)
 async def verify_token(
-    credentials: HTTPAuthorizationCredentials = Depends(security)
+        credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """验证JWT Token"""
     try:
@@ -77,7 +77,7 @@ async def get_system_health():
     from app.account_pool import get_account_pool
     pool = get_account_pool()
     pool_stats = pool.get_pool_stats()
-    
+
     return {
         "status": "healthy",
         "account_pool": pool_stats,
@@ -93,14 +93,14 @@ async def get_system_health():
 async def get_admin_token(request: Request):
     """生成管理员JWT Token - 仅限内网访问"""
     client_ip = request.client.host if request.client else "unknown"
-    
+
     # 检查是否为内网IP
     if not is_internal_ip(client_ip):
         raise HTTPException(
-            status_code=403, 
+            status_code=403,
             detail="Admin token generation is only allowed from internal network"
         )
-    
+
     # 创建管理员token
     admin_user_data = {
         "user_id": "admin_user",
@@ -109,9 +109,9 @@ async def get_admin_token(request: Request):
         "role": "admin",
         "permission_group": "admin"
     }
-    
+
     token = create_jwt_token(admin_user_data)
-    
+
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -126,21 +126,4 @@ async def get_admin_token(request: Request):
         ],
         "permissions": admin_user_data["permissions"],
         "note": "这是管理员token，拥有所有权限，包括批量下单功能。仅限内网生成。"
-    }
-
-@auth_router.get("/alpaca-credentials")
-async def get_alpaca_credentials():
-    """获取Alpaca WebSocket测试凭据"""
-    # 直接从secrets.yml返回账户凭据
-    return {
-        "api_key": "PK8T7QYKN7SN9EDDMC09",
-        "secret_key": "dhRGqLVvzqGUIYGY87eKw4osEZFbPnCMjuBL2ijV",
-        "account_name": "Primary Trading Account",
-        "paper_trading": True,
-        "endpoints": {
-            "stock_ws": "wss://stream.data.alpaca.markets/v2/iex",
-            "option_ws": "wss://stream.data.alpaca.markets/v1beta1/indicative",
-            "test_ws": "wss://stream.data.alpaca.markets/v2/test"
-        },
-        "note": "这些是真实的Alpaca API凭据，用于WebSocket连接测试"
     }

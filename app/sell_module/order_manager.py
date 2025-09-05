@@ -85,27 +85,35 @@ class OrderManager:
             return await self._get_all_orders_via_pool(status)
     
     async def _get_all_orders_via_api(self, status: str = 'open') -> List[Order]:
-        """通过 API 客户端获取所有订单"""
+        """通过 API 客户端获取所有订单 - 遍历所有账户"""
         try:
             logger.debug(f"使用 API 客户端获取所有订单 (status={status})")
-            # 通过 HTTP API 获取所有订单数据
-            orders_data = await self.api_client.get_all_orders(status=status)
             
-            if not orders_data:
-                logger.debug("未获取到任何订单数据")
+            # 获取所有账户列表
+            accounts = await self.account_pool.get_all_accounts()
+            if not accounts:
+                logger.debug("未找到任何账户")
                 return []
             
-            # 转换为 Order 对象
-            all_orders = []
-            for order_data in orders_data:
-                try:
-                    order = Order(order_data)
-                    all_orders.append(order)
-                except Exception as e:
-                    logger.warning(f"Failed to parse order data: {e}")
-                    continue
+            # 为每个账户创建获取订单的任务
+            tasks = []
+            for account_id in accounts.keys():
+                task = self._get_account_orders_via_api(account_id, status)
+                tasks.append(task)
             
-            logger.debug(f"Retrieved {len(all_orders)} orders via API")
+            # 并发获取所有账户的订单
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # 聚合所有订单
+            all_orders = []
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    account_id = list(accounts.keys())[i]
+                    logger.error(f"Failed to get orders for account {account_id}: {result}")
+                    continue
+                all_orders.extend(result)
+            
+            logger.debug(f"Retrieved {len(all_orders)} orders from {len(accounts)} accounts via API")
             return all_orders
             
         except Exception as e:
@@ -142,8 +150,40 @@ class OrderManager:
             logger.error(f"Failed to get all orders: {e}")
             return []
     
+    async def _get_account_orders_via_api(self, account_id: str, status: str) -> List[Order]:
+        """通过 API 客户端获取单个账户的订单"""
+        try:
+            logger.debug(f"通过 API 获取账户 {account_id} 的订单 (status={status})")
+            
+            # 通过 HTTP API 获取该账户的订单数据
+            orders_data = await self.api_client.get_all_orders(account_id=account_id, status=status)
+            
+            if not orders_data:
+                logger.debug(f"账户 {account_id} 未获取到任何订单数据")
+                return []
+            
+            # 转换为 Order 对象
+            orders = []
+            for order_data in orders_data:
+                try:
+                    # 确保账户ID包含在数据中
+                    order_data['account_id'] = account_id
+                    order = Order(order_data)
+                    orders.append(order)
+                except Exception as e:
+                    logger.warning(f"Failed to parse order data for account {account_id}: {e}")
+                    continue
+            
+            logger.debug(f"Account {account_id}: Retrieved {len(orders)} orders")
+            return orders
+            
+        except Exception as e:
+            logger.error(f"Failed to get orders for account {account_id} via API: {e}")
+            return []
+    
     async def _get_account_orders(self, account_id: str, connection, status: str) -> List[Order]:
         """
+        通过连接池获取单个账户的订单（原始方法）
         获取单个账户的订单
         
         Args:
@@ -323,34 +363,51 @@ class OrderManager:
             Order ID or None
         """
         try:
-            # Optimized connection and order submission
-            connection = await self.account_pool.get_connection(account_id)
-            client = connection.alpaca_client
-            
-            # Streamlined order placement
-            if order_type == 'limit' and limit_price:
-                result = await client.place_option_order(
-                    option_symbol=symbol,
-                    qty=abs(qty),
-                    side='sell',
-                    order_type='limit',
-                    limit_price=limit_price
-                )
+            # Prefer HTTP API client if configured to ensure all sells use API endpoint
+            if self.use_api_client and self.api_client is not None:
+                if order_type == 'limit' and limit_price:
+                    result = await self.api_client.place_option_order(
+                        account_id=account_id,
+                        option_symbol=symbol,
+                        qty=abs(qty),
+                        side='sell',
+                        order_type='limit',
+                        limit_price=limit_price
+                    )
+                else:
+                    result = await self.api_client.place_option_order(
+                        account_id=account_id,
+                        option_symbol=symbol,
+                        qty=abs(qty),
+                        side='sell',
+                        order_type='market'
+                    )
             else:
-                result = await client.place_option_order(
-                    option_symbol=symbol,
-                    qty=abs(qty),
-                    side='sell',
-                    order_type='market'
-                )
-            
-            order_id = result.get('id')
-            logger.info(f"Sell order submitted: {order_id} for {symbol} qty={qty}")
-            
+                # Fallback to direct pool client
+                connection = await self.account_pool.get_connection(account_id)
+                client = connection.alpaca_client
+                if order_type == 'limit' and limit_price:
+                    result = await client.place_option_order(
+                        option_symbol=symbol,
+                        qty=abs(qty),
+                        side='sell',
+                        order_type='limit',
+                        limit_price=limit_price
+                    )
+                else:
+                    result = await client.place_option_order(
+                        option_symbol=symbol,
+                        qty=abs(qty),
+                        side='sell',
+                        order_type='market'
+                    )
+
+            order_id = result.get('id') if isinstance(result, dict) else None
+            logger.info(f"Sell order submitted: {order_id} for {symbol} qty={qty} (account {account_id})")
             return order_id
-            
+
         except Exception as e:
-            logger.error(f"Failed to submit sell order for {symbol}: {e}")
+            logger.error(f"Failed to submit sell order for {symbol} (account {account_id}): {e}")
             return None
     
     async def get_pending_sell_orders(self, symbol: Optional[str] = None) -> List[Order]:

@@ -7,6 +7,8 @@ import aiohttp
 import asyncio
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+import time
+import json
 from loguru import logger
 from config import settings
 
@@ -24,6 +26,12 @@ class AlpacaAPIClient:
             'Content-Type': 'application/json',
             'User-Agent': 'Opitios-SellModule/1.0'
         }
+        
+        # Rate limiting management
+        self.rate_limit_reset_time = 0
+        self.rate_limit_remaining = 10  # Default assumption
+        self.rate_limit_total = 10
+        self.last_rate_limit_check = 0
     
     async def _get_session(self) -> aiohttp.ClientSession:
         """获取或创建 HTTP 会话"""
@@ -36,9 +44,49 @@ class AlpacaAPIClient:
             )
         return self.session
     
+    def _update_rate_limit_info(self, response_data: dict):
+        """更新速率限制信息"""
+        if isinstance(response_data, dict):
+            # 检查是否有速率限制信息
+            if "limit" in response_data:
+                self.rate_limit_total = response_data.get("limit", 10)
+                self.rate_limit_remaining = response_data.get("remaining", 0)
+                self.rate_limit_reset_time = response_data.get("reset_time", 0)
+                self.last_rate_limit_check = time.time()
+                
+                logger.warning(f"Rate limit info updated: {self.rate_limit_remaining}/{self.rate_limit_total}, "
+                             f"reset at {self.rate_limit_reset_time}")
+    
+    async def _check_rate_limit(self):
+        """检查并处理速率限制"""
+        current_time = time.time()
+        
+        # 如果还在速率限制期内
+        if current_time < self.rate_limit_reset_time:
+            wait_time = self.rate_limit_reset_time - current_time
+            logger.warning(f"Rate limit active. Waiting {wait_time:.1f} seconds until reset...")
+            await asyncio.sleep(wait_time + 1)  # 额外等待1秒确保重置
+            logger.info("Rate limit should be reset now, continuing...")
+        
+        # 如果剩余请求数很低，主动延迟
+        elif self.rate_limit_remaining <= 2 and self.rate_limit_remaining > 0:
+            logger.warning(f"Rate limit approaching: only {self.rate_limit_remaining} requests remaining. "
+                         f"Adding delay to prevent limit...")
+            await asyncio.sleep(5)  # 5秒延迟
+    
+    def _is_rate_limit_error(self, response_data: dict) -> bool:
+        """检查是否为速率限制错误"""
+        if isinstance(response_data, dict):
+            return (
+                response_data.get("detail") == "Rate limit exceedeed" or
+                "rate limit" in str(response_data.get("error", "")).lower() or
+                "limit" in response_data
+            )
+        return False
+    
     async def _make_request(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
         """
-        统一的 HTTP 请求方法
+        统一的 HTTP 请求方法 - 支持速率限制管理
         
         Args:
             method: HTTP 方法 (GET, POST, etc.)
@@ -48,34 +96,87 @@ class AlpacaAPIClient:
         Returns:
             API 响应数据
         """
+        # 检查速率限制
+        await self._check_rate_limit()
+        
         url = f"{self.base_url}/api/v1{endpoint}"
         session = await self._get_session()
         
-        try:
-            async with session.request(method, url, **kwargs) as response:
-                if response.status == 200:
-                    return await response.json()
-                else:
-                    error_text = await response.text()
-                    logger.error(f"API request failed: {method} {url} - {response.status}: {error_text}")
-                    return {"error": f"HTTP {response.status}: {error_text}"}
-                    
-        except asyncio.TimeoutError:
-            logger.error(f"API request timeout: {method} {url}")
-            return {"error": "Request timeout"}
-        except Exception as e:
-            logger.error(f"API request exception: {method} {url} - {e}")
-            return {"error": str(e)}
-    
-    async def get_all_positions(self) -> List[Dict[str, Any]]:
-        """
-        获取所有账户的持仓信息
+        max_retries = 3
+        retry_count = 0
         
-        Returns:
-            所有持仓的列表
+        while retry_count < max_retries:
+            try:
+                async with session.request(method, url, **kwargs) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        
+                        # 检查响应中是否包含速率限制信息
+                        if isinstance(result, dict):
+                            self._update_rate_limit_info(result)
+                            
+                            # 如果是速率限制错误，等待并重试
+                            if self._is_rate_limit_error(result):
+                                retry_count += 1
+                                if retry_count < max_retries:
+                                    logger.warning(f"Rate limit hit, retrying {retry_count}/{max_retries}...")
+                                    await asyncio.sleep(10 * retry_count)  # 递增延迟
+                                    continue
+                                else:
+                                    logger.error("Max retries reached for rate limit, giving up")
+                                    return result
+                        
+                        return result
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"API request failed: {method} {url} - {response.status}: {error_text}")
+                        
+                        # 检查是否为429速率限制
+                        if response.status == 429:
+                            retry_count += 1
+                            if retry_count < max_retries:
+                                wait_time = 15 * retry_count  # 递增等待时间
+                                logger.warning(f"HTTP 429 rate limit, waiting {wait_time}s before retry {retry_count}/{max_retries}")
+                                await asyncio.sleep(wait_time)
+                                continue
+                        
+                        return {"error": f"HTTP {response.status}: {error_text}"}
+                        
+            except asyncio.TimeoutError:
+                retry_count += 1
+                if retry_count < max_retries:
+                    logger.warning(f"Request timeout, retrying {retry_count}/{max_retries}...")
+                    await asyncio.sleep(5 * retry_count)
+                    continue
+                else:
+                    logger.error(f"API request timeout after {max_retries} retries: {method} {url}")
+                    return {"error": "Request timeout"}
+            except Exception as e:
+                logger.error(f"API request exception: {method} {url} - {e}")
+                return {"error": str(e)}
+        
+        # 如果循环结束了，说明达到了最大重试次数
+        return {"error": f"Max retries ({max_retries}) exceeded"}
+    
+    async def get_all_positions(self, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
-        logger.debug("通过 API 获取所有账户持仓")
-        result = await self._make_request('GET', '/positions')
+        获取账户的持仓信息
+        
+        Args:
+            account_id: 账户ID，必须提供用于多账户路由
+            
+        Returns:
+            持仓列表
+        """
+        logger.debug(f"通过 API 获取持仓 (account: {account_id or 'not specified'})")
+        
+        params = {}
+        if account_id:
+            params['account_id'] = account_id
+        else:
+            logger.warning("No account_id provided to get_all_positions - this will likely fail")
+            
+        result = await self._make_request('GET', '/positions', params=params)
         
         if "error" in result:
             logger.error(f"获取持仓失败: {result['error']}")
@@ -83,18 +184,28 @@ class AlpacaAPIClient:
             
         return result if isinstance(result, list) else []
     
-    async def get_all_orders(self, status: str = 'open') -> List[Dict[str, Any]]:
+    async def get_all_orders(self, account_id: Optional[str] = None, status: str = 'open') -> List[Dict[str, Any]]:
         """
-        获取所有账户的订单信息
+        获取账户的订单信息
         
         Args:
+            account_id: 账户ID，必须提供用于多账户路由
             status: 订单状态过滤
             
         Returns:
             订单列表
         """
-        logger.debug(f"通过 API 获取所有订单 (status={status})")
-        params = {'status': status} if status else {}
+        logger.debug(f"通过 API 获取订单 (account: {account_id or 'not specified'}, status={status})")
+        
+        params = {}
+        if account_id:
+            params['account_id'] = account_id
+        else:
+            logger.warning("No account_id provided to get_all_orders - this will likely fail")
+            
+        if status:
+            params['status'] = status
+            
         result = await self._make_request('GET', '/orders', params=params)
         
         if "error" in result:
@@ -126,27 +237,25 @@ class AlpacaAPIClient:
             
         return result
     
-    async def get_option_quotes(self, symbols: List[str], account_id: Optional[str] = None) -> Dict[str, Any]:
+    async def get_option_quotes(self, symbols: List[str]) -> Dict[str, Any]:
         """
-        获取期权报价
+        获取期权报价 - 市场数据，不需要账户ID
+        
+        ⚠️ DEPRECATED: OptimizedStrategy uses position.current_price directly.
+        This method is only used for fallback/traditional strategy.
         
         Args:
             symbols: 期权符号列表
-            account_id: 可选的账户ID
             
         Returns:
             期权报价数据
         """
-        logger.debug(f"通过 API 获取期权报价: {len(symbols)} symbols")
-        params = {}
-        if account_id:
-            params['account_id'] = account_id
+        logger.warning(f"使用已弃用的 get_option_quotes 方法获取 {len(symbols)} 个期权报价 - 考虑使用 OptimizedStrategy")
             
         result = await self._make_request(
             'POST', 
             '/options/quotes/batch',
-            json={'symbols': symbols},
-            params=params
+            json={'option_symbols': symbols}
         )
         
         if "error" in result:
@@ -177,14 +286,14 @@ class AlpacaAPIClient:
             'option_symbol': option_symbol,
             'qty': qty,
             'side': side,
-            'order_type': order_type,
-            'account_id': account_id
+            'order_type': order_type
         }
         
         if limit_price:
             order_data['limit_price'] = limit_price
         
-        result = await self._make_request('POST', '/options/order', json=order_data)
+        # Server expects account_id as query param via routing dependency
+        result = await self._make_request('POST', '/options/order', params={'account_id': account_id}, json=order_data)
         
         if "error" in result:
             logger.error(f"下单失败: {result['error']}")
@@ -227,8 +336,12 @@ class AlpacaAPIClient:
     async def close(self):
         """关闭 HTTP 会话"""
         if self.session and not self.session.closed:
-            await self.session.close()
-            logger.debug("API 客户端会话已关闭")
+            try:
+                await self.session.close()
+                logger.debug("API 客户端会话已关闭")
+            except Exception as e:
+                logger.warning(f"关闭 API 客户端会话时出错: {e}")
+        self.session = None
     
     async def __aenter__(self):
         """异步上下文管理器入口"""
@@ -243,6 +356,6 @@ class AlpacaAPIClient:
 api_client = AlpacaAPIClient()
 
 
-async def get_api_client() -> AlpacaAPIClient:
+def get_api_client() -> AlpacaAPIClient:
     """获取 API 客户端实例"""
     return api_client

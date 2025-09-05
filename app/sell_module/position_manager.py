@@ -52,6 +52,30 @@ class Position:
             
         self.side = data.get('side')  # 'long' or 'short'
         
+        # Store additional price fields from Alpaca
+        try:
+            self.current_price = float(data.get('current_price', 0))
+        except (ValueError, TypeError):
+            self.current_price = 0.0
+            
+        try:
+            self.lastday_price = float(data.get('lastday_price', 0))
+        except (ValueError, TypeError):
+            self.lastday_price = 0.0
+        
+        # Store asset class for option identification
+        self.asset_class = data.get('asset_class')
+        
+        # Store qty_available for correct sell quantities
+        try:
+            self.qty_available = float(data.get('qty_available', 0))
+        except (ValueError, TypeError):
+            self.qty_available = 0.0
+        
+        # Log if avg_entry_price is missing
+        if self.avg_entry_price == 0 and self.symbol:
+            logger.warning(f"Position {self.symbol}: avg_entry_price为0，可能是Alpaca paper账户数据问题")
+        
         # 期权特定字段 - 基于symbol解析
         if self.is_option:
             # 从期权symbol解析信息: NVDA250822P00170000
@@ -67,13 +91,16 @@ class Position:
     
     @property
     def is_option(self) -> bool:
-        """是否为期权 - 基于symbol模式判断"""
+        """是否为期权 - 使用asset_class字段准确判断"""
         if not self.symbol:
             return False
-        # 期权symbol模式: NVDA250822P00170000 (至少12位，包含日期和C/P标识)
-        return (len(self.symbol) >= 12 and 
-                any(char in self.symbol for char in ['C', 'P']) and
-                any(char.isdigit() for char in self.symbol[-8:]))  # 最后8位包含数字
+        
+        # 使用Alpaca API返回的asset_class字段进行准确判断
+        if self.asset_class:
+            return self.asset_class == 'us_option'
+        
+        # 如果asset_class不可用，返回False，避免不准确的symbol匹配
+        return False
     
     @property
     def is_long(self) -> bool:
@@ -199,33 +226,37 @@ class PositionManager:
             return await self._get_all_positions_via_pool()
     
     async def _get_all_positions_via_api(self) -> List[Position]:
-        """通过 API 客户端获取所有持仓"""
+        """通过 API 客户端获取所有持仓 - 遍历所有账户"""
         try:
             logger.debug("使用 API 客户端获取所有持仓")
-            # 通过 HTTP API 获取所有持仓数据
-            positions_data = await self.api_client.get_all_positions()
             
-            if not positions_data:
-                logger.debug("未获取到任何持仓数据")
+            # 获取所有账户列表
+            accounts = await self.account_pool.get_all_accounts()
+            if not accounts:
+                logger.debug("未找到任何账户")
                 return []
             
-            # 转换为 Position 对象
+            # 为每个账户创建获取持仓的任务
+            tasks = []
+            for account_id in accounts.keys():
+                task = self._get_account_positions_via_api(account_id)
+                tasks.append(task)
+            
+            # 并发获取所有账户的持仓
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # 聚合所有持仓
             all_positions = []
-            for pos_data in positions_data:
-                try:
-                    position = Position(pos_data)
-                    all_positions.append(position)
-                    
-                    # 重要持仓日志
-                    if position.is_option and position.is_zero_day_option:
-                        logger.warning(f"Zero-day option detected: {position.symbol} in {position.account_id}")
-                except Exception as e:
-                    logger.warning(f"Failed to parse position data: {e}")
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    account_id = list(accounts.keys())[i]
+                    logger.error(f"Failed to get positions for account {account_id}: {result}")
                     continue
+                all_positions.extend(result)
             
             # 统计信息
             option_count = sum(1 for pos in all_positions if pos.is_option)
-            logger.debug(f"Retrieved {len(all_positions)} positions ({option_count} options) via API")
+            logger.debug(f"Retrieved {len(all_positions)} positions ({option_count} options) from {len(accounts)} accounts via API")
             
             return all_positions
             
@@ -269,8 +300,44 @@ class PositionManager:
             # This ensures tests fail when there are real errors
             raise RuntimeError(f"Position retrieval failed: {e}") from e
     
+    async def _get_account_positions_via_api(self, account_id: str) -> List[Position]:
+        """通过 API 客户端获取单个账户的持仓"""
+        try:
+            logger.debug(f"通过 API 获取账户 {account_id} 的持仓")
+            
+            # 通过 HTTP API 获取该账户的持仓数据
+            positions_data = await self.api_client.get_all_positions(account_id=account_id)
+            
+            if not positions_data:
+                logger.debug(f"账户 {account_id} 未获取到任何持仓数据")
+                return []
+            
+            # 转换为 Position 对象
+            positions = []
+            for pos_data in positions_data:
+                try:
+                    # 确保账户ID包含在数据中
+                    pos_data['account_id'] = account_id
+                    position = Position(pos_data)
+                    positions.append(position)
+                    
+                    # 重要持仓日志
+                    if position.is_option and position.is_zero_day_option:
+                        logger.warning(f"Zero-day option detected: {position.symbol} in {account_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to parse position data for account {account_id}: {e}")
+                    continue
+            
+            logger.debug(f"Account {account_id}: Retrieved {len(positions)} positions")
+            return positions
+            
+        except Exception as e:
+            logger.error(f"Failed to get positions for account {account_id} via API: {e}")
+            return []
+    
     async def _get_account_positions(self, account_id: str, connection) -> List[Position]:
         """
+        通过连接池获取单个账户的持仓（原始方法）
         High-performance single account position retrieval
         
         Args:
@@ -325,14 +392,15 @@ class PositionManager:
         if not short_positions:
             return
         
-        logger.warning(f"Found {len(short_positions)} short option positions, closing concurrently")
+        logger.warning(f"Found {len(short_positions)} short option positions, closing sequentially")
         
-        # High-concurrency position closing
-        tasks = [self._close_short_position(position) for position in short_positions]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Count failures
-        failed_count = sum(1 for result in results if isinstance(result, Exception))
+        # Sequentially close each short position to avoid concurrent orders
+        failed_count = 0
+        for position in short_positions:
+            try:
+                await self._close_short_position(position)
+            except Exception:
+                failed_count += 1
         if failed_count > 0:
             logger.error(f"{failed_count}/{len(short_positions)} short positions failed to close")
     

@@ -9,6 +9,7 @@ from datetime import datetime
 from loguru import logger
 from app.account_pool import AccountPool
 from app.alpaca_client import AlpacaClient
+from .api_client import AlpacaAPIClient
 from .position_manager import Position
 
 
@@ -16,12 +17,12 @@ class OptionQuote:
     """期权报价数据类"""
     def __init__(self, data: dict):
         self.symbol = data.get('symbol')
-        self.bid_price = float(data.get('bid_price', 0))
-        self.ask_price = float(data.get('ask_price', 0))
-        self.last_price = float(data.get('last_price', 0))
-        self.mark_price = float(data.get('mark_price', 0))
-        self.bid_size = int(data.get('bid_size', 0))
-        self.ask_size = int(data.get('ask_size', 0))
+        self.bid_price = float(data.get('bid_price') or 0)
+        self.ask_price = float(data.get('ask_price') or 0)
+        self.last_price = float(data.get('last_price') or 0)
+        self.mark_price = float(data.get('mark_price') or 0)
+        self.bid_size = int(data.get('bid_size') or 0)
+        self.ask_size = int(data.get('ask_size') or 0)
         self.timestamp = data.get('timestamp', datetime.now().isoformat())
         
     @property
@@ -45,14 +46,19 @@ class OptionQuote:
 
 
 class PriceTracker:
-    def __init__(self, account_pool: AccountPool):
+    def __init__(self, account_pool: AccountPool, api_client: Optional[AlpacaAPIClient] = None):
+        if account_pool is None:
+            raise TypeError("account_pool cannot be None")
         self.account_pool = account_pool
+        # API客户端用于替代直接连接池访问（可选）
+        self.api_client = api_client
+        self.use_api_client = api_client is not None
         self._price_cache: Dict[str, OptionQuote] = {}
         self._price_history: Dict[str, List[OptionQuote]] = {}
         
     async def get_option_quotes(self, symbols: List[str]) -> Dict[str, OptionQuote]:
         """
-        获取期权报价 - 使用指定的stock_ws账户
+        获取期权报价 - 支持API客户端或直接连接池访问
         
         Args:
             symbols: 期权符号列表
@@ -60,6 +66,53 @@ class PriceTracker:
         Returns:
             期权符号到报价的映射字典
         """
+        if self.use_api_client:
+            return await self._get_option_quotes_via_api(symbols)
+        else:
+            return await self._get_option_quotes_via_pool(symbols)
+    
+    async def _get_option_quotes_via_api(self, symbols: List[str]) -> Dict[str, OptionQuote]:
+        """通过 API 客户端获取期权报价"""
+        if not symbols:
+            return {}
+        
+        quotes = {}
+        
+        try:
+            logger.debug(f"使用 API 客户端获取 {len(symbols)} 个期权报价")
+            
+            # 分批获取报价（API限制每次最多20个符号）
+            batch_size = 20  # API限制每次最多20个符号
+            for i in range(0, len(symbols), batch_size):
+                batch_symbols = symbols[i:i + batch_size]
+                batch_quotes_data = await self.api_client.get_option_quotes(batch_symbols)
+                
+                if batch_quotes_data and 'quotes' in batch_quotes_data:
+                    for quote_data in batch_quotes_data['quotes']:
+                        symbol = quote_data.get('symbol')
+                        if symbol and "error" not in quote_data:
+                            quotes[symbol] = OptionQuote(quote_data)
+            
+            # 更新缓存
+            self._price_cache.update(quotes)
+            
+            # 更新价格历史
+            for symbol, quote in quotes.items():
+                if symbol not in self._price_history:
+                    self._price_history[symbol] = []
+                self._price_history[symbol].append(quote)
+                # 只保留最近的10个价格记录
+                self._price_history[symbol] = self._price_history[symbol][-10:]
+            
+            logger.debug(f"通过 API 成功获取 {len(quotes)}/{len(symbols)} 个期权报价")
+            return quotes
+            
+        except Exception as e:
+            logger.error(f"通过 API 获取期权报价失败: {e}")
+            return quotes
+    
+    async def _get_option_quotes_via_pool(self, symbols: List[str]) -> Dict[str, OptionQuote]:
+        """通过连接池获取期权报价（原始方法）"""
         if not symbols:
             return {}
         
@@ -88,8 +141,8 @@ class PriceTracker:
             
             first_client = stock_ws_connection.alpaca_client
             
-            # 分批获取报价（避免单次请求太多符号）
-            batch_size = 50
+            # 分批获取报价（API限制每次最多20个符号）
+            batch_size = 20  # API限制每次最多20个符号
             for i in range(0, len(symbols), batch_size):
                 batch_symbols = symbols[i:i + batch_size]
                 batch_quotes = await self._get_quotes_batch(first_client, batch_symbols)
@@ -106,11 +159,11 @@ class PriceTracker:
                 # 只保留最近的10个价格记录
                 self._price_history[symbol] = self._price_history[symbol][-10:]
             
-            logger.debug(f"成功获取 {len(quotes)}/{len(symbols)} 个期权报价")
+            logger.debug(f"通过连接池成功获取 {len(quotes)}/{len(symbols)} 个期权报价")
             return quotes
             
         except Exception as e:
-            logger.error(f"获取期权报价失败: {e}")
+            logger.error(f"通过连接池获取期权报价失败: {e}")
             return quotes
     
     async def _get_quotes_batch(self, client, symbols: List[str]) -> Dict[str, OptionQuote]:
@@ -128,11 +181,18 @@ class PriceTracker:
         
         try:
             # 获取期权报价数据
-            quotes_data = await client.get_option_quotes(symbols)
+            quotes_response = await client.get_multiple_option_quotes(symbols)
             
+            # 检查是否有错误
+            if "error" in quotes_response:
+                logger.error(f"获取期权报价失败: {quotes_response['error']}")
+                return quotes
+            
+            # 提取报价数据
+            quotes_data = quotes_response.get('quotes', [])
             for quote_data in quotes_data:
                 symbol = quote_data.get('symbol')
-                if symbol:
+                if symbol and "error" not in quote_data:
                     quotes[symbol] = OptionQuote(quote_data)
             
             return quotes
@@ -159,6 +219,12 @@ class PriceTracker:
         
         # 去重
         unique_symbols = list(set(symbols))
+        
+        # 记录去重效果
+        if len(symbols) != len(unique_symbols):
+            logger.info(f"期权符号去重: {len(symbols)} -> {len(unique_symbols)} (去除 {len(symbols) - len(unique_symbols)} 个重复)")
+        else:
+            logger.debug(f"期权符号无重复: {len(unique_symbols)} 个唯一符号")
         
         # 获取报价
         quotes = await self.get_option_quotes(unique_symbols)
