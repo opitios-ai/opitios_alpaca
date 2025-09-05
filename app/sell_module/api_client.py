@@ -6,11 +6,9 @@ API 客户端
 import aiohttp
 import asyncio
 from typing import List, Dict, Any, Optional
-from datetime import datetime
 import time
 import json
 from loguru import logger
-from config import settings
 
 
 class AlpacaAPIClient:
@@ -78,7 +76,7 @@ class AlpacaAPIClient:
         """检查是否为速率限制错误"""
         if isinstance(response_data, dict):
             return (
-                response_data.get("detail") == "Rate limit exceedeed" or
+                response_data.get("detail") == "Rate limit exceeded" or
                 "rate limit" in str(response_data.get("error", "")).lower() or
                 "limit" in response_data
             )
@@ -133,10 +131,58 @@ class AlpacaAPIClient:
                         
                         # 检查是否为429速率限制
                         if response.status == 429:
+                            # 尝试从JSON或响应头中解析重置时间
+                            reset_time = None
+                            limit = None
+                            remaining = None
+                            try:
+                                data = json.loads(error_text)
+                                if isinstance(data, dict):
+                                    reset_time = data.get("reset_time")
+                                    limit = data.get("limit")
+                                    remaining = data.get("remaining")
+                            except Exception:
+                                pass
+                            # 备用：从响应头读取
+                            if reset_time is None:
+                                header_reset = response.headers.get("X-RateLimit-Reset")
+                                try:
+                                    reset_time = int(header_reset) if header_reset else None
+                                except Exception:
+                                    reset_time = None
+                            if limit is None:
+                                header_limit = response.headers.get("X-RateLimit-Limit")
+                                try:
+                                    limit = int(header_limit) if header_limit else None
+                                except Exception:
+                                    limit = None
+                            if remaining is None:
+                                header_remaining = response.headers.get("X-RateLimit-Remaining")
+                                try:
+                                    remaining = int(header_remaining) if header_remaining else None
+                                except Exception:
+                                    remaining = None
+
+                            # 更新本地速率限制信息
+                            if reset_time is not None:
+                                self.rate_limit_reset_time = reset_time
+                            if limit is not None:
+                                self.rate_limit_total = limit
+                            if remaining is not None:
+                                self.rate_limit_remaining = remaining
+
                             retry_count += 1
                             if retry_count < max_retries:
-                                wait_time = 15 * retry_count  # 递增等待时间
-                                logger.warning(f"HTTP 429 rate limit, waiting {wait_time}s before retry {retry_count}/{max_retries}")
+                                # 精确等待到reset_time，再重试
+                                now = time.time()
+                                if reset_time and now < reset_time:
+                                    wait_time = max(0, reset_time - now) + 1  # 多等1s保证重置
+                                else:
+                                    # 回退：如果没有reset_time，则使用递增延迟
+                                    wait_time = 10 * retry_count
+                                logger.warning(
+                                    f"HTTP 429 rate limit. Waiting {wait_time:.1f}s (limit={limit}, remaining={remaining}, reset={reset_time}) before retry {retry_count}/{max_retries}"
+                                )
                                 await asyncio.sleep(wait_time)
                                 continue
                         
