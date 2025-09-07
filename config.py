@@ -134,18 +134,8 @@ class Settings(BaseSettings):
         'transaction_channel': None
     })
     
-    # Sell Module Configuration
-    sell_module: Dict = secrets.get('sell_module', {
-        'enabled': True,
-        'check_interval': 5,
-        'order_cancel_minutes': 3,
-        'zero_day_handling': True,
-        'strategy_one': {
-            'enabled': True,
-            'profit_rate': 1.1,
-            'stop_loss_rate': 0.8
-        }
-    })
+    # Sell Module Configuration (read entirely from secrets.yml)
+    sell_module: Dict = secrets.get('sell_module', {})
     
     class Config:
         env_file = ".env"
