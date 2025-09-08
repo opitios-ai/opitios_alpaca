@@ -4,12 +4,11 @@
 """
 
 import asyncio
-from typing import List, Dict, Optional
+from typing import List, Optional
 from datetime import datetime, date
 from loguru import logger
 from app.account_pool import AccountPool
-from app.alpaca_client import AlpacaClient
-from .api_client import AlpacaAPIClient, get_api_client
+from .api_client import AlpacaAPIClient
 
 
 class Position:
@@ -205,13 +204,15 @@ class Position:
 
 
 class PositionManager:
-    def __init__(self, account_pool: AccountPool, api_client: Optional[AlpacaAPIClient] = None):
+    def __init__(self, account_pool: AccountPool, api_client: Optional[AlpacaAPIClient] = None, order_manager=None):
         if account_pool is None:
             raise TypeError("account_pool cannot be None")
         self.account_pool = account_pool
         # API客户端用于替代直接连接池访问（可选）
         self.api_client = api_client
         self.use_api_client = api_client is not None
+        # 集中式订单管理器（用于统一订单管理）
+        self.order_manager = order_manager
     
     async def get_all_positions(self) -> List[Position]:
         """
@@ -256,7 +257,8 @@ class PositionManager:
             
             # 统计信息
             option_count = sum(1 for pos in all_positions if pos.is_option)
-            logger.debug(f"Retrieved {len(all_positions)} positions ({option_count} options) from {len(accounts)} accounts via API")
+            zero_day_count = sum(1 for pos in all_positions if pos.is_option and pos.is_zero_day_option)
+            logger.info(f"✅ Retrieved {len(all_positions)} positions ({option_count} options, {zero_day_count} zero-day) from {len(accounts)} accounts via API")
             
             return all_positions
             
@@ -303,17 +305,18 @@ class PositionManager:
     async def _get_account_positions_via_api(self, account_id: str) -> List[Position]:
         """通过 API 客户端获取单个账户的持仓"""
         try:
-            logger.debug(f"通过 API 获取账户 {account_id} 的持仓")
+            logger.debug(f"通过 API 获取账户 [{account_id}] 的持仓")
             
             # 通过 HTTP API 获取该账户的持仓数据
             positions_data = await self.api_client.get_all_positions(account_id=account_id)
             
             if not positions_data:
-                logger.debug(f"账户 {account_id} 未获取到任何持仓数据")
+                logger.debug(f"账户 [{account_id}] 未获取到任何持仓数据")
                 return []
             
             # 转换为 Position 对象
             positions = []
+            option_count = 0
             for pos_data in positions_data:
                 try:
                     # 确保账户ID包含在数据中
@@ -321,18 +324,23 @@ class PositionManager:
                     position = Position(pos_data)
                     positions.append(position)
                     
+                    # 统计期权数量
+                    if position.is_option:
+                        option_count += 1
+                    
                     # 重要持仓日志
                     if position.is_option and position.is_zero_day_option:
-                        logger.warning(f"Zero-day option detected: {position.symbol} in {account_id}")
+                        logger.warning(f"⚠️ Zero-day option detected [{account_id}] {position.symbol} | "
+                                     f"Current: ${position.current_price} | P&L: {position.unrealized_plpc:.2%}")
                 except Exception as e:
-                    logger.warning(f"Failed to parse position data for account {account_id}: {e}")
+                    logger.warning(f"Failed to parse position data [{account_id}]: {e}")
                     continue
             
-            logger.debug(f"Account {account_id}: Retrieved {len(positions)} positions")
+            logger.info(f"✅ Account [{account_id}]: Retrieved {len(positions)} positions ({option_count} options)")
             return positions
             
         except Exception as e:
-            logger.error(f"Failed to get positions for account {account_id} via API: {e}")
+            logger.error(f"❌ Failed to get positions for account [{account_id}] via API: {e}")
             return []
     
     async def _get_account_positions(self, account_id: str, connection) -> List[Position]:
@@ -417,22 +425,25 @@ class PositionManager:
             await self._close_short_position_via_pool(position)
     
     async def _close_short_position_via_api(self, position: Position):
-        """通过 API 客户端平仓空头持仓"""
+        """通过集中式订单管理平仓空头持仓"""
         try:
-            # 通过 API 下买单平仓空头持仓
-            result = await self.api_client.place_option_order(
+            # 使用集中式订单管理系统
+            if not hasattr(self, 'order_manager') or not self.order_manager:
+                logger.error(f"Order manager not available for closing position: {position.symbol}")
+                return
+            
+            result = await self.order_manager.place_buy_order(
                 account_id=position.account_id,
-                option_symbol=position.symbol,
+                symbol=position.symbol,
                 qty=abs(int(position.qty)),
-                side='buy',
-                order_type='market'
+                order_type='market'  # 空头平仓总是使用市价单
             )
             
             if "error" not in result:
-                logger.info(f"Short position closed via API: {position.symbol} in {position.account_id}")
+                logger.info(f"✅ Short position closed [{position.account_id}] {position.symbol}")
             else:
-                logger.error(f"Failed to close short position {position.symbol} via API: {result['error']}")
-                raise Exception(result['error'])
+                logger.error(f"❌ Failed to close short position [{position.account_id}] {position.symbol}: {result.get('error')}")
+                raise Exception(result.get('error', 'Unknown error'))
             
         except Exception as e:
             logger.error(f"Failed to close short position {position.symbol} via API: {e}")

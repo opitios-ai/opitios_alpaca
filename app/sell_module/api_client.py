@@ -34,11 +34,22 @@ class AlpacaAPIClient:
     async def _get_session(self) -> aiohttp.ClientSession:
         """获取或创建 HTTP 会话"""
         if self.session is None or self.session.closed:
-            timeout = aiohttp.ClientTimeout(total=30)
+            # 优化超时设置：总超时60秒，连接超时10秒，读取超时30秒
+            timeout = aiohttp.ClientTimeout(
+                total=180,       # 总超时时间 - 增加到180秒
+                connect=30,      # 连接超时 - 增加到30秒
+                sock_read=120    # 读取超时 - 增加到120秒
+            )
+            # 增加连接池大小以支持更多并发
             self.session = aiohttp.ClientSession(
                 headers=self.headers,
                 timeout=timeout,
-                connector=aiohttp.TCPConnector(limit=20, limit_per_host=10)
+                connector=aiohttp.TCPConnector(
+                    limit=100,          # 总连接池大小 - 增加到100
+                    limit_per_host=50,  # 每个主机的连接数 - 增加到50
+                    ttl_dns_cache=300,  # DNS缓存时间
+                    use_dns_cache=True
+                )
             )
         return self.session
     
@@ -67,10 +78,11 @@ class AlpacaAPIClient:
             logger.info("Rate limit should be reset now, continuing...")
         
         # 如果剩余请求数很低，主动延迟
-        elif self.rate_limit_remaining <= 2 and self.rate_limit_remaining > 0:
+        elif self.rate_limit_remaining <= 3 and self.rate_limit_remaining > 0:
+            wait_time = 10  # 增加到10秒延迟
             logger.warning(f"Rate limit approaching: only {self.rate_limit_remaining} requests remaining. "
-                         f"Adding delay to prevent limit...")
-            await asyncio.sleep(5)  # 5秒延迟
+                         f"Adding {wait_time}s delay to prevent limit...")
+            await asyncio.sleep(wait_time)
     
     def _is_rate_limit_error(self, response_data: dict) -> bool:
         """检查是否为速率限制错误"""
@@ -236,7 +248,7 @@ class AlpacaAPIClient:
         
         Args:
             account_id: 账户ID，必须提供用于多账户路由
-            status: 订单状态过滤
+            status: 订单状态过滤，支持单个状态或逗号分隔的多个状态 (如 'open,accepted,replaced')
             
         Returns:
             订单列表
@@ -326,18 +338,16 @@ class AlpacaAPIClient:
         Returns:
             订单结果
         """
-        logger.info(f"通过 API 下期权订单: {option_symbol} x{qty} {side} (account: {account_id})")
-        
+        logger.info(f"通过API下期权订单: {option_symbol} x{qty} {side} (account: {account_id})")
+
         order_data = {
             'option_symbol': option_symbol,
             'qty': qty,
             'side': side,
-            'order_type': order_type
+            'type': 'limit',        # 使用正确的字段名
+            'limit_price': 0.01     # 使用正确的数据类型
         }
-        
-        if limit_price:
-            order_data['limit_price'] = limit_price
-        
+
         # Server expects account_id as query param via routing dependency
         result = await self._make_request('POST', '/options/order', params={'account_id': account_id}, json=order_data)
         

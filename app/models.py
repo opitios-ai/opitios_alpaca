@@ -24,9 +24,6 @@ class PositionSide(str, Enum):
     SHORT = "short"
 
 # Stock Models
-class StockQuoteRequest(BaseModel):
-    symbol: str = Field(..., description="Stock symbol (e.g., AAPL, TSLA)")
-
 class MultiStockQuoteRequest(BaseModel):
     symbols: List[str] = Field(..., description="List of stock symbols (e.g., ['AAPL', 'TSLA', 'GOOGL'])", example=["AAPL", "TSLA", "GOOGL", "MSFT", "AMZN"])
 
