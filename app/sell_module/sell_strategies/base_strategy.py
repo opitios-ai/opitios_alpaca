@@ -65,7 +65,7 @@ class BaseStrategy(ABC):
     
     async def _place_sell_order(self, position: Position, current_price: float, reason: str) -> bool:
         """
-        下达卖出订单
+        下达卖出订单 - 使用集中式订单管理
         
         Args:
             position: 持仓信息
@@ -76,14 +76,16 @@ class BaseStrategy(ABC):
             是否成功下单
         """
         try:
-            order_id = await self.order_manager.submit_sell_order(
+            result = await self.order_manager.place_sell_order(
                 account_id=position.account_id,
                 symbol=position.symbol,
                 qty=position.qty,
-                order_type='market'
+                order_type='limit',
+                limit_price=0.01  # 使用测试价格
             )
             
-            if order_id:
+            if "error" not in result:
+                order_id = result.get('id', 'Unknown')
                 logger.warning(
                     f"{self.name}策略执行 账户: {position.account_id}, "
                     f"期权: {position.symbol}, 触发{reason}卖出, "

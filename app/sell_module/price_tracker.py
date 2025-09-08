@@ -3,12 +3,10 @@
 负责获取和追踪期权的实时价格数据
 """
 
-import asyncio
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 from datetime import datetime
 from loguru import logger
 from app.account_pool import AccountPool
-from app.alpaca_client import AlpacaClient
 from .api_client import AlpacaAPIClient
 from .position_manager import Position
 
@@ -58,7 +56,7 @@ class PriceTracker:
         
     async def get_option_quotes(self, symbols: List[str]) -> Dict[str, OptionQuote]:
         """
-        获取期权报价 - 支持API客户端或直接连接池访问
+        获取期权报价 - 已弃用，使用position数据直接计算
         
         Args:
             symbols: 期权符号列表
@@ -66,10 +64,9 @@ class PriceTracker:
         Returns:
             期权符号到报价的映射字典
         """
-        if self.use_api_client:
-            return await self._get_option_quotes_via_api(symbols)
-        else:
-            return await self._get_option_quotes_via_pool(symbols)
+        logger.warning("get_option_quotes已弃用 - 使用position数据直接计算，无需额外API调用")
+        logger.warning(f"Requested {len(symbols)} symbols: {symbols[:5]}{'...' if len(symbols) > 5 else ''}")
+        return {}
     
     async def _get_option_quotes_via_api(self, symbols: List[str]) -> Dict[str, OptionQuote]:
         """通过 API 客户端获取期权报价"""
@@ -203,7 +200,7 @@ class PriceTracker:
     
     async def get_position_prices(self, positions: List[Position]) -> Dict[str, OptionQuote]:
         """
-        获取持仓的当前价格
+        获取持仓的当前价格 - 已弃用，使用position数据直接计算
         
         Args:
             positions: 持仓列表
@@ -211,35 +208,20 @@ class PriceTracker:
         Returns:
             期权符号到报价的映射字典
         """
-        # 提取所有期权符号
-        symbols = [pos.symbol for pos in positions if pos.is_option]
+        logger.warning("get_position_prices已弃用 - 使用position.current_price直接计算，无需额外API调用")
+        logger.warning(f"Requested prices for {len(positions)} positions")
         
-        if not symbols:
-            return {}
-        
-        # 去重
-        unique_symbols = list(set(symbols))
-        
-        # 记录去重效果
-        if len(symbols) != len(unique_symbols):
-            logger.info(f"期权符号去重: {len(symbols)} -> {len(unique_symbols)} (去除 {len(symbols) - len(unique_symbols)} 个重复)")
-        else:
-            logger.debug(f"期权符号无重复: {len(unique_symbols)} 个唯一符号")
-        
-        # 获取报价
-        quotes = await self.get_option_quotes(unique_symbols)
-        
-        # 记录价格信息
+        # 记录position数据中的价格信息
         for position in positions:
-            if position.symbol in quotes:
-                quote = quotes[position.symbol]
+            if position.is_option:
                 logger.debug(
-                    f"期权 {position.symbol} 当前价格: "
-                    f"买一={quote.bid_price}, 卖一={quote.ask_price}, "
-                    f"最后={quote.last_price}, 当前={quote.current_price}"
+                    f"Position [{position.account_id}] {position.symbol} 价格数据: "
+                    f"current_price=${position.current_price}, "
+                    f"avg_entry_price=${position.avg_entry_price}, "
+                    f"unrealized_plpc={position.unrealized_plpc:.2%}"
                 )
         
-        return quotes
+        return {}
     
     def get_cached_quote(self, symbol: str) -> Optional[OptionQuote]:
         """

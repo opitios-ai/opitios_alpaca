@@ -10,7 +10,7 @@ import arrow
 from loguru import logger
 from config import settings
 from app.account_pool import AccountPool
-from .api_client import AlpacaAPIClient, get_api_client
+from .api_client import AlpacaAPIClient
 from app.utils.discord_notifier import send_sell_module_notification
 from .config_manager import ConfigManager
 from .position_manager import PositionManager, Position
@@ -51,13 +51,6 @@ class SellWatcher:
         # 初始化策略
         self.strategy_one = StrategyOne(self.order_manager)
         
-        # 直接卖出策略配置 (使用position数据，无需单独的策略类)
-        self.direct_sell_config = {
-            'min_profit_threshold': 0.15,  # 15% profit target
-            'stop_loss_threshold': -0.30,  # -30% stop loss
-            'zero_day_profit_threshold': 0.05  # 5% for zero-day options
-        }
-        
         # 运行状态
         self.is_running = False
         self.monitor_task = None
@@ -81,10 +74,11 @@ class SellWatcher:
         # 发送Discord启动通知
         try:
             accounts_count = len(self.account_pool.account_configs) if self.account_pool else 0
+            rates = await self.config_manager.get_strategy_config('GLOBAL')
             strategy_config = {
                 'enabled': self.config_manager.is_strategy_enabled(),
-                'profit_rate': getattr(settings, 'sell_module', {}).get('strategy_one', {}).get('profit_rate', 1.1),
-                'stop_loss_rate': getattr(settings, 'sell_module', {}).get('strategy_one', {}).get('stop_loss_rate', 0.8)
+                'profit_rate': rates.get('profit_rate'),
+                'stop_loss_rate': rates.get('stop_loss_rate')
             }
             
             await send_sell_module_notification(
@@ -152,7 +146,6 @@ class SellWatcher:
                 await self.monitor_task
             except asyncio.CancelledError:
                 logger.debug("监控任务已取消")
-                pass
         
         logger.info("卖出监控器已停止")
     
@@ -216,65 +209,61 @@ class SellWatcher:
     
     async def _execute_sell_strategies(self, positions: List[Position]):
         """
-        执行卖出策略 - 优先使用position数据直接计算，回退到price_tracker
+        执行卖出策略 - 使用position数据直接计算，并行处理所有持仓
         
         Args:
             positions: 多头期权持仓列表
         """
         logger.info("***** 开始执行卖出策略 *****")
         
-        # 如果使用API客户端，优先使用position数据直接计算（无需额外API调用）
-        if self.use_api_client:
-            logger.info(f"使用position数据直接处理 {len(positions)} 个持仓（无需额外API调用）")
-            try:
-                await self._execute_direct_sell_strategy(positions)
-                logger.info("***** 直接卖出策略执行结束 *****")
-                return
-                
-            except Exception as e:
-                logger.error(f"直接卖出策略执行失败: {e}")
-                logger.error(f"继续处理错误，回退到传统策略")
-        
-        # 回退到传统策略（如果直接策略失败或不可用）
-        logger.info(f"回退到传统价格追踪策略处理 {len(positions)} 个持仓")
-        await self._execute_traditional_sell_strategies(positions)
-    
-    async def _execute_direct_sell_strategy(self, positions: List[Position]):
-        """
-        直接卖出策略 - 使用position中的数据直接计算和执行
-        
-        Args:
-            positions: 多头期权持仓列表
-        """
         # 筛选出期权持仓
         option_positions = [pos for pos in positions if pos.is_option and pos.is_long]
         logger.info(f"发现 {len(option_positions)} 个多头期权持仓需要评估")
         
-        # 评估每个持仓
+        if not option_positions:
+            logger.info("没有期权持仓需要处理")
+            return
+        
+        # 并行评估所有持仓的卖出条件
+        logger.info(f"并行评估 {len(option_positions)} 个持仓的卖出条件...")
+        evaluation_tasks = [
+            self._evaluate_position_sell_condition(position) 
+            for position in option_positions
+        ]
+        
+        evaluation_results = await asyncio.gather(*evaluation_tasks, return_exceptions=True)
+        
+        # 收集需要卖出的持仓
         positions_to_sell = []
-        for position in option_positions:
-            should_sell, reason = await self._should_sell_position(position)
+        for i, result in enumerate(evaluation_results):
+            position = option_positions[i]
+            if isinstance(result, Exception):
+                logger.error(f"评估持仓失败 [{position.account_id}] {position.symbol}: {result}")
+                continue
             
+            should_sell, reason = result
             if should_sell:
-                logger.info(f"SELL DECISION: {position.symbol} - {reason} | "
+                logger.info(f"SELL DECISION [{position.account_id}] {position.symbol}: {reason} | "
                            f"P&L: {position.unrealized_plpc:.2%} | Current: ${position.current_price} | "
                            f"QtyAvailable: {position.qty_available}")
                 positions_to_sell.append(position)
             else:
-                logger.debug(f"HOLD: {position.symbol} - {reason} | "
+                logger.debug(f"HOLD [{position.account_id}] {position.symbol}: {reason} | "
                             f"P&L: {position.unrealized_plpc:.2%} | Current: ${position.current_price}")
         
         logger.info(f"策略评估完成: {len(positions_to_sell)}/{len(option_positions)} 个持仓需要卖出")
         
-        # 执行卖出
+        # 并行执行卖出订单
         if positions_to_sell:
-            await self._execute_direct_sells(positions_to_sell)
+            await self._execute_parallel_sell_orders(positions_to_sell)
         else:
             logger.info("无持仓需要卖出")
+        
+        logger.info("***** 卖出策略执行结束 *****")
     
-    async def _should_sell_position(self, position: Position) -> tuple[bool, str]:
+    async def _evaluate_position_sell_condition(self, position: Position) -> tuple[bool, str]:
         """
-        判断持仓是否应该卖出
+        评估单个持仓的卖出条件 - 并行执行
         
         Args:
             position: 持仓对象
@@ -285,64 +274,110 @@ class SellWatcher:
         try:
             # 检查必需数据
             if position.unrealized_plpc is None:
-                logger.error(f"Position {position.symbol}: Missing unrealized_plpc field")
+                logger.error(f"Position [{position.account_id}] {position.symbol}: Missing unrealized_plpc field")
                 return False, "Continue after error: Missing unrealized_plpc data"
             
             profit_loss_pct = position.unrealized_plpc
             is_zero_day = position.is_zero_day_option
             
-            # 零日期权特殊处理
+            # 零日期权：无需利润判断，交由零日处理逻辑统一市价卖出
             if is_zero_day:
-                if profit_loss_pct >= self.direct_sell_config['zero_day_profit_threshold']:
-                    return True, f"Zero-day option profit target reached: {profit_loss_pct:.2%}"
-                elif profit_loss_pct <= self.direct_sell_config['stop_loss_threshold']:
-                    return True, f"Zero-day option stop loss triggered: {profit_loss_pct:.2%}"
-                else:
-                    return False, f"Zero-day option holding: P&L {profit_loss_pct:.2%} within range"
-            
-            # 普通期权策略
-            if profit_loss_pct >= self.direct_sell_config['min_profit_threshold']:
-                return True, f"Profit target reached: {profit_loss_pct:.2%}"
-            elif profit_loss_pct <= self.direct_sell_config['stop_loss_threshold']:
-                return True, f"Stop loss triggered: {profit_loss_pct:.2%}"
-            else:
-                return False, f"Holding: P&L {profit_loss_pct:.2%} within acceptable range"
+                return False, "Zero-day handled by dedicated market-sell handler"
+
+            # 使用 ConfigManager 作为单一配置来源
+            underlying_symbol = getattr(position, 'underlying_symbol', position.symbol.split('_')[0])
+            rates = await self.config_manager.get_strategy_config(underlying_symbol)
+            profit_rate = float(rates.get('profit_rate', 1.1))
+            stop_loss_rate = float(rates.get('stop_loss_rate', 0.8))
+
+            min_profit_threshold = profit_rate - 1.0
+            stop_loss_threshold = stop_loss_rate - 1.0
+
+            if profit_loss_pct >= min_profit_threshold:
+                return True, f"Profit target reached: {profit_loss_pct:.2%} >= {min_profit_threshold:.2%}"
+            if profit_loss_pct <= stop_loss_threshold:
+                return True, f"Stop loss triggered: {profit_loss_pct:.2%} <= {stop_loss_threshold:.2%}"
+            return False, f"Holding: P&L {profit_loss_pct:.2%} within range"
                 
         except Exception as e:
-            logger.error(f"Error evaluating sell decision for {position.symbol}: {e}")
+            logger.error(f"Error evaluating sell decision [{position.account_id}] {position.symbol}: {e}")
             return False, f"Continue after error: {str(e)}"
+
     
-    async def _execute_direct_sells(self, positions_to_sell: List[Position]):
+    async def _execute_parallel_sell_orders(self, positions_to_sell: List[Position]):
         """
-        执行直接卖出操作
+        并行执行卖出订单 - 使用批次处理避免API过载
         
         Args:
             positions_to_sell: 需要卖出的持仓列表
         """
-        logger.info(f"执行直接卖出策略: {len(positions_to_sell)} 个持仓")
+        logger.info(f"并行执行卖出订单: {len(positions_to_sell)} 个持仓")
         
+        # 批次大小和并发控制
+        BATCH_SIZE = 20  # 每批处理20个订单
+        MAX_CONCURRENT = 10  # 最大并发数
+        
+        # 按账户分组，确保同一账户的订单不会过度并发
+        positions_by_account = {}
+        for position in positions_to_sell:
+            if position.account_id not in positions_by_account:
+                positions_by_account[position.account_id] = []
+            positions_by_account[position.account_id].append(position)
+        
+        logger.info(f"订单分布: {[(account, len(positions)) for account, positions in positions_by_account.items()]}")
+        
+        # 统计结果
         successful_sells = 0
         failed_sells = 0
         
-        # 顺序执行卖单，严格避免并发下单
-        for position in positions_to_sell:
-            try:
-                result = await self._execute_single_direct_sell(position)
-                if isinstance(result, dict) and result.get("error"):
+        # 使用信号量控制并发数
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT)
+        
+        async def process_position_with_semaphore(position: Position):
+            """使用信号量控制单个订单处理"""
+            async with semaphore:
+                return await self._execute_single_sell_order(position)
+        
+        # 分批处理所有订单
+        all_positions = positions_to_sell
+        for batch_start in range(0, len(all_positions), BATCH_SIZE):
+            batch_end = min(batch_start + BATCH_SIZE, len(all_positions))
+            batch_positions = all_positions[batch_start:batch_end]
+            
+            logger.info(f"处理批次 {batch_start//BATCH_SIZE + 1}: 订单 {batch_start+1}-{batch_end} ({len(batch_positions)} 个)")
+            
+            # 并行处理当前批次
+            sell_tasks = [
+                process_position_with_semaphore(position) 
+                for position in batch_positions
+            ]
+            
+            batch_results = await asyncio.gather(*sell_tasks, return_exceptions=True)
+            
+            # 处理批次结果
+            for i, result in enumerate(batch_results):
+                position = batch_positions[i]
+                if isinstance(result, Exception):
                     failed_sells += 1
-                    logger.error(f"❌ Failed to place sell order for {position.symbol} (account {position.account_id}): {result['error']}")
+                    logger.error(f"❌ Failed to place sell order [{position.account_id}] {position.symbol}: {result}")
+                elif isinstance(result, dict) and result.get("error"):
+                    failed_sells += 1
+                    logger.error(f"❌ Failed to place sell order [{position.account_id}] {position.symbol}: {result['error']}")
                 else:
                     successful_sells += 1
-                    logger.info(f"✅ Sell order placed successfully for {position.symbol} (account {position.account_id})")
-            except Exception as e:
-                failed_sells += 1
-                logger.error(f"Failed to sell {position.symbol} (account {position.account_id}): {e}")
+                    order_id = result.get('id', 'Unknown') if isinstance(result, dict) else 'Unknown'
+                    logger.info(f"✅ Sell order placed successfully [{position.account_id}] {position.symbol} | Order ID: {order_id}")
+            
+            # 批次间延迟，避免API过载
+            if batch_end < len(all_positions):
+                logger.info("批次完成，等待 2 秒后处理下一批次...")
+                await asyncio.sleep(2)
         
-        logger.info(f"直接卖出完成: {successful_sells} 成功, {failed_sells} 失败")
+        logger.info(f"并行卖出完成: {successful_sells} 成功, {failed_sells} 失败")
     
-    async def _execute_single_direct_sell(self, position: Position) -> Dict[str, any]:
+    async def _execute_single_sell_order(self, position: Position) -> Dict[str, any]:
         """
-        执行单个持仓的直接卖出
+        执行单个持仓的卖出订单 - 使用集中式订单管理
         
         Args:
             position: 需要卖出的持仓
@@ -354,124 +389,37 @@ class SellWatcher:
             # 使用qty_available确定正确的卖出数量
             if position.qty_available is None or position.qty_available <= 0:
                 error_msg = f"Invalid qty_available: {position.qty_available}"
-                logger.error(f"Position {position.symbol}: {error_msg}")
+                logger.error(f"Position [{position.account_id}] {position.symbol}: {error_msg}")
                 return {"error": error_msg}
             
             qty_to_sell = abs(int(position.qty_available))
             
-            # 通过API客户端下市价卖单（使用实际的 API 客户端实例，而非布尔标志）
-            api_client = getattr(self.order_manager, 'api_client', None)
-            if api_client is None:
-                error_msg = "API client is not configured"
-                logger.error(f"Position {position.symbol}: {error_msg}")
+            # 使用集中式订单管理系统
+            if not self.order_manager:
+                error_msg = "Order manager not available"
+                logger.error(f"Position [{position.account_id}] {position.symbol}: {error_msg}")
                 return {"error": error_msg}
 
-            result = await api_client.place_option_order(
+            logger.info(f"Placing sell order [{position.account_id}] {position.symbol} x{qty_to_sell} @ limit 0.01")
+            
+            result = await self.order_manager.place_sell_order(
                 account_id=position.account_id,
-                option_symbol=position.symbol,
+                symbol=position.symbol,
                 qty=qty_to_sell,
-                side='sell',
-                order_type='market'
+                order_type='limit',
+                limit_price=0.01
             )
             
             return result
             
         except Exception as e:
-            logger.error(f"Exception executing sell for {position.symbol}: {e}")
+            logger.error(f"Exception executing sell [{position.account_id}] {position.symbol}: {e}")
             return {"error": str(e)}
     
-    async def _execute_traditional_sell_strategies(self, positions: List[Position]):
-        """
-        传统卖出策略（使用price_tracker）- 作为OptimizedStrategy的回退
-        
-        Args:
-            positions: 多头期权持仓列表
-        """
-        logger.info("***** 使用传统策略（price_tracker）*****")
-        
-        # 获取所有持仓的价格
-        logger.info(f"获取 {len(positions)} 个持仓的价格数据...")
-        quotes = await self.price_tracker.get_position_prices(positions)
-        
-        if not quotes:
-            logger.warning("未能获取期权价格数据，跳过策略执行")
-            logger.info("***** 传统策略执行结束 *****")
-            return
-        
-        logger.info(f"成功获取 {len(quotes)} 个期权的价格数据")
-        
-        # 更新追踪列表
-        self.track_list = self.price_tracker.add_options_to_track(positions, quotes)
-        
-        # 遍历每个持仓执行策略
-        logger.info(f"开始检查 {len(positions)} 个持仓的卖出条件...")
-        for position in positions:
-            try:
-                await self._execute_position_strategy(position, quotes)
-            except Exception as e:
-                logger.error(f"执行持仓策略失败 {position.symbol}: {e}")
-        
-        logger.info("***** 传统策略执行结束 *****")
-    
-    async def _execute_position_strategy(self, position: Position, quotes: Dict):
-        """
-        对单个持仓执行策略
-        
-        Args:
-            position: 持仓信息
-            quotes: 价格数据字典
-        """
-        symbol = position.symbol
-        quote = quotes.get(symbol)
-        
-        if not quote:
-            logger.warning(f"未找到期权 {symbol} 的价格数据")
-            return
-        
-        # 获取策略配置
-        underlying_symbol = getattr(position, 'underlying_symbol', symbol.split('_')[0])
-        strategy_config = await self.config_manager.get_strategy_config(underlying_symbol)
-        
-        # 检查策略一是否启用
-        if not self.config_manager.is_strategy_enabled():
-            logger.info(f"策略一未启用，跳过 {symbol}")
-            return
-        
-        logger.info(f"策略一已启用，开始检查 {symbol}")
-        
-        # 执行策略一
-        await self._execute_strategy_one(position, quote, strategy_config)
-    
-    async def _execute_strategy_one(self, position: Position, quote, strategy_config: Dict):
-        """
-        执行策略一
-        
-        Args:
-            position: 持仓信息
-            quote: 期权报价
-            strategy_config: 策略配置
-        """
-        try:
-            # 检查是否应该执行
-            should_execute = await self.strategy_one.should_execute(position, quote, strategy_config)
-            
-            if should_execute:
-                # 执行策略
-                success, reason, sell_price = await self.strategy_one.execute(position, quote, strategy_config)
-                
-                if success:
-                    logger.info(f"策略一执行成功 {position.symbol}: {reason}, 价格: ${sell_price:.2f}")
-                else:
-                    logger.warning(f"策略一执行失败 {position.symbol}: {reason}")
-            else:
-                logger.debug(f"策略一条件不满足 {position.symbol}，继续监控")
-                
-        except Exception as e:
-            logger.error(f"策略一执行异常 {position.symbol}: {e}")
     
     async def _handle_zero_day_options(self, positions: List[Position]):
         """
-        处理零日期权（当日到期的期权）
+        处理零日期权（当日到期的期权）- 并行执行
         
         Args:
             positions: 持仓列表
@@ -483,21 +431,32 @@ class SellWatcher:
         
         logger.warning(f"发现 {len(zero_day_positions)} 个零日期权，准备强制平仓")
         
-        for position in zero_day_positions:
-            try:
-                # 零日期权直接市价卖出
-                order_id = await self.order_manager.submit_sell_order(
-                    account_id=position.account_id,
-                    symbol=position.symbol,
-                    qty=position.qty,
-                    order_type='market'
-                )
-                
-                if order_id:
-                    logger.warning(f"零日期权强制平仓 {position.symbol}, 订单ID: {order_id}")
-                
-            except Exception as e:
-                logger.error(f"零日期权平仓失败 {position.symbol}: {e}")
+        # 并行执行零日期权平仓
+        zero_day_tasks = [
+            self._execute_single_sell_order(position) 
+            for position in zero_day_positions
+        ]
+        
+        zero_day_results = await asyncio.gather(*zero_day_tasks, return_exceptions=True)
+        
+        # 统计结果
+        successful_closes = 0
+        failed_closes = 0
+        
+        for i, result in enumerate(zero_day_results):
+            position = zero_day_positions[i]
+            if isinstance(result, Exception):
+                failed_closes += 1
+                logger.error(f"❌ Zero-day close failed [{position.account_id}] {position.symbol}: {result}")
+            elif isinstance(result, dict) and result.get("error"):
+                failed_closes += 1
+                logger.error(f"❌ Zero-day close failed [{position.account_id}] {position.symbol}: {result['error']}")
+            else:
+                successful_closes += 1
+                order_id = result.get('id', 'Unknown') if isinstance(result, dict) else 'Unknown'
+                logger.warning(f"⚠️ Zero-day option closed [{position.account_id}] {position.symbol} | Order ID: {order_id}")
+        
+        logger.warning(f"零日期权平仓完成: {successful_closes} 成功, {failed_closes} 失败")
     
     def _is_market_open(self) -> bool:
         """
@@ -544,13 +503,16 @@ class SellWatcher:
             'strategy_one_enabled': self.config_manager.is_strategy_enabled(),
             'check_interval': self.config_manager.get_check_interval(),
             'tracked_options': len(self.track_list),
+            'architecture': 'parallel_optimized' if self.use_api_client else 'legacy',
             'components': {
                 'config_manager': 'ready',
-                'position_manager': 'ready', 
-                'order_manager': 'ready',
-                'price_tracker': 'ready (fallback only)' if self.use_api_client else 'ready',
+                'position_manager': 'ready (parallel)', 
+                'order_manager': 'ready (parallel)',
+                'price_tracker': 'not_used (position_data_only)',
                 'strategy_one': 'ready',
-                'direct_sell_strategy': 'ready' if self.use_api_client else 'not available'
+                'parallel_sell_strategy': 'ready' if self.use_api_client else 'not available',
+                'parallel_evaluation': 'enabled',
+                'parallel_order_placement': 'enabled'
             }
         }
     

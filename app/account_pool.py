@@ -126,29 +126,6 @@ class AccountConnection:
         if self._lock.locked():
             self._lock.release()
     
-    async def get_trading_client(self) -> TradingClient:
-        """Get trading client"""
-        return await self.connection_manager.get_connection(ConnectionType.TRADING_CLIENT)
-    
-    def release_trading_client(self):
-        """Release trading client"""
-        self.connection_manager.release_connection(ConnectionType.TRADING_CLIENT)
-    
-    async def get_stock_data_client(self) -> StockHistoricalDataClient:
-        """Get stock data client"""
-        return await self.connection_manager.get_connection(ConnectionType.STOCK_DATA)
-    
-    def release_stock_data_client(self):
-        """Release stock data client"""
-        self.connection_manager.release_connection(ConnectionType.STOCK_DATA)
-    
-    async def get_option_data_client(self) -> OptionHistoricalDataClient:
-        """Get option data client"""
-        return await self.connection_manager.get_connection(ConnectionType.OPTION_DATA)
-    
-    def release_option_data_client(self):
-        """Release option data client"""
-        self.connection_manager.release_connection(ConnectionType.OPTION_DATA)
     
     @property
     def is_available(self) -> bool:
@@ -399,15 +376,25 @@ class AccountPool:
             logger.debug(f"Account name '{account_identifier}' resolved to ID: {resolved_id}")
             return resolved_id
         
-        # Try partial matching
-        for name, account_id in self.account_name_to_id.items():
-            if account_name_lower in name or name in account_name_lower:
-                logger.debug(f"Account name '{account_identifier}' partially matched to ID: {account_id}")
-                return account_id
+        # No partial matching - exact match only for security
+        # Partial matching is dangerous and can lead to wrong account selection
         
         logger.warning(f"Cannot resolve account identifier: {account_identifier}")
         return None
     
+    def get_account_config(self, account_id: Optional[str] = None, routing_key: Optional[str] = None) -> Optional[AccountConfig]:
+        """获取账户配置 - 无锁，用于HTTP客户端创建"""
+        # 优先使用account_id
+        resolved_account_id = None
+        if account_id:
+            resolved_account_id = self.resolve_account_id(account_id)
+            # 如果指定了account_id但无法解析，直接返回None，不要fallback到其他账户
+            if not resolved_account_id:
+                logger.warning(f"Account ID '{account_id}' not found")
+                return None
+        
+        return self.account_configs.get(resolved_account_id) if resolved_account_id else None
+
     async def get_connection(self, account_id: Optional[str] = None, routing_key: Optional[str] = None) -> AccountConnection:
         """Get account connection"""
         if not self._initialized:

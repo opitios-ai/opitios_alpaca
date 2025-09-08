@@ -15,6 +15,7 @@ import asyncio
 import time
 from datetime import datetime, timedelta
 
+
 class AlpacaClient:
     def __init__(self, api_key: str, secret_key: str, paper_trading: bool = True):
         # Use provided credentials (required in clean architecture)
@@ -22,24 +23,24 @@ class AlpacaClient:
         self.secret_key = secret_key
         self.paper_trading = paper_trading
         self.base_url = "https://paper-api.alpaca.markets" if paper_trading else "https://api.alpaca.markets"
-        
+
         # Validate credentials
         if not self.api_key or not self.secret_key:
             raise ValueError("Alpaca API credentials are required")
-        
+
         # Initialize trading client
         self.trading_client = TradingClient(
             api_key=self.api_key,
             secret_key=self.secret_key,
             paper=self.paper_trading
         )
-        
+
         # Initialize data clients
         self.stock_data_client = StockHistoricalDataClient(
             api_key=self.api_key,
             secret_key=self.secret_key
         )
-        
+
         # Initialize options data client
         self.option_data_client = OptionHistoricalDataClient(
             api_key=self.api_key,
@@ -70,7 +71,7 @@ class AlpacaClient:
         try:
             request = StockLatestQuoteRequest(symbol_or_symbols=[symbol])
             quotes = self.stock_data_client.get_stock_latest_quote(request)
-            
+
             if symbol in quotes:
                 quote = quotes[symbol]
                 return {
@@ -83,7 +84,7 @@ class AlpacaClient:
                 }
             else:
                 return {"error": f"No quote data found for {symbol}"}
-                
+
         except Exception as e:
             logger.error(f"Error getting stock quote for {symbol}: {e}")
             return {"error": str(e)}
@@ -93,10 +94,10 @@ class AlpacaClient:
         try:
             if not symbols or len(symbols) == 0:
                 return {"error": "No symbols provided"}
-            
+
             request = StockLatestQuoteRequest(symbol_or_symbols=symbols)
             quotes = self.stock_data_client.get_stock_latest_quote(request)
-            
+
             results = []
             for symbol in symbols:
                 if symbol in quotes:
@@ -114,19 +115,19 @@ class AlpacaClient:
                         "symbol": symbol,
                         "error": f"No quote data found for {symbol}"
                     })
-            
+
             return {
                 "quotes": results,
                 "count": len(results),
                 "requested_symbols": symbols
             }
-                
+
         except Exception as e:
             logger.error(f"Error getting multiple stock quotes: {e}")
             return {"error": str(e)}
 
-    async def get_stock_bars(self, symbol: str, timeframe: str = "1Day", limit: int = 100, 
-                           start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict[str, Any]:
+    async def get_stock_bars(self, symbol: str, timeframe: str = "1Day", limit: int = 100,
+                             start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict[str, Any]:
         """Get historical price bars for a stock using real Alpaca market data"""
         try:
             # Convert timeframe string to TimeFrame enum with proper multipliers
@@ -137,9 +138,9 @@ class AlpacaClient:
                 "1Hour": TimeFrame.Hour,
                 "1Day": TimeFrame.Day
             }
-            
+
             timeframe_obj = tf_map.get(timeframe, TimeFrame.Day)
-            
+
             # Set default date range if not provided (last 30 days for daily, last 5 days for intraday)
             if not start_date or not end_date:
                 from datetime import datetime, timedelta
@@ -149,13 +150,13 @@ class AlpacaClient:
                     start_dt = end_dt - timedelta(days=5)  # 5 days for intraday
                 else:
                     start_dt = end_dt - timedelta(days=30)  # 30 days for daily
-                    
+
                 start_date = start_dt.strftime("%Y-%m-%d")
                 end_date = end_dt.strftime("%Y-%m-%d")
-            
+
             # Use different feed for paper trading vs live trading
             feed_type = "iex" if self.paper_trading else "sip"
-            
+
             request = StockBarsRequest(
                 symbol_or_symbols=[symbol],
                 timeframe=timeframe_obj,
@@ -166,10 +167,10 @@ class AlpacaClient:
                 feed=feed_type,
                 sort="asc"
             )
-            
+
             bars = self.stock_data_client.get_stock_bars(request)
             logger.debug(f"bars: len{bars}")
-            
+
             # BarSet object has data dict, check there
             if hasattr(bars, 'data') and symbol in bars.data and len(bars.data[symbol]) > 0:
                 bars_data = []
@@ -184,7 +185,7 @@ class AlpacaClient:
                         "trade_count": bar.trade_count if hasattr(bar, 'trade_count') else None,
                         "vwap": float(bar.vwap) if hasattr(bar, 'vwap') and bar.vwap else None
                     })
-                
+
                 return {
                     "symbol": symbol,
                     "timeframe": timeframe,
@@ -196,11 +197,11 @@ class AlpacaClient:
             else:
                 logger.warning(f"No bar data found for {symbol} with timeframe {timeframe}")
                 return {"error": f"No bar data found for {symbol}"}
-                
+
         except Exception as e:
             error_msg = str(e)
             logger.error(f"Error getting stock bars for {symbol}: {error_msg}")
-            
+
             # Pass through the original error for better handling in routes.py
             return {"error": error_msg}
 
@@ -211,27 +212,27 @@ class AlpacaClient:
             # Use real Alpaca options chain API
             request = OptionChainRequest(underlying_symbol=underlying_symbol)
             chain = self.option_data_client.get_option_chain(request)
-            
+
             if chain and isinstance(chain, dict) and len(chain) > 0:
                 options_data = []
                 exp_dates = set()
                 quote_failures = 0
-                
+
                 # SDK returns dict with option symbols as keys and contract objects as values
                 for option_symbol, contract in chain.items():
                     # Parse option symbol to extract contract details
                     underlying, strike_price, exp_date, option_type = self._parse_option_symbol(option_symbol)
-                    
+
                     # Skip if parsing failed
                     if not underlying or not strike_price or not option_type:
                         continue
-                    
+
                     # Filter by expiration date if specified
                     if expiration_date and exp_date != expiration_date:
                         continue
-                        
+
                     exp_dates.add(exp_date)
-                    
+
                     option_data = {
                         "symbol": option_symbol,
                         "underlying_symbol": underlying_symbol,
@@ -239,7 +240,7 @@ class AlpacaClient:
                         "expiration_date": exp_date,
                         "option_type": option_type
                     }
-                    
+
                     # Extract quote data directly from the OptionsSnapshot object
                     try:
                         if hasattr(contract, 'latest_quote') and contract.latest_quote:
@@ -250,14 +251,14 @@ class AlpacaClient:
                                 "bid_size": quote.bid_size if hasattr(quote, 'bid_size') else None,
                                 "ask_size": quote.ask_size if hasattr(quote, 'ask_size') else None
                             })
-                        
+
                         if hasattr(contract, 'latest_trade') and contract.latest_trade:
                             trade = contract.latest_trade
                             option_data["last_price"] = float(trade.price) if trade.price else None
-                        
+
                         if hasattr(contract, 'implied_volatility') and contract.implied_volatility:
                             option_data["implied_volatility"] = float(contract.implied_volatility)
-                            
+
                         if hasattr(contract, 'greeks') and contract.greeks:
                             greeks = contract.greeks
                             option_data["greeks"] = {
@@ -270,9 +271,9 @@ class AlpacaClient:
                     except Exception as quote_error:
                         quote_failures += 1
                         logger.warning(f"Failed to extract quote data for option {option_symbol}: {quote_error}")
-                    
+
                     options_data.append(option_data)
-                
+
                 # Get current stock price for reference
                 stock_quote = await self.get_stock_quote(underlying_symbol)
                 current_price = None
@@ -280,9 +281,10 @@ class AlpacaClient:
                     current_price = stock_quote.get("ask_price") or stock_quote.get("bid_price")
                 else:
                     logger.warning(f"Could not get current stock price for {underlying_symbol}")
-                
-                logger.info(f"Options chain for {underlying_symbol}: {len(options_data)} contracts, {quote_failures} quote failures")
-                
+
+                logger.info(
+                    f"Options chain for {underlying_symbol}: {len(options_data)} contracts, {quote_failures} quote failures")
+
                 return {
                     "underlying_symbol": underlying_symbol,
                     "underlying_price": current_price,
@@ -294,7 +296,7 @@ class AlpacaClient:
             else:
                 logger.error(f"No options chain data found for {underlying_symbol}")
                 return {"error": f"No real options chain data available for {underlying_symbol}"}
-            
+
         except Exception as e:
             logger.error(f"Error getting options chain for {underlying_symbol}: {e}")
             return {"error": f"Failed to retrieve real options chain data for {underlying_symbol}: {str(e)}"}
@@ -305,18 +307,18 @@ class AlpacaClient:
             # Get real Alpaca options data only
             request = OptionLatestQuoteRequest(symbol_or_symbols=[option_symbol])
             quotes = self.option_data_client.get_option_latest_quote(request)
-            
+
             if quotes and option_symbol in quotes:
                 quote = quotes[option_symbol]
-                
+
                 # Parse option symbol to get components
                 underlying, strike_price, exp_date, option_type = self._parse_option_symbol(option_symbol)
-                
+
                 # Validate that we have valid option data
                 if not underlying or not strike_price or not option_type:
                     logger.error(f"Failed to parse option symbol: {option_symbol}")
                     return {"error": f"Invalid option symbol format: {option_symbol}"}
-                
+
                 return {
                     "symbol": option_symbol,
                     "underlying_symbol": underlying,
@@ -327,61 +329,63 @@ class AlpacaClient:
                     "ask_price": float(quote.ask_price) if quote.ask_price else None,
                     "bid_size": quote.bid_size if hasattr(quote, 'bid_size') else None,
                     "ask_size": quote.ask_size if hasattr(quote, 'ask_size') else None,
-                    "last_price": float(quote.last_price) if hasattr(quote, 'last_price') and quote.last_price else None,
-                    "implied_volatility": float(quote.implied_volatility) if hasattr(quote, 'implied_volatility') and quote.implied_volatility else None,
+                    "last_price": float(quote.last_price) if hasattr(quote,
+                                                                     'last_price') and quote.last_price else None,
+                    "implied_volatility": float(quote.implied_volatility) if hasattr(quote,
+                                                                                     'implied_volatility') and quote.implied_volatility else None,
                     "timestamp": str(quote.timestamp) if quote.timestamp else None
                 }
             else:
                 logger.warning(f"No real options data available for {option_symbol}")
                 return {"error": f"No real market data available for option symbol: {option_symbol}"}
-                
+
         except Exception as e:
             logger.error(f"Error getting option quote for {option_symbol}: {e}")
             return {"error": f"Failed to retrieve real option data for {option_symbol}: {str(e)}"}
-    
+
     def _validate_option_symbol(self, option_symbol: str) -> bool:
         """Validate option symbol format for trading"""
         try:
             # Option symbol format: SYMBOL[YY]MMDD[C/P]XXXXXXXX
             # Example: AAPL240216C00190000
-            
+
             if len(option_symbol) < 15:  # Minimum length check
                 return False
-            
+
             # Find where the date starts by looking for the first digit after letters
             underlying = ""
             date_start_idx = 0
-            
+
             for i, char in enumerate(option_symbol):
                 if char.isdigit():
                     underlying = option_symbol[:i]
                     date_start_idx = i
                     break
-            
+
             if not underlying or date_start_idx == 0:
                 return False
-            
+
             if len(option_symbol) < date_start_idx + 9:  # Need at least YYMMDD + C/P + price
                 return False
-                
-            date_part = option_symbol[date_start_idx:date_start_idx+6]
-            option_type_char = option_symbol[date_start_idx+6]
-            strike_part = option_symbol[date_start_idx+7:]
-            
+
+            date_part = option_symbol[date_start_idx:date_start_idx + 6]
+            option_type_char = option_symbol[date_start_idx + 6]
+            strike_part = option_symbol[date_start_idx + 7:]
+
             # Validate date part (6 digits)
             if not date_part.isdigit() or len(date_part) != 6:
                 return False
-            
+
             # Validate option type (C or P)
             if option_type_char.upper() not in ['C', 'P']:
                 return False
-            
+
             # Validate strike price part (8 digits)
             if not strike_part.isdigit() or len(strike_part) != 8:
                 return False
-            
+
             return True
-            
+
         except Exception as e:
             logger.error(f"Error validating option symbol {option_symbol}: {e}")
             return False
@@ -392,31 +396,31 @@ class AlpacaClient:
             # Find where the date starts by looking for the first digit after letters
             underlying = ""
             date_start_idx = 0
-            
+
             for i, char in enumerate(option_symbol):
                 if char.isdigit():
                     underlying = option_symbol[:i]
                     date_start_idx = i
                     break
-            
+
             if not underlying or date_start_idx == 0:
                 logger.error(f"No underlying symbol found in: {option_symbol}")
                 return None, None, None, None
-            
+
             if len(option_symbol) < date_start_idx + 7:
                 logger.error(f"Option symbol too short: {option_symbol}")
                 return None, None, None, None
-                
-            date_part = option_symbol[date_start_idx:date_start_idx+6]
-            option_type_char = option_symbol[date_start_idx+6]
-            strike_part = option_symbol[date_start_idx+7:]
-            
+
+            date_part = option_symbol[date_start_idx:date_start_idx + 6]
+            option_type_char = option_symbol[date_start_idx + 6]
+            strike_part = option_symbol[date_start_idx + 7:]
+
             strike_price = float(strike_part) / 1000
             exp_date = f"20{date_part[:2]}-{date_part[2:4]}-{date_part[4:6]}"
             option_type = "call" if option_type_char.upper() == 'C' else "put"
-            
+
             return underlying, strike_price, exp_date, option_type
-            
+
         except Exception as e:
             logger.error(f"Error parsing option symbol {option_symbol}: {e}")
             return None, None, None, None
@@ -427,11 +431,11 @@ class AlpacaClient:
             if not option_symbols or len(option_symbols) == 0:
                 logger.error("No option symbols provided for batch quote request")
                 return {"error": "No option symbols provided"}
-            
+
             results = []
             successful_quotes = 0
             failed_symbols = []
-            
+
             for symbol in option_symbols:
                 quote = await self.get_option_quote(symbol)
                 if "error" in quote:
@@ -440,39 +444,39 @@ class AlpacaClient:
                 else:
                     successful_quotes += 1
                 results.append(quote)
-            
+
             # Log summary of results
             logger.info(f"Option quotes batch request: {successful_quotes}/{len(option_symbols)} successful")
             if failed_symbols:
                 logger.warning(f"Failed option symbols: {failed_symbols}")
-            
+
             return {
                 "quotes": results,
-                "count": len(results),  
+                "count": len(results),
                 "successful_count": successful_quotes,
                 "failed_count": len(failed_symbols),
                 "requested_symbols": option_symbols,
                 "failed_symbols": failed_symbols if failed_symbols else None
             }
-            
+
         except Exception as e:
             logger.error(f"Error getting multiple option quotes: {e}")
             return {"error": f"Failed to process batch option quotes request: {str(e)}"}
 
     # Trading Methods
-    async def place_stock_order(self, symbol: str, qty: float, side: str, order_type: str = "market", 
-                              limit_price: Optional[float] = None, stop_price: Optional[float] = None,
-                              time_in_force: str = "day", user_id: Optional[str] = None) -> Dict[str, Any]:
+    async def place_stock_order(self, symbol: str, qty: float, side: str, order_type: str = "market",
+                                limit_price: Optional[float] = None, stop_price: Optional[float] = None,
+                                time_in_force: str = "day", user_id: Optional[str] = None) -> Dict[str, Any]:
         """Place a stock order with timing measurements"""
         start_time = time.time()
         order_prep_time = None
         order_submit_time = None
-        
+
         try:
             # Convert string parameters to Alpaca enums
             order_side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
             tif = TimeInForce.DAY if time_in_force.lower() == "day" else TimeInForce.GTC
-            
+
             # Create order request based on type
             prep_start = time.time()
             if order_type.lower() == "market":
@@ -500,19 +504,19 @@ class AlpacaClient:
                 )
             else:
                 return {"error": "Invalid order type or missing required price parameters"}
-            
+
             order_prep_time = (time.time() - prep_start) * 1000  # Convert to milliseconds
-            
+
             # Submit order with timing
             price_info = f" at ${limit_price}" if limit_price else f" at ${stop_price} (stop)" if stop_price else ""
             logger.info(f"Placing stock order: {symbol} x{qty} {side.upper()} {order_type.upper()}{price_info}")
-            
+
             submit_start = time.time()
             order = self.trading_client.submit_order(order_data)
             order_submit_time = (time.time() - submit_start) * 1000  # Convert to milliseconds
-            
+
             total_time = (time.time() - start_time) * 1000  # Convert to milliseconds
-            
+
             order_result = {
                 "id": str(order.id),  # 确保ID是字符串类型
                 "symbol": order.symbol,
@@ -530,12 +534,13 @@ class AlpacaClient:
                     "total_time_ms": round(total_time, 2)
                 }
             }
-            
+
             # 详细的成功日志 - 包含用户信息和时间信息
             price_str = f" at ${limit_price}" if limit_price else f" at ${stop_price} (stop)" if stop_price else ""
             user_info = f"User: {user_id} | " if user_id else ""
             timing_info = f"[Prep: {order_prep_time:.2f}ms, Submit: {order_submit_time:.2f}ms, Total: {total_time:.2f}ms]"
-            logger.info(f"✅ Stock order placed successfully: {user_info}{order_result['symbol']} x{order_result['qty']} {order_result['side'].upper()}{price_str} | Order ID: {order_result['id']} | Status: {order_result['status']} | Timing: {timing_info}")
+            logger.info(
+                f"✅ Stock order placed successfully: {user_info}{order_result['symbol']} x{order_result['qty']} {order_result['side'].upper()}{price_str} | Order ID: {order_result['id']} | Status: {order_result['status']} | Timing: {timing_info}")
 
             # 发送Discord通知
             # try:
@@ -544,32 +549,33 @@ class AlpacaClient:
             # except Exception as e:
             #     logger.warning(f"Failed to send Discord notification: {e}")
             return order_result
-            
+
         except Exception as e:
             total_time = (time.time() - start_time) * 1000
             logger.error(f"Error placing stock order after {total_time:.2f}ms: {e}")
             return {"error": str(e)}
 
     async def place_option_order(self, option_symbol: str, qty: int, side: str, order_type: str = "market",
-                               limit_price: Optional[float] = None, time_in_force: str = "day", 
-                               user_id: Optional[str] = None,account_id: str = None) -> Dict[str, Any]:
+                                 limit_price: Optional[float] = None, time_in_force: str = "day",
+                                 user_id: Optional[str] = None, account_id: str = None) -> Dict[str, Any]:
         """Place an options order using Alpaca's options trading API with timing measurements"""
         start_time = time.time()
         validation_time = None
         order_prep_time = None
         order_submit_time = None
-        
+
         try:
             # Convert string parameters to Alpaca enums
             order_side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
             tif = TimeInForce.DAY if time_in_force.lower() == "day" else TimeInForce.GTC
-            
+
             # Validate option symbol format (e.g., AAPL240216C00190000)
             validation_start = time.time()
             if not self._validate_option_symbol(option_symbol):
-                return {"error": f"Invalid option symbol format: {option_symbol}. Expected format: SYMBOL[YY]MMDD[C/P]XXXXXXXX"}
+                return {
+                    "error": f"Invalid option symbol format: {option_symbol}. Expected format: SYMBOL[YY]MMDD[C/P]XXXXXXXX"}
             validation_time = (time.time() - validation_start) * 1000  # Convert to milliseconds
-            
+
             # Create option order request based on type
             prep_start = time.time()
             if order_type.lower() == "market":
@@ -589,19 +595,19 @@ class AlpacaClient:
                 )
             else:
                 return {"error": "Invalid order type or missing required price parameters for options"}
-            
+
             order_prep_time = (time.time() - prep_start) * 1000  # Convert to milliseconds
-            
+
             # Submit option order
             price_info = f" at ${limit_price}" if limit_price else ""
             logger.info(f"Placing option order: {option_symbol} x{qty} {side.upper()} {order_type.upper()}{price_info}")
-            
+
             submit_start = time.time()
             order = self.trading_client.submit_order(order_data)
             order_submit_time = (time.time() - submit_start) * 1000  # Convert to milliseconds
-            
+
             total_time = (time.time() - start_time) * 1000  # Convert to milliseconds
-            
+
             # 详细的成功日志
             order_result = {
                 "id": str(order.id),  # 确保ID是字符串类型
@@ -623,15 +629,16 @@ class AlpacaClient:
                     "total_time_ms": round(total_time, 2)
                 }
             }
-            
+
             # 详细的成功日志 - 包含用户信息和时间信息
             price_str = f" at ${limit_price}" if limit_price else ""
             user_info = f"User: {user_id} | " if user_id else ""
             timing_info = f"[Validation: {validation_time:.2f}ms, Prep: {order_prep_time:.2f}ms, Submit: {order_submit_time:.2f}ms, Total: {total_time:.2f}ms]"
-            logger.info(f"✅ Option order placed successfully: account {account_id} {user_info}{order.symbol} x{order_result['qty']} {order_result['side'].upper()}{price_str} | Order ID: {order_result['id']} | Status: {order_result['status']} | Timing: {timing_info}")
+            logger.info(
+                f"✅ Option order placed successfully: account {account_id} {user_info}{order.symbol} x{order_result['qty']} {order_result['side'].upper()}{price_str} | Order ID: {order_result['id']} | Status: {order_result['status']} | Timing: {timing_info}")
 
             return order_result
-            
+
         except Exception as e:
             total_time = (time.time() - start_time) * 1000
             logger.error(f"Error placing option order for {option_symbol} after {total_time:.2f}ms: {e}")
@@ -661,9 +668,9 @@ class AlpacaClient:
         try:
             positions = self.trading_client.get_all_positions()
             position_list = []
-            
+
             for position in positions:
-                logger.info(position)
+                # logger.info(position)
                 position_list.append({
                     "asset_id": str(position.asset_id),
                     "symbol": position.symbol,
@@ -673,46 +680,63 @@ class AlpacaClient:
                     "cost_basis": float(position.cost_basis) if position.cost_basis else None,
                     "unrealized_pl": float(position.unrealized_pl) if position.unrealized_pl else None,
                     "unrealized_plpc": float(position.unrealized_plpc) if position.unrealized_plpc else None,
-                    "avg_entry_price": float(position.avg_entry_price) if position.avg_entry_price and float(position.avg_entry_price) > 0 else None,
+                    "avg_entry_price": float(position.avg_entry_price) if position.avg_entry_price and float(
+                        position.avg_entry_price) > 0 else None,
                     "current_price": float(position.current_price) if position.current_price else None,
                     "lastday_price": float(position.lastday_price) if position.lastday_price else None,
-                    "asset_class": position.asset_class.value if hasattr(position, 'asset_class') and position.asset_class else None,
-                    "qty_available": float(position.qty_available) if hasattr(position, 'qty_available') and position.qty_available else None
+                    "asset_class": position.asset_class.value if hasattr(position,
+                                                                         'asset_class') and position.asset_class else None,
+                    "qty_available": float(position.qty_available) if hasattr(position,
+                                                                              'qty_available') and position.qty_available else None
                 })
-            
+
             return position_list
-            
+
         except Exception as e:
             logger.error(f"Error getting positions: {e}")
             return [{"error": str(e)}]
 
     async def get_orders(self, status: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
-        """Get orders"""
+        """Get orders
+
+        Supports comma-separated statuses (e.g., "open,accepted,replaced").
+        Special keyword "open" maps to multiple underlying open statuses.
+        """
         try:
             request = GetOrdersRequest(limit=limit)
             orders = self.trading_client.get_orders(request)
-            
+
             logger.debug(f"Retrieved {len(orders)} total orders from Alpaca API (status filter: {status})")
-            
+
             # Define open order statuses that should be considered "open"
-            open_statuses = {'new', 'accepted', 'pending_new', 'accepted_for_bidding', 'pending_cancel', 'pending_replace'}
-            
+            open_statuses = {'new', 'accepted', 'pending_new', 'accepted_for_bidding', 'pending_cancel',
+                             'pending_replace'}
+
             order_list = []
             filtered_count = 0
             status_counts = {}
-            
+
+            # Build requested statuses set (supports comma-separated list)
+            requested_statuses: Optional[set] = None
+            if status is not None:
+                requested_statuses = set()
+                # Split by comma and normalize
+                for raw in [s.strip() for s in status.split(',') if s.strip()]:
+                    if raw == 'open':
+                        requested_statuses.update(open_statuses)
+                    else:
+                        requested_statuses.add(raw)
+
             for order in orders:
                 # Track order status counts for debugging
                 order_status = order.status.value
                 status_counts[order_status] = status_counts.get(order_status, 0) + 1
-                # If status is 'open', include all open statuses; otherwise match exact status
-                if status is None:
+                # If status is None, include all. Otherwise, include if in requested set
+                if requested_statuses is None:
                     include_order = True
-                elif status == 'open':
-                    include_order = order.status.value in open_statuses
                 else:
-                    include_order = order.status.value == status
-                
+                    include_order = order_status in requested_statuses
+
                 if include_order:
                     filtered_count += 1
                     order_list.append({
@@ -735,13 +759,13 @@ class AlpacaClient:
                         "submitted_at": str(order.submitted_at) if order.submitted_at else None,
                         "filled_at": str(order.filled_at) if order.filled_at else None
                     })
-            
+
             # Log detailed debugging information
             logger.debug(f"Order status breakdown: {status_counts}")
             logger.debug(f"Filtered {filtered_count}/{len(orders)} orders for status='{status}'")
-            
+
             return order_list
-            
+
         except Exception as e:
             logger.error(f"Error getting orders: {e}")
             return [{"error": str(e)}]
@@ -757,12 +781,12 @@ class AlpacaClient:
 
 
 class PooledAlpacaClient:
-    """使用连接池的Alpaca客户端"""
-    
+    """使用预加载配置的Alpaca客户端 - HTTP请求无锁，WebSocket使用连接池"""
+
     def __init__(self):
         # 延迟加载连接池以避免循环导入
         self._pool = None
-    
+
     @property
     def pool(self):
         """获取连接池实例"""
@@ -770,109 +794,128 @@ class PooledAlpacaClient:
             from app.account_pool import get_account_pool
             self._pool = get_account_pool()
         return self._pool
-    
-    async def _get_client_with_routing(self, account_id: Optional[str] = None, routing_key: Optional[str] = None):
-        """获取路由后的客户端连接"""
-        connection = await self.pool.get_connection(account_id, routing_key)
-        return connection
-    
-    async def get_stock_quote(self, symbol: str, account_id: Optional[str] = None, routing_key: Optional[str] = None) -> Dict[str, Any]:
-        """获取股票报价 - 使用连接池"""
-        async with self.pool.get_account_connection(account_id, routing_key or symbol) as connection:
-            return await connection.alpaca_client.get_stock_quote(symbol)
-    
-    async def get_multiple_stock_quotes(self, symbols: List[str], account_id: Optional[str] = None, routing_key: Optional[str] = None) -> Dict[str, Any]:
-        """获取多个股票报价 - 使用连接池"""
-        async with self.pool.get_account_connection(account_id, routing_key or symbols[0] if symbols else None) as connection:
-            return await connection.alpaca_client.get_multiple_stock_quotes(symbols)
-    
-    async def get_stock_bars(self, symbol: str, timeframe: str = "1Day", limit: int = 100, 
-                           start_date: Optional[str] = None, end_date: Optional[str] = None,
-                           account_id: Optional[str] = None, routing_key: Optional[str] = None) -> Dict[str, Any]:
-        """获取股票K线数据 - 使用连接池"""
-        async with self.pool.get_account_connection(account_id, routing_key or symbol) as connection:
-            return await connection.alpaca_client.get_stock_bars(symbol, timeframe, limit, start_date, end_date)
-    
+
+    def _get_http_client(self, account_id: Optional[str] = None, routing_key: Optional[str] = None) -> AlpacaClient:
+        """获取HTTP客户端 - 无锁，使用预加载配置"""
+        # 获取账户配置（无锁）
+        config = self.pool.get_account_config(account_id, routing_key)
+        if not config:
+            if account_id:
+                raise Exception(f"Account ID '{account_id}' not found.")
+            else:
+                raise Exception(f"No account configuration available for routing_key={routing_key}")
+        
+        # 创建新的HTTP客户端实例
+        return AlpacaClient(
+            api_key=config.api_key,
+            secret_key=config.secret_key,
+            paper_trading=config.paper_trading
+        )
+
+    async def _get_websocket_connection(self, account_id: Optional[str] = None, routing_key: Optional[str] = None):
+        """获取WebSocket连接 - 使用连接池（有锁）"""
+        return await self.pool.get_connection(account_id, routing_key)
+
+    async def get_stock_quote(self, symbol: str, account_id: Optional[str] = None, routing_key: Optional[str] = None) -> \
+    Dict[str, Any]:
+        """获取股票报价 - 使用HTTP客户端（无锁）"""
+        client = self._get_http_client(account_id, routing_key or symbol)
+        return await client.get_stock_quote(symbol)
+
+    async def get_multiple_stock_quotes(self, symbols: List[str], account_id: Optional[str] = None,
+                                        routing_key: Optional[str] = None) -> Dict[str, Any]:
+        """获取多个股票报价 - 使用HTTP客户端（无锁）"""
+        client = self._get_http_client(account_id, routing_key or symbols[0] if symbols else None)
+        return await client.get_multiple_stock_quotes(symbols)
+
+    async def get_stock_bars(self, symbol: str, timeframe: str = "1Day", limit: int = 100,
+                             start_date: Optional[str] = None, end_date: Optional[str] = None,
+                             account_id: Optional[str] = None, routing_key: Optional[str] = None) -> Dict[str, Any]:
+        """获取股票K线数据 - 使用HTTP客户端（无锁）"""
+        client = self._get_http_client(account_id, routing_key or symbol)
+        return await client.get_stock_bars(symbol, timeframe, limit, start_date, end_date)
+
     async def get_options_chain(self, underlying_symbol: str, expiration_date: Optional[str] = None,
-                              account_id: Optional[str] = None, routing_key: Optional[str] = None) -> Dict[str, Any]:
-        """获取期权链 - 使用连接池"""
-        async with self.pool.get_account_connection(account_id, routing_key or underlying_symbol) as connection:
-            return await connection.alpaca_client.get_options_chain(underlying_symbol, expiration_date)
-    
-    async def get_option_quote(self, option_symbol: str, account_id: Optional[str] = None, 
-                             routing_key: Optional[str] = None) -> Dict[str, Any]:
-        """获取期权报价 - 使用连接池"""
-        async with self.pool.get_account_connection(account_id, routing_key or option_symbol) as connection:
-            return await connection.alpaca_client.get_option_quote(option_symbol)
-    
+                                account_id: Optional[str] = None, routing_key: Optional[str] = None) -> Dict[str, Any]:
+        """获取期权链 - 使用HTTP客户端（无锁）"""
+        client = self._get_http_client(account_id, routing_key or underlying_symbol)
+        return await client.get_options_chain(underlying_symbol, expiration_date)
+
+    async def get_option_quote(self, option_symbol: str, account_id: Optional[str] = None,
+                               routing_key: Optional[str] = None) -> Dict[str, Any]:
+        """获取期权报价 - 使用HTTP客户端（无锁）"""
+        client = self._get_http_client(account_id, routing_key or option_symbol)
+        return await client.get_option_quote(option_symbol)
+
     async def get_multiple_option_quotes(self, option_symbols: List[str], account_id: Optional[str] = None,
-                                       routing_key: Optional[str] = None) -> Dict[str, Any]:
-        """获取多个期权报价 - 使用连接池"""
-        async with self.pool.get_account_connection(account_id, routing_key or option_symbols[0] if option_symbols else None) as connection:
-            return await connection.alpaca_client.get_multiple_option_quotes(option_symbols)
-    
-    async def place_stock_order(self, symbol: str, qty: float, side: str, order_type: str = "market", 
-                              limit_price: Optional[float] = None, stop_price: Optional[float] = None,
-                              time_in_force: str = "day", account_id: Optional[str] = None, 
-                              routing_key: Optional[str] = None, user_id: Optional[str] = None) -> Dict[str, Any]:
-        """下股票订单 - 使用连接池"""
-        async with self.pool.get_account_connection(account_id, routing_key or symbol) as connection:
-            return await connection.alpaca_client.place_stock_order(
-                symbol, qty, side, order_type, limit_price, stop_price, time_in_force, user_id
-            )
-    
+                                         routing_key: Optional[str] = None) -> Dict[str, Any]:
+        """获取多个期权报价 - 使用HTTP客户端（无锁）"""
+        client = self._get_http_client(account_id, routing_key or option_symbols[0] if option_symbols else None)
+        return await client.get_multiple_option_quotes(option_symbols)
+
+    async def place_stock_order(self, symbol: str, qty: float, side: str, order_type: str = "market",
+                                limit_price: Optional[float] = None, stop_price: Optional[float] = None,
+                                time_in_force: str = "day", account_id: Optional[str] = None,
+                                routing_key: Optional[str] = None, user_id: Optional[str] = None) -> Dict[str, Any]:
+        """下股票订单 - 使用HTTP客户端（无锁）"""
+        client = self._get_http_client(account_id, routing_key or symbol)
+        return await client.place_stock_order(
+            symbol, qty, side, order_type, limit_price, stop_price, time_in_force, user_id
+        )
+
     async def place_option_order(self, option_symbol: str, qty: int, side: str, order_type: str = "market",
-                               limit_price: Optional[float] = None, time_in_force: str = "day",
-                               account_id: Optional[str] = None, routing_key: Optional[str] = None, 
-                               user_id: Optional[str] = None) -> Dict[str, Any]:
-        """下期权订单 - 使用连接池"""
-        async with self.pool.get_account_connection(account_id, routing_key or option_symbol) as connection:
-            return await connection.alpaca_client.place_option_order(
-                option_symbol, qty, side, order_type, limit_price, time_in_force, user_id,account_id
-            )
-    
+                                 limit_price: Optional[float] = None, time_in_force: str = "day",
+                                 account_id: Optional[str] = None, routing_key: Optional[str] = None,
+                                 user_id: Optional[str] = None) -> Dict[str, Any]:
+        """下期权订单 - 使用HTTP客户端（无锁）"""
+        client = self._get_http_client(account_id, routing_key or option_symbol)
+        return await client.place_option_order(
+            option_symbol, qty, side, order_type, limit_price, time_in_force, user_id, account_id
+        )
+
     async def get_account(self, account_id: Optional[str] = None, routing_key: Optional[str] = None) -> Dict[str, Any]:
-        """获取账户信息 - 使用连接池"""
-        async with self.pool.get_account_connection(account_id, routing_key) as connection:
-            return await connection.alpaca_client.get_account()
-    
-    async def get_positions(self, account_id: Optional[str] = None, routing_key: Optional[str] = None) -> List[Dict[str, Any]]:
-        """获取持仓信息 - 使用连接池"""
-        async with self.pool.get_account_connection(account_id, routing_key) as connection:
-            return await connection.alpaca_client.get_positions()
-    
+        """获取账户信息 - 使用HTTP客户端（无锁）"""
+        client = self._get_http_client(account_id, routing_key)
+        return await client.get_account()
+
+    async def get_positions(self, account_id: Optional[str] = None, routing_key: Optional[str] = None) -> List[
+        Dict[str, Any]]:
+        """获取持仓信息 - 使用HTTP客户端（无锁）"""
+        client = self._get_http_client(account_id, routing_key)
+        return await client.get_positions()
+
     async def get_orders(self, status: Optional[str] = None, limit: int = 100,
-                       account_id: Optional[str] = None, routing_key: Optional[str] = None) -> List[Dict[str, Any]]:
-        """获取订单信息 - 使用连接池"""
-        async with self.pool.get_account_connection(account_id, routing_key) as connection:
-            return await connection.alpaca_client.get_orders(status, limit)
-    
-    async def cancel_order(self, order_id: str, account_id: Optional[str] = None, 
-                         routing_key: Optional[str] = None) -> Dict[str, Any]:
-        """取消订单 - 使用连接池"""
-        async with self.pool.get_account_connection(account_id, routing_key) as connection:
-            return await connection.alpaca_client.cancel_order(order_id)
-    
-    async def bulk_place_stock_order(self, symbol: str, qty: float, side: str, order_type: str = "market", 
-                                   limit_price: Optional[float] = None, stop_price: Optional[float] = None,
-                                   time_in_force: str = "day", user_id: Optional[str] = None) -> Dict[str, Any]:
+                         account_id: Optional[str] = None, routing_key: Optional[str] = None) -> List[Dict[str, Any]]:
+        """获取订单信息 - 使用HTTP客户端（无锁）"""
+        client = self._get_http_client(account_id, routing_key)
+        return await client.get_orders(status, limit)
+
+    async def cancel_order(self, order_id: str, account_id: Optional[str] = None,
+                           routing_key: Optional[str] = None) -> Dict[str, Any]:
+        """取消订单 - 使用HTTP客户端（无锁）"""
+        client = self._get_http_client(account_id, routing_key)
+        return await client.cancel_order(order_id)
+
+    async def bulk_place_stock_order(self, symbol: str, qty: float, side: str, order_type: str = "market",
+                                     limit_price: Optional[float] = None, stop_price: Optional[float] = None,
+                                     time_in_force: str = "day", user_id: Optional[str] = None) -> Dict[str, Any]:
         """为所有账户批量下股票订单"""
         from app.models import BulkOrderResult
-        
+
         # 获取所有可用账户
         pool_stats = self.pool.get_pool_stats()
         account_stats = pool_stats.get("account_stats", {})
-        
+
         results = []
         successful_orders = 0
         failed_orders = 0
-        
+
         logger.info(f"Starting bulk stock order for {len(account_stats)} accounts: {symbol} {qty} {side}")
-        
+
         # 为每个账户下单
         for account_id, stats in account_stats.items():
             account_name = stats.get("account_name")
-            
+
             try:
                 # 使用指定账户下单
                 order_result = await self.place_stock_order(
@@ -886,7 +929,7 @@ class PooledAlpacaClient:
                     account_id=account_id,
                     user_id=user_id
                 )
-                
+
                 if "error" in order_result:
                     failed_orders += 1
                     results.append(BulkOrderResult(
@@ -899,30 +942,33 @@ class PooledAlpacaClient:
                 else:
                     successful_orders += 1
                     from app.models import OrderResponse
-                    
+
                     # 确保ID是字符串类型（Alpaca可能返回UUID对象）
                     if 'id' in order_result and order_result['id'] is not None:
                         order_result['id'] = str(order_result['id'])
-                    
+
                     results.append(BulkOrderResult(
                         account_id=account_id,
                         account_name=account_name,
                         success=True,
                         order=OrderResponse(**order_result)
                     ))
-                    
+
                     # 详细的成功日志 - 包含用户信息
-                    price_str = f" at ${order_result.get('limit_price')}" if order_result.get('limit_price') else f" at ${order_result.get('stop_price')} (stop)" if order_result.get('stop_price') else ""
+                    price_str = f" at ${order_result.get('limit_price')}" if order_result.get(
+                        'limit_price') else f" at ${order_result.get('stop_price')} (stop)" if order_result.get(
+                        'stop_price') else ""
                     user_info = f"User: {user_id} | " if user_id else ""
-                    logger.info(f"✅ Stock order placed for {account_name}: {user_info}{order_result['symbol']} x{order_result['qty']} {order_result['side'].upper()}{price_str} | Order ID: {order_result['id']}")
-                    
+                    logger.info(
+                        f"✅ Stock order placed for {account_name}: {user_info}{order_result['symbol']} x{order_result['qty']} {order_result['side'].upper()}{price_str} | Order ID: {order_result['id']}")
+
                     # 发送Discord通知
                     # try:
                     #     from app.utils.discord_notifier import send_trade_notification
                     #     asyncio.create_task(send_trade_notification(order_result, account_name, is_bulk=True))
                     # except Exception as e:
                     #     logger.warning(f"Failed to send Discord notification: {e}")
-                    
+
             except Exception as e:
                 failed_orders += 1
                 error_msg = str(e)
@@ -933,9 +979,9 @@ class PooledAlpacaClient:
                     error=error_msg
                 ))
                 logger.error(f"Exception placing order for account {account_id}: {error_msg}")
-        
+
         logger.info(f"Bulk stock order completed: {successful_orders} successful, {failed_orders} failed")
-        
+
         # 发送批量交易汇总通知
         if successful_orders > 0:
             try:
@@ -945,7 +991,7 @@ class PooledAlpacaClient:
                 ))
             except Exception as e:
                 logger.warning(f"Failed to send Discord bulk summary: {e}")
-        
+
         return {
             "bulk_place": True,
             "total_accounts": len(account_stats),
@@ -953,29 +999,29 @@ class PooledAlpacaClient:
             "failed_orders": failed_orders,
             "results": results
         }
-    
+
     async def bulk_place_option_order(self, option_symbol: str, qty: int, side: str, order_type: str = "market",
-                                    limit_price: Optional[float] = None, time_in_force: str = "day",
-                                    user_id: Optional[str] = None) -> Dict[str, Any]:
+                                      limit_price: Optional[float] = None, time_in_force: str = "day",
+                                      user_id: Optional[str] = None) -> Dict[str, Any]:
         """为所有账户批量下期权订单"""
         from app.models import BulkOrderResult
-        
+
         # 获取所有可用账户
         pool_stats = self.pool.get_pool_stats()
         account_stats = pool_stats.get("account_stats", {})
-        
+
         results = []
         successful_orders = 0
         failed_orders = 0
-        
+
         logger.info(f"🚀 Starting bulk option order for {len(account_stats)} accounts: {option_symbol} {qty} {side}")
         logger.info(f"📊 Account stats: {list(account_stats.keys())}")
-        
+
         # 为每个账户下单
         for i, (account_id, stats) in enumerate(account_stats.items()):
             account_name = stats.get("account_name")
-            logger.info(f"🔄 Processing account {i+1}/{len(account_stats)}: {account_id} ({account_name})")
-            
+            logger.info(f"🔄 Processing account {i + 1}/{len(account_stats)}: {account_id} ({account_name})")
+
             try:
                 logger.info(f"📞 About to place option order for account {account_id}")
                 # 使用指定账户下单
@@ -989,8 +1035,9 @@ class PooledAlpacaClient:
                     account_id=account_id,
                     user_id=user_id
                 )
-                logger.info(f"📄 Order result received for account {account_id}: {type(order_result)} keys: {list(order_result.keys()) if isinstance(order_result, dict) else 'N/A'}")
-                
+                logger.info(
+                    f"📄 Order result received for account {account_id}: {type(order_result)} keys: {list(order_result.keys()) if isinstance(order_result, dict) else 'N/A'}")
+
                 if "error" in order_result:
                     failed_orders += 1
                     results.append(BulkOrderResult(
@@ -1004,30 +1051,31 @@ class PooledAlpacaClient:
                     successful_orders += 1
                     logger.info(f"✅ Successfully processed order for account {account_id}")
                     from app.models import OrderResponse
-                    
+
                     # 确保ID是字符串类型（Alpaca可能返回UUID对象）
                     if 'id' in order_result and order_result['id'] is not None:
                         order_result['id'] = str(order_result['id'])
-                    
+
                     results.append(BulkOrderResult(
                         account_id=account_id,
                         account_name=account_name,
                         success=True,
                         order=OrderResponse(**order_result)
                     ))
-                    
+
                     # 详细的成功日志 - 包含用户信息
                     price_str = f" at ${order_result.get('limit_price')}" if order_result.get('limit_price') else ""
                     user_info = f"User: {user_id} | " if user_id else ""
-                    logger.info(f"✅ Option order placed for {account_name}: {user_info}{order_result['symbol']} x{order_result['qty']} {order_result['side'].upper()}{price_str} | Order ID: {order_result['id']}")
-                    
+                    logger.info(
+                        f"✅ Option order placed for {account_name}: {user_info}{order_result['symbol']} x{order_result['qty']} {order_result['side'].upper()}{price_str} | Order ID: {order_result['id']}")
+
                     # 发送Discord通知
                     # try:
                     #     from app.utils.discord_notifier import send_trade_notification
                     #     asyncio.create_task(send_trade_notification(order_result, account_name, is_bulk=True))
                     # except Exception as e:
                     #     logger.warning(f"Failed to send Discord notification: {e}")
-                    
+
             except Exception as e:
                 failed_orders += 1
                 error_msg = str(e)
@@ -1039,10 +1087,11 @@ class PooledAlpacaClient:
                     success=False,
                     error=error_msg
                 ))
-            
-            logger.info(f"🏁 Completed processing account {account_id} ({i+1}/{len(account_stats)})")
-        
-        logger.info(f"🎯 Bulk option order COMPLETED: {successful_orders} successful, {failed_orders} failed out of {len(account_stats)} accounts")
+
+            logger.info(f"🏁 Completed processing account {account_id} ({i + 1}/{len(account_stats)})")
+
+        logger.info(
+            f"🎯 Bulk option order COMPLETED: {successful_orders} successful, {failed_orders} failed out of {len(account_stats)} accounts")
 
         # 发送批量交易汇总通知
         if successful_orders > 0:
@@ -1061,11 +1110,12 @@ class PooledAlpacaClient:
             "failed_orders": failed_orders,
             "results": results
         }
-    
-    async def test_connection(self, account_id: Optional[str] = None, routing_key: Optional[str] = None) -> Dict[str, Any]:
-        """测试连接 - 使用连接池"""
-        async with self.pool.get_account_connection(account_id, routing_key) as connection:
-            return await connection.alpaca_client.test_connection()
+
+    async def test_connection(self, account_id: Optional[str] = None, routing_key: Optional[str] = None) -> Dict[
+        str, Any]:
+        """测试连接 - 使用HTTP客户端（无锁）"""
+        client = self._get_http_client(account_id, routing_key)
+        return await client.test_connection()
 
 
 # 全局连接池客户端实例
