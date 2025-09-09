@@ -182,6 +182,306 @@ class TestAlpacaAccountConnection:
         assert age < 1  # Should be less than 1 minute for new connection
 
 
+class TestAccountValidationFixes:
+    """Test the 6 critical production fixes for account validation."""
+    
+    @pytest.mark.asyncio
+    async def test_pa_prefix_account_type_detection_paper(self, primary_test_account):
+        """Test PA prefix detection for paper trading accounts - Fix #1."""
+        from app.account_pool import AccountConnection
+        
+        account_config = AccountConfig(
+            account_id=primary_test_account.credentials.account_id,
+            api_key=primary_test_account.credentials.api_key,
+            secret_key=primary_test_account.credentials.secret_key,
+            paper_trading=True  # Expect paper trading
+        )
+        
+        connection = AccountConnection(account_config)
+        
+        # Mock the trading client response with PA prefix (paper account)
+        with patch.object(connection.connection_manager, 'get_connection') as mock_get_conn:
+            mock_trading_client = MagicMock()
+            mock_account = MagicMock()
+            mock_account.account_number = "PA123456789"  # Paper account with PA prefix
+            mock_account.portfolio_value = "10000.00"  # Above minimum balance
+            mock_trading_client.get_account.return_value = mock_account
+            mock_get_conn.return_value = mock_trading_client
+            
+            # Test connection should succeed with matching account type
+            is_healthy = await connection.test_connection()
+            
+            assert is_healthy is True, "Paper account with PA prefix should be valid when paper_trading=True"
+            mock_trading_client.get_account.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_pa_prefix_account_type_detection_mismatch(self, primary_test_account):
+        """Test PA prefix detection mismatch - Fix #1."""
+        from app.account_pool import AccountConnection
+        
+        account_config = AccountConfig(
+            account_id=primary_test_account.credentials.account_id,
+            api_key=primary_test_account.credentials.api_key,
+            secret_key=primary_test_account.credentials.secret_key,
+            paper_trading=False  # Expect live trading but get paper account
+        )
+        
+        connection = AccountConnection(account_config)
+        
+        # Mock the trading client response with PA prefix (paper account) but config expects live
+        with patch.object(connection.connection_manager, 'get_connection') as mock_get_conn:
+            mock_trading_client = MagicMock()
+            mock_account = MagicMock()
+            mock_account.account_number = "PA123456789"  # Paper account with PA prefix
+            mock_account.portfolio_value = "10000.00"  # Above minimum balance
+            mock_trading_client.get_account.return_value = mock_account
+            mock_get_conn.return_value = mock_trading_client
+            
+            # Test connection should still succeed but log warning
+            with patch('app.account_pool.logger') as mock_logger:
+                is_healthy = await connection.test_connection()
+                
+                # Connection should still succeed but warning should be logged
+                assert is_healthy is True, "Connection should still succeed despite account type mismatch"
+                mock_logger.warning.assert_called()
+                warning_call = mock_logger.warning.call_args[0][0]
+                assert "Account type mismatch" in warning_call
+                assert "Expected paper_trading=False" in warning_call
+                assert "PA123456789 is paper" in warning_call
+    
+    @pytest.mark.asyncio
+    async def test_live_account_detection(self, primary_test_account):
+        """Test live account detection (non-PA prefix) - Fix #1."""
+        from app.account_pool import AccountConnection
+        
+        account_config = AccountConfig(
+            account_id=primary_test_account.credentials.account_id,
+            api_key=primary_test_account.credentials.api_key,
+            secret_key=primary_test_account.credentials.secret_key,
+            paper_trading=False  # Expect live trading
+        )
+        
+        connection = AccountConnection(account_config)
+        
+        # Mock the trading client response with non-PA prefix (live account)
+        with patch.object(connection.connection_manager, 'get_connection') as mock_get_conn:
+            mock_trading_client = MagicMock()
+            mock_account = MagicMock()
+            mock_account.account_number = "123456789"  # Live account without PA prefix
+            mock_account.portfolio_value = "25000.00"  # Above minimum balance
+            mock_trading_client.get_account.return_value = mock_account
+            mock_get_conn.return_value = mock_trading_client
+            
+            # Test connection should succeed with matching account type
+            is_healthy = await connection.test_connection()
+            
+            assert is_healthy is True, "Live account without PA prefix should be valid when paper_trading=False"
+            mock_trading_client.get_account.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_minimum_balance_validation_success(self, primary_test_account):
+        """Test minimum balance validation with sufficient funds - Fix #2."""
+        from app.account_pool import AccountConnection
+        
+        account_config = AccountConfig(
+            account_id=primary_test_account.credentials.account_id,
+            api_key=primary_test_account.credentials.api_key,
+            secret_key=primary_test_account.credentials.secret_key,
+            paper_trading=True
+        )
+        
+        connection = AccountConnection(account_config)
+        
+        # Mock settings to set minimum balance requirement
+        with patch('app.account_pool.settings') as mock_settings:
+            mock_settings.minimum_balance = 5000.0
+            
+            # Mock the trading client response with sufficient balance
+            with patch.object(connection.connection_manager, 'get_connection') as mock_get_conn:
+                mock_trading_client = MagicMock()
+                mock_account = MagicMock()
+                mock_account.account_number = "PA123456789"
+                mock_account.portfolio_value = "10000.00"  # Above minimum balance ($5000)
+                mock_trading_client.get_account.return_value = mock_account
+                mock_get_conn.return_value = mock_trading_client
+                
+                # Test connection should succeed with sufficient balance
+                is_healthy = await connection.test_connection()
+                
+                assert is_healthy is True, "Account with balance above minimum should be valid"
+                mock_trading_client.get_account.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_minimum_balance_validation_failure(self, primary_test_account):
+        """Test minimum balance validation with insufficient funds - Fix #2."""
+        from app.account_pool import AccountConnection
+        
+        account_config = AccountConfig(
+            account_id=primary_test_account.credentials.account_id,
+            api_key=primary_test_account.credentials.api_key,
+            secret_key=primary_test_account.credentials.secret_key,
+            paper_trading=True
+        )
+        
+        connection = AccountConnection(account_config)
+        
+        # Mock settings to set minimum balance requirement
+        with patch('app.account_pool.settings') as mock_settings:
+            mock_settings.minimum_balance = 5000.0
+            
+            # Mock the trading client response with insufficient balance
+            with patch.object(connection.connection_manager, 'get_connection') as mock_get_conn:
+                mock_trading_client = MagicMock()
+                mock_account = MagicMock()
+                mock_account.account_number = "PA123456789"
+                mock_account.portfolio_value = "2500.00"  # Below minimum balance ($5000)
+                mock_trading_client.get_account.return_value = mock_account
+                mock_get_conn.return_value = mock_trading_client
+                
+                # Test connection should fail with insufficient balance
+                with patch('app.account_pool.logger') as mock_logger:
+                    is_healthy = await connection.test_connection()
+                    
+                    assert is_healthy is False, "Account with balance below minimum should be invalid"
+                    mock_logger.error.assert_called()
+                    error_call = mock_logger.error.call_args[0][0]
+                    assert "balance $2,500.00 is below minimum required $5,000.00" in error_call
+    
+    @pytest.mark.asyncio
+    async def test_balance_validation_with_secrets_yml_config(self, primary_test_account):
+        """Test balance validation using configuration from secrets.yml - Fix #2."""
+        from app.account_pool import AccountConnection
+        import config
+        
+        account_config = AccountConfig(
+            account_id=primary_test_account.credentials.account_id,
+            api_key=primary_test_account.credentials.api_key,
+            secret_key=primary_test_account.credentials.secret_key,
+            paper_trading=True
+        )
+        
+        connection = AccountConnection(account_config)
+        
+        # Test that settings.minimum_balance is loaded from config properly
+        # This ensures the secrets.yml configuration is being read correctly
+        assert hasattr(config.settings, 'minimum_balance')
+        assert config.settings.minimum_balance >= 0  # Should be a positive number
+        
+        # Mock the trading client response
+        with patch.object(connection.connection_manager, 'get_connection') as mock_get_conn:
+            mock_trading_client = MagicMock()
+            mock_account = MagicMock()
+            mock_account.account_number = "PA123456789"
+            # Use balance exactly at minimum (should pass)
+            mock_account.portfolio_value = str(config.settings.minimum_balance)
+            mock_trading_client.get_account.return_value = mock_account
+            mock_get_conn.return_value = mock_trading_client
+            
+            # Test connection should succeed with balance exactly at minimum
+            is_healthy = await connection.test_connection()
+            
+            assert is_healthy is True, "Account with balance exactly at minimum should be valid"
+    
+    @pytest.mark.asyncio 
+    async def test_account_validation_with_real_data(self, real_api_client):
+        """Test account validation with real Alpaca API data - Fix #1 and #2 combined."""
+        # This test uses real API connections and data (NO MOCK TESTS ALLOWED)
+        
+        # Get real account information
+        account_result = await real_api_client.get_account_info()
+        
+        if account_result.get("error"):
+            pytest.skip(f"Real API connection failed: {account_result['error']}")
+        
+        # Extract real account data
+        account_number = account_result.get("account_number")
+        portfolio_value = float(account_result.get("portfolio_value", 0))
+        
+        # Validate account type detection with real data
+        is_paper_account = account_number.startswith("PA") if account_number else False
+        
+        # Test PA prefix detection logic
+        if real_api_client.test_account.credentials.paper_trading:
+            # For paper trading, we expect PA prefix
+            assert is_paper_account, f"Paper trading account should have PA prefix, got: {account_number}"
+        else:
+            # For live trading, we expect no PA prefix
+            assert not is_paper_account, f"Live trading account should not have PA prefix, got: {account_number}"
+        
+        # Test balance validation with real data
+        # Note: Paper accounts typically have virtual money, live accounts have real money
+        assert portfolio_value >= 0, f"Portfolio value should be non-negative, got: {portfolio_value}"
+        
+        # Log results for verification
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Real account validation results:")
+        logger.info(f"  Account Number: {account_number}")
+        logger.info(f"  Is Paper Account: {is_paper_account}")
+        logger.info(f"  Portfolio Value: ${portfolio_value:,.2f}")
+        logger.info(f"  Expected Paper Trading: {real_api_client.test_account.credentials.paper_trading}")
+    
+    @pytest.mark.asyncio
+    async def test_account_validation_error_handling(self, primary_test_account):
+        """Test account validation error handling - Fix #1 and #2."""
+        from app.account_pool import AccountConnection
+        
+        account_config = AccountConfig(
+            account_id=primary_test_account.credentials.account_id,
+            api_key="invalid_key",  # Invalid credentials to trigger error
+            secret_key="invalid_secret",
+            paper_trading=True
+        )
+        
+        connection = AccountConnection(account_config)
+        
+        # Test connection should fail gracefully with invalid credentials
+        with patch('app.account_pool.logger') as mock_logger:
+            is_healthy = await connection.test_connection()
+            
+            assert is_healthy is False, "Connection with invalid credentials should fail"
+            mock_logger.error.assert_called()
+            error_call = mock_logger.error.call_args[0][0]
+            assert "Connection test failed" in error_call
+    
+    def test_account_type_detection_edge_cases(self):
+        """Test edge cases for account type detection - Fix #1."""
+        from app.account_pool import AccountConnection
+        
+        # Test empty account number
+        mock_account = MagicMock()
+        mock_account.account_number = ""
+        mock_account.portfolio_value = "10000.00"
+        
+        # Empty account number should not start with PA
+        is_paper = mock_account.account_number.startswith("PA")
+        assert is_paper is False
+        
+        # Test None account number
+        mock_account.account_number = None
+        try:
+            is_paper = mock_account.account_number.startswith("PA") if mock_account.account_number else False
+            assert is_paper is False
+        except AttributeError:
+            # This is expected behavior for None
+            pass
+        
+        # Test case-sensitive PA prefix
+        test_cases = [
+            ("PA123456789", True),   # Standard paper account
+            ("pa123456789", False),  # Lowercase should not match
+            ("PA", True),            # Minimal PA prefix
+            ("P", False),            # Just P is not enough
+            ("AP123456789", False),  # AP is not PA
+            ("123456789", False),    # No prefix (live account)
+            ("XPA123456789", False), # PA not at start
+        ]
+        
+        for account_number, expected_is_paper in test_cases:
+            is_paper = account_number.startswith("PA")
+            assert is_paper == expected_is_paper, f"Account number '{account_number}' should {'be' if expected_is_paper else 'not be'} detected as paper account"
+
+
 class TestAccountConnectionPool:
     """Test AccountConnectionPool functionality."""
     

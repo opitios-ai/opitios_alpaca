@@ -494,7 +494,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             "/api/v1/options/quote": (60, 60),
             "/api/v1/options/quotes/batch": (20, 60),
             "/api/v1/stocks/order": (10, 60),  # 10 orders per minute
-            "/api/v1/options/order": (10, 60),
+            "/api/v1/options/order": (200, 60),  # align with Alpaca 200/min
             "default": (120, 60)  # 默认限制
         }
         
@@ -513,10 +513,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         endpoint = request.url.path
         limit, window = self.endpoint_limits.get(endpoint, self.endpoint_limits["default"])
         
+        # 组合标识：按用户+账户进行限流，避免不同账户共享桶
+        account_id_param = request.query_params.get("account_id")
+        identifier = f"user:{user_id}:{endpoint}"
+        if account_id_param:
+            identifier = f"{identifier}:account:{account_id_param}"
+
         # 检查rate limit
-        allowed, rate_info = rate_limiter.is_allowed(
-            f"user:{user_id}:{endpoint}", limit, window
-        )
+        allowed, rate_info = rate_limiter.is_allowed(identifier, limit, window)
         
         if not allowed:
             return JSONResponse(

@@ -9,7 +9,8 @@ from typing import Dict, Optional
 from pydantic import BaseModel
 
 from app.middleware import verify_jwt_token, create_jwt_token, is_internal_ip, internal_or_jwt_auth
-from app.demo_jwt import generate_demo_jwt_token, get_demo_user_info
+# Demo JWT imports only for development - not used in production
+# from app.demo_jwt import generate_demo_jwt_token, get_demo_user_info
 from config import settings
 from fastapi import Request
 
@@ -29,7 +30,7 @@ class TokenVerificationResponse(BaseModel):
 
 @auth_router.post("/verify-token", response_model=TokenVerificationResponse)
 async def verify_token(
-    credentials: HTTPAuthorizationCredentials = Depends(security)
+        credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """验证JWT Token"""
     try:
@@ -48,27 +49,14 @@ async def verify_token(
         )
 
 
-# 演示JWT端点
-@auth_router.get("/demo-token")
-async def get_demo_jwt_token():
-    """获取演示JWT Token - 用于Swagger UI快速测试"""
-    token = generate_demo_jwt_token(expire_hours=168)  # 7天有效期
-    user_info = get_demo_user_info()
-    
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "expires_in": 168 * 3600,  # 7天转换为秒
-        "demo_user": user_info,
-        "usage_instructions": [
-            "1. 复制 access_token 的值",
-            "2. 点击 Swagger UI 右上角的 'Authorize' 按钮",
-            "3. 输入: Bearer 后面跟上token (例如: Bearer eyJ0eXAiOiJKV1Q...)",
-            "4. 点击 'Authorize' 按钮",
-            "5. 现在可以测试所有需要JWT认证的端点"
-        ],
-        "note": "这是一个演示token，仅用于测试目的。实际使用中请通过外部系统获取有效token。"
-    }
+# Demo JWT endpoint DISABLED for production security
+# @auth_router.get("/demo-token")
+# async def get_demo_jwt_token():
+#     """DISABLED: Demo JWT Token endpoint - disabled for production security"""
+#     raise HTTPException(
+#         status_code=404,
+#         detail="Demo token endpoint has been disabled for production security"
+#     )
 
 
 # 简化的管理员路由
@@ -89,7 +77,7 @@ async def get_system_health():
     from app.account_pool import get_account_pool
     pool = get_account_pool()
     pool_stats = pool.get_pool_stats()
-    
+
     return {
         "status": "healthy",
         "account_pool": pool_stats,
@@ -105,14 +93,14 @@ async def get_system_health():
 async def get_admin_token(request: Request):
     """生成管理员JWT Token - 仅限内网访问"""
     client_ip = request.client.host if request.client else "unknown"
-    
+
     # 检查是否为内网IP
     if not is_internal_ip(client_ip):
         raise HTTPException(
-            status_code=403, 
+            status_code=403,
             detail="Admin token generation is only allowed from internal network"
         )
-    
+
     # 创建管理员token
     admin_user_data = {
         "user_id": "admin_user",
@@ -121,9 +109,9 @@ async def get_admin_token(request: Request):
         "role": "admin",
         "permission_group": "admin"
     }
-    
+
     token = create_jwt_token(admin_user_data)
-    
+
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -138,21 +126,4 @@ async def get_admin_token(request: Request):
         ],
         "permissions": admin_user_data["permissions"],
         "note": "这是管理员token，拥有所有权限，包括批量下单功能。仅限内网生成。"
-    }
-
-@auth_router.get("/alpaca-credentials")
-async def get_alpaca_credentials():
-    """获取Alpaca WebSocket测试凭据"""
-    # 直接从secrets.yml返回账户凭据
-    return {
-        "api_key": "PK8T7QYKN7SN9EDDMC09",
-        "secret_key": "dhRGqLVvzqGUIYGY87eKw4osEZFbPnCMjuBL2ijV",
-        "account_name": "Primary Trading Account",
-        "paper_trading": True,
-        "endpoints": {
-            "stock_ws": "wss://stream.data.alpaca.markets/v2/iex",
-            "option_ws": "wss://stream.data.alpaca.markets/v1beta1/indicative",
-            "test_ws": "wss://stream.data.alpaca.markets/v2/test"
-        },
-        "note": "这些是真实的Alpaca API凭据，用于WebSocket连接测试"
     }
