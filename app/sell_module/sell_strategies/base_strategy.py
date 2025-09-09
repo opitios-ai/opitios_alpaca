@@ -76,12 +76,21 @@ class BaseStrategy(ABC):
             是否成功下单
         """
         try:
+            # 测试代码 - 限价0.01（已注释，恢复为市价平仓）
+            # result = await self.order_manager.place_sell_order(
+            #     account_id=position.account_id,
+            #     symbol=position.symbol,
+            #     qty=position.qty,
+            #     order_type='limit',
+            #     limit_price=0.01  # 使用测试价格
+            # )
+            
+            # 正常市价平仓
             result = await self.order_manager.place_sell_order(
                 account_id=position.account_id,
                 symbol=position.symbol,
                 qty=position.qty,
-                order_type='limit',
-                limit_price=0.01  # 使用测试价格
+                order_type='market'
             )
             
             if "error" not in result:   
