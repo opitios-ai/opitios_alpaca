@@ -40,7 +40,7 @@ class SellWatcher:
             self.position_manager = PositionManager(account_pool, api_client)
             self.order_manager = OrderManager(account_pool, api_client)
             # 只有在优化策略失败时才需要price_tracker作为回退
-            self.price_tracker = PriceTracker(account_pool, api_client)
+            self.price_tracker = PriceTracker(account_pool)
         else:
             # 原始架构 - 直接连接池访问（需要price_tracker）
             logger.debug("使用原始架构初始化卖出监控器组件")
@@ -187,10 +187,10 @@ class SellWatcher:
             logger.info("取消旧订单检查完成")
             
             # 5. 检查是否在交易时间内
-            # if not self._is_market_open():
-            #     logger.info("市场未开放，跳过策略执行")
-            #     logger.info("=" * 60)
-            #     return
+            if not self._is_market_open():
+                logger.info("市场未开放，跳过策略执行")
+                logger.info("=" * 60)
+                return
             
             # 6. 执行卖出策略
             await self._execute_sell_strategies(long_positions)
@@ -401,14 +401,24 @@ class SellWatcher:
                 logger.error(f"Position [{position.account_id}] {position.symbol}: {error_msg}")
                 return {"error": error_msg}
 
-            logger.info(f"Placing sell order [{position.account_id}] {position.symbol} x{qty_to_sell} @ limit 0.01")
+            # 测试代码 - 限价0.01（已注释，恢复为市价平仓）
+            # logger.info(f"Placing sell order [{position.account_id}] {position.symbol} x{qty_to_sell} @ limit 0.01")
+            # result = await self.order_manager.place_sell_order(
+            #     account_id=position.account_id,
+            #     symbol=position.symbol,
+            #     qty=qty_to_sell,
+            #     order_type='limit',
+            #     limit_price=0.01
+            # )
+            
+            # 正常市价平仓
+            logger.info(f"Placing sell order [{position.account_id}] {position.symbol} x{qty_to_sell} @ market")
             
             result = await self.order_manager.place_sell_order(
                 account_id=position.account_id,
                 symbol=position.symbol,
                 qty=qty_to_sell,
-                order_type='limit',
-                limit_price=0.01
+                order_type='market'
             )
             
             return result

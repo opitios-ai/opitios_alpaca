@@ -296,31 +296,6 @@ class AlpacaAPIClient:
             
         return result
     
-    async def get_option_quotes(self, symbols: List[str]) -> Dict[str, Any]:
-        """
-        获取期权报价 - 市场数据，不需要账户ID
-        
-        ⚠️ DEPRECATED: OptimizedStrategy uses position.current_price directly.
-        This method is only used for fallback/traditional strategy.
-        
-        Args:
-            symbols: 期权符号列表
-            
-        Returns:
-            期权报价数据
-        """
-        logger.warning(f"使用已弃用的 get_option_quotes 方法获取 {len(symbols)} 个期权报价 - 考虑使用 OptimizedStrategy")
-            
-        result = await self._make_request(
-            'POST', 
-            '/options/quotes/batch',
-            json={'option_symbols': symbols}
-        )
-        
-        if "error" in result:
-            logger.error(f"获取期权报价失败: {result['error']}")
-            
-        return result
     
     async def place_option_order(self, account_id: str, option_symbol: str, qty: int, 
                                side: str, order_type: str = "market", 
@@ -345,8 +320,8 @@ class AlpacaAPIClient:
             'option_symbol': option_symbol,
             'qty': qty,
             'side': side,
-            'type': 'limit',        # 使用正确的字段名
-            'limit_price': 0.01     # 使用正确的数据类型
+            'type': order_type,     # 使用传入的订单类型
+            'limit_price': limit_price if order_type == 'limit' else None
         }
 
         # Server expects account_id as query param via routing dependency
