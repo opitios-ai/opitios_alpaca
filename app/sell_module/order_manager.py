@@ -67,15 +67,14 @@ class Order:
 
 
 class OrderManager:
-    def __init__(self, account_pool: AccountPool, api_client: Optional[AlpacaAPIClient] = None):
+    def __init__(self, account_pool: AccountPool, api_client: AlpacaAPIClient):
         self.account_pool = account_pool
-        # API客户端用于替代直接连接池访问（可选）
+        # API客户端用于所有订单操作
         self.api_client = api_client
-        self.use_api_client = api_client is not None
 
     async def get_all_orders(self, status: str = 'open,accepted,replaced') -> List[Order]:
         """
-        获取所有账户的订单信息 - 支持API客户端或直接连接池访问
+        获取所有账户的订单信息 - 使用HTTP API客户端
         
         Args:
             status: Order status filter ('open', 'closed', 'all', or comma-separated statuses like 'open,accepted,replaced')
@@ -83,10 +82,7 @@ class OrderManager:
         Returns:
             List of orders from all accounts
         """
-        if self.use_api_client:
-            return await self._get_all_orders_via_api(status)
-        else:
-            return await self._get_all_orders_via_pool(status)
+        return await self._get_all_orders_via_api(status)
 
     async def _get_all_orders_via_api(self, status: str = 'open') -> List[Order]:
         """通过 API 客户端获取所有订单 - 遍历所有账户"""
@@ -125,35 +121,6 @@ class OrderManager:
             logger.error(f"Failed to get all orders via API: {e}")
             return []
 
-    async def _get_all_orders_via_pool(self, status: str = 'open') -> List[Order]:
-        """通过连接池获取所有订单（原始方法）"""
-        try:
-            # Optimized account retrieval and task creation
-            accounts = await self.account_pool.get_all_accounts()
-
-            if not accounts:
-                return []
-
-            # High-concurrency order fetching
-            tasks = [
-                self._get_account_orders(account_id, connection, status)
-                for account_id, connection in accounts.items()
-            ]
-
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            # Optimized result aggregation
-            all_orders = []
-            for result in results:
-                if not isinstance(result, Exception):
-                    all_orders.extend(result)
-
-            logger.debug(f"Retrieved {len(all_orders)} orders from {len(accounts)} accounts")
-            return all_orders
-
-        except Exception as e:
-            logger.error(f"Failed to get all orders: {e}")
-            return []
 
     async def _get_account_orders_via_api(self, account_id: str, status: str) -> List[Order]:
         """通过 API 客户端获取单个账户的订单"""
@@ -192,50 +159,6 @@ class OrderManager:
             logger.error(f"❌ Failed to get orders for account [{account_id}] via API: {e}")
             return []
 
-    async def _get_account_orders(self, account_id: str, connection, status: str) -> List[Order]:
-        """
-        通过连接池获取单个账户的订单（原始方法）
-        获取单个账户的订单
-        
-        Args:
-            account_id: 账户ID
-            connection: 账户连接对象
-            status: 订单状态，支持单个状态或逗号分隔的多个状态
-            
-        Returns:
-            该账户的订单列表
-        """
-        try:
-            alpaca_client = connection.alpaca_client
-            
-            # 处理多个状态的情况
-            if ',' in status:
-                # 多个状态，分别获取后合并
-                statuses = [s.strip() for s in status.split(',')]
-                all_orders_data = []
-                
-                for single_status in statuses:
-                    orders_data = await alpaca_client.get_orders(status=single_status)
-                    all_orders_data.extend(orders_data)
-                
-                orders_data = all_orders_data
-            else:
-                # 单个状态
-                orders_data = await alpaca_client.get_orders(status=status)
-            
-            orders = []
-
-            for order_data in orders_data:
-                # 添加账户ID到订单数据
-                order_data['account_id'] = account_id
-                order = Order(order_data)
-                orders.append(order)
-
-            return orders
-
-        except Exception as e:
-            logger.error(f"获取账户 {account_id} 订单失败: {e}")
-            return []
 
     async def cancel_old_orders(self, minutes: int = 3, side: str = 'sell'):
         """
@@ -311,7 +234,7 @@ class OrderManager:
 
     async def _cancel_account_orders_sequential(self, account_id: str, orders: List[Order]) -> List[bool]:
         """
-        Cancel orders sequentially for a single account to avoid connection conflicts
+        Cancel orders sequentially for a single account using HTTP API client
         
         Args:
             account_id: Account ID to cancel orders for
@@ -325,51 +248,37 @@ class OrderManager:
 
         logger.info(f"🔄 Cancelling {order_count} orders sequentially for account [{account_id}]")
 
-        try:
-            # Get connection once for all orders in this account
-            logger.info(f"🔗 Getting connection for account [{account_id}]...")
-            connection = await self.account_pool.get_connection(account_id)
-            logger.info(f"✅ Connection established for account [{account_id}]")
+        if not self.api_client:
+            logger.error(f"❌ API client not initialized for account [{account_id}]")
+            return [Exception("API client not initialized")] * order_count
 
-            # Cancel each order sequentially using the same connection
-            for i, order in enumerate(orders, 1):
-                try:
-                    logger.info(f"🔄 Cancelling order {i}/{order_count}: {order.id} [{account_id}] {order.symbol}")
-                    
-                    # Add timeout to prevent hanging
-                    import asyncio
-                    result = await asyncio.wait_for(
-                        connection.alpaca_client.cancel_order(order.id),
-                        timeout=10.0  # 10 second timeout per order
-                    )
+        # Cancel each order sequentially using HTTP API client
+        for i, order in enumerate(orders, 1):
+            try:
+                logger.info(f"🔄 Cancelling order {i}/{order_count}: {order.id} [{account_id}] {order.symbol}")
+                
+                # Use HTTP API client instead of direct Alpaca client
+                result = await self.api_client.cancel_order(account_id, order.id)
 
-                    if "error" not in result:
-                        logger.info(f"✅ Order {order.id} cancelled successfully [{account_id}] {order.symbol} ({i}/{order_count})")
-                        results.append(True)
-                    else:
-                        logger.error(f"❌ Failed to cancel order {order.id} [{account_id}] {order.symbol}: {result.get('error')}")
-                        results.append(Exception(f"Cancellation failed: {result.get('error')}"))
+                if "error" not in result:
+                    logger.info(f"✅ Order {order.id} cancelled successfully [{account_id}] {order.symbol} ({i}/{order_count})")
+                    results.append(True)
+                else:
+                    logger.error(f"❌ Failed to cancel order {order.id} [{account_id}] {order.symbol}: {result.get('error')}")
+                    results.append(Exception(f"Cancellation failed: {result.get('error')}"))
 
-                except asyncio.TimeoutError:
-                    logger.error(f"⏰ Timeout cancelling order {order.id} [{account_id}] {order.symbol} - skipping")
-                    results.append(Exception("Cancellation timeout"))
-                except Exception as e:
-                    logger.error(f"❌ Error cancelling order {order.id} [{account_id}] {order.symbol}: {e}")
-                    results.append(e)
+            except Exception as e:
+                logger.error(f"❌ Error cancelling order {order.id} [{account_id}] {order.symbol}: {e}")
+                results.append(e)
 
-            logger.debug(
-                f"✅ Account [{account_id}] batch complete: {sum(1 for r in results if r is True)}/{order_count} successful")
-
-        except Exception as e:
-            logger.error(f"❌ Failed to get connection for account [{account_id}]: {e}")
-            # Return failure for all orders if connection fails
-            results = [e] * order_count
+        logger.debug(
+            f"✅ Account [{account_id}] batch complete: {sum(1 for r in results if r is True)}/{order_count} successful")
 
         return results
 
     async def _cancel_order(self, order: Order) -> bool:
         """
-        High-performance single order cancellation with optimized operations
+        High-performance single order cancellation using HTTP API client
         
         Args:
             order: Order to cancel
@@ -378,12 +287,19 @@ class OrderManager:
             Success status
         """
         try:
-            # Optimized connection retrieval and API call
-            connection = await self.account_pool.get_connection(order.account_id)
-            result = await connection.alpaca_client.cancel_order(order.id)
+            if not self.api_client:
+                logger.error(f"❌ API client not initialized for order {order.id}")
+                return False
 
-            logger.debug(f"Order {order.id} cancelled successfully for {order.symbol}")
-            return True
+            # Use HTTP API client instead of direct Alpaca client
+            result = await self.api_client.cancel_order(order.account_id, order.id)
+
+            if "error" not in result:
+                logger.debug(f"Order {order.id} cancelled successfully for {order.symbol}")
+                return True
+            else:
+                logger.warning(f"Failed to cancel order {order.id} ({order.symbol}): {result.get('error')}")
+                return False
 
         except Exception as e:
             logger.warning(f"Failed to cancel order {order.id} ({order.symbol}): {e}")

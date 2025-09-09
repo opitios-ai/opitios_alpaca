@@ -34,21 +34,22 @@ class AlpacaAPIClient:
     async def _get_session(self) -> aiohttp.ClientSession:
         """获取或创建 HTTP 会话"""
         if self.session is None or self.session.closed:
-            # 优化超时设置：总超时60秒，连接超时10秒，读取超时30秒
+            # 优化超时设置：减少超时时间避免阻塞其他请求
             timeout = aiohttp.ClientTimeout(
-                total=180,       # 总超时时间 - 增加到180秒
-                connect=30,      # 连接超时 - 增加到30秒
-                sock_read=120    # 读取超时 - 增加到120秒
+                total=30,        # 总超时时间 - 减少到30秒
+                connect=5,       # 连接超时 - 减少到5秒
+                sock_read=20     # 读取超时 - 减少到20秒
             )
-            # 增加连接池大小以支持更多并发
+            # 优化连接池设置避免阻塞
             self.session = aiohttp.ClientSession(
                 headers=self.headers,
                 timeout=timeout,
                 connector=aiohttp.TCPConnector(
-                    limit=100,          # 总连接池大小 - 增加到100
-                    limit_per_host=50,  # 每个主机的连接数 - 增加到50
+                    limit=20,           # 总连接池大小 - 减少到20
+                    limit_per_host=10,  # 每个主机的连接数 - 减少到10
                     ttl_dns_cache=300,  # DNS缓存时间
-                    use_dns_cache=True
+                    use_dns_cache=True,
+                    enable_cleanup_closed=True  # 启用连接清理
                 )
             )
         return self.session
@@ -112,7 +113,7 @@ class AlpacaAPIClient:
         url = f"{self.base_url}/api/v1{endpoint}"
         session = await self._get_session()
         
-        max_retries = 3
+        max_retries = 1  # 减少重试次数避免阻塞
         retry_count = 0
         
         while retry_count < max_retries:
@@ -130,7 +131,7 @@ class AlpacaAPIClient:
                                 retry_count += 1
                                 if retry_count < max_retries:
                                     logger.warning(f"Rate limit hit, retrying {retry_count}/{max_retries}...")
-                                    await asyncio.sleep(10 * retry_count)  # 递增延迟
+                                    await asyncio.sleep(2 * retry_count)  # 减少延迟时间
                                     continue
                                 else:
                                     logger.error("Max retries reached for rate limit, giving up")
@@ -191,7 +192,7 @@ class AlpacaAPIClient:
                                     wait_time = max(0, reset_time - now) + 1  # 多等1s保证重置
                                 else:
                                     # 回退：如果没有reset_time，则使用递增延迟
-                                    wait_time = 10 * retry_count
+                                    wait_time = 2 * retry_count
                                 logger.warning(
                                     f"HTTP 429 rate limit. Waiting {wait_time:.1f}s (limit={limit}, remaining={remaining}, reset={reset_time}) before retry {retry_count}/{max_retries}"
                                 )
@@ -204,7 +205,7 @@ class AlpacaAPIClient:
                 retry_count += 1
                 if retry_count < max_retries:
                     logger.warning(f"Request timeout, retrying {retry_count}/{max_retries}...")
-                    await asyncio.sleep(5 * retry_count)
+                    await asyncio.sleep(1 * retry_count)  # 减少超时重试延迟
                     continue
                 else:
                     logger.error(f"API request timeout after {max_retries} retries: {method} {url}")
