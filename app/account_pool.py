@@ -295,29 +295,49 @@ class AccountPool:
     
     async def _perform_health_checks(self):
         """Perform health checks"""
-        if not self._global_lock:
-            return
-            
-        async with self._global_lock:
-            for account_id, connection in self.account_connections.items():
-                try:
-                    await connection.test_connection()
-                except Exception as e:
-                    logger.error(f"Health check failed for account {account_id}: {e}")
+        # Perform health checks concurrently for all accounts without global lock
+        tasks = []
+        for account_id, connection in self.account_connections.items():
+            task = asyncio.create_task(self._health_check_account(account_id, connection))
+            tasks.append(task)
+        
+        # Wait for all health checks to complete
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+    
+    async def _health_check_account(self, account_id: str, connection: AccountConnection):
+        """Health check for a single account"""
+        try:
+            await connection.test_connection()
+        except Exception as e:
+            logger.error(f"Health check failed for account {account_id}: {e}")
     
     async def _cleanup_idle_connections(self):
         """Cleanup idle connections"""
-        if not self._global_lock:
-            return
+        # Perform cleanup concurrently for all accounts without global lock
+        tasks = []
+        for account_id, connection in self.account_connections.items():
+            task = asyncio.create_task(self._cleanup_account(account_id, connection))
+            tasks.append(task)
+        
+        # Wait for all cleanup operations to complete
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+    
+    async def _cleanup_account(self, account_id: str, connection: AccountConnection):
+        """Cleanup for a single account"""
+        try:
+            # Get connection stats for cleanup decisions
+            stats = connection.get_connection_stats()
+            logger.debug(f"Account {account_id} connection stats: {stats.get('total_connections', 0)} connections")
             
-        async with self._global_lock:
-            for account_id, connection in self.account_connections.items():
-                try:
-                    # Get connection stats for cleanup decisions
-                    stats = connection.get_connection_stats()
-                    logger.debug(f"Account {account_id} connection stats: {stats.get('total_connections', 0)} connections")
-                except Exception as e:
-                    logger.error(f"Failed to cleanup connections for account {account_id}: {e}")
+            # Cleanup if connection has been idle for too long
+            if stats.get('idle_time_seconds', 0) > 300:  # 5 minutes
+                logger.info(f"Cleaning up idle connection for account {account_id}")
+                await connection.cleanup_idle_connections()
+                
+        except Exception as e:
+            logger.error(f"Failed to cleanup connections for account {account_id}: {e}")
     
     def get_account_by_routing(self, routing_key: Optional[str] = None, strategy: str = "round_robin") -> Optional[str]:
         """Get account ID by routing strategy"""
@@ -420,22 +440,22 @@ class AccountPool:
                 f"Available names: {available_names}"
             )
         
-        async with self._global_lock:
-            connection = self.account_connections[resolved_account_id]
-            usage_queue = self.usage_queues[resolved_account_id]
-            
-            if not connection.is_available:
-                logger.warning(f"Connection busy, waiting for availability (account: {resolved_account_id})")
-            
-            await connection.acquire()
-            
-            # Update usage queue
-            if connection in usage_queue:
-                usage_queue.remove(connection)
-            usage_queue.append(connection)
-            
-            logger.debug(f"Successfully acquired account connection (account: {resolved_account_id})")
-            return connection
+        # Get connection and usage queue (no global lock needed)
+        connection = self.account_connections[resolved_account_id]
+        usage_queue = self.usage_queues[resolved_account_id]
+        
+        if not connection.is_available:
+            logger.warning(f"Connection busy, waiting for availability (account: {resolved_account_id})")
+        
+        await connection.acquire()
+        
+        # Update usage queue (atomic operation with connection's own lock)
+        if connection in usage_queue:
+            usage_queue.remove(connection)
+        usage_queue.append(connection)
+        
+        logger.debug(f"Successfully acquired account connection (account: {resolved_account_id})")
+        return connection
     
     def release_connection(self, connection: AccountConnection):
         """Release connection"""
