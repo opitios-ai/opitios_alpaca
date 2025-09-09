@@ -4,11 +4,11 @@
 """
 
 import asyncio
-from typing import List, Dict, Optional
+from typing import List, Optional
 from datetime import datetime, date
 from loguru import logger
 from app.account_pool import AccountPool
-from app.alpaca_client import AlpacaClient
+from .api_client import AlpacaAPIClient
 
 
 class Position:
@@ -51,6 +51,30 @@ class Position:
             
         self.side = data.get('side')  # 'long' or 'short'
         
+        # Store additional price fields from Alpaca
+        try:
+            self.current_price = float(data.get('current_price', 0))
+        except (ValueError, TypeError):
+            self.current_price = 0.0
+            
+        try:
+            self.lastday_price = float(data.get('lastday_price', 0))
+        except (ValueError, TypeError):
+            self.lastday_price = 0.0
+        
+        # Store asset class for option identification
+        self.asset_class = data.get('asset_class')
+        
+        # Store qty_available for correct sell quantities
+        try:
+            self.qty_available = float(data.get('qty_available', 0))
+        except (ValueError, TypeError):
+            self.qty_available = 0.0
+        
+        # Log if avg_entry_price is missing
+        if self.avg_entry_price == 0 and self.symbol:
+            logger.warning(f"Position {self.symbol}: avg_entry_price为0，可能是Alpaca paper账户数据问题")
+        
         # 期权特定字段 - 基于symbol解析
         if self.is_option:
             # 从期权symbol解析信息: NVDA250822P00170000
@@ -66,13 +90,16 @@ class Position:
     
     @property
     def is_option(self) -> bool:
-        """是否为期权 - 基于symbol模式判断"""
+        """是否为期权 - 使用asset_class字段准确判断"""
         if not self.symbol:
             return False
-        # 期权symbol模式: NVDA250822P00170000 (至少12位，包含日期和C/P标识)
-        return (len(self.symbol) >= 12 and 
-                any(char in self.symbol for char in ['C', 'P']) and
-                any(char.isdigit() for char in self.symbol[-8:]))  # 最后8位包含数字
+        
+        # 使用Alpaca API返回的asset_class字段进行准确判断
+        if self.asset_class:
+            return self.asset_class == 'us_option'
+        
+        # 如果asset_class不可用，返回False，避免不准确的symbol匹配
+        return False
     
     @property
     def is_long(self) -> bool:
@@ -177,18 +204,71 @@ class Position:
 
 
 class PositionManager:
-    def __init__(self, account_pool: AccountPool):
+    def __init__(self, account_pool: AccountPool, api_client: Optional[AlpacaAPIClient] = None, order_manager=None):
         if account_pool is None:
             raise TypeError("account_pool cannot be None")
         self.account_pool = account_pool
+        # API客户端用于替代直接连接池访问（可选）
+        self.api_client = api_client
+        self.use_api_client = api_client is not None
+        # 集中式订单管理器（用于统一订单管理）
+        self.order_manager = order_manager
     
     async def get_all_positions(self) -> List[Position]:
         """
-        High-performance concurrent retrieval of positions from all accounts
+        获取所有账户的持仓信息 - 支持API客户端或直接连接池访问
         
         Returns:
             List of all account positions
         """
+        if self.use_api_client:
+            return await self._get_all_positions_via_api()
+        else:
+            return await self._get_all_positions_via_pool()
+    
+    async def _get_all_positions_via_api(self) -> List[Position]:
+        """通过 API 客户端获取所有持仓 - 遍历所有账户"""
+        try:
+            logger.debug("使用 API 客户端获取所有持仓")
+            
+            # 获取所有账户列表
+            accounts = await self.account_pool.get_all_accounts()
+            if not accounts:
+                logger.debug("未找到任何账户")
+                return []
+            
+            # 为每个账户创建获取持仓的任务
+            tasks = []
+            for account_id in accounts.keys():
+                task = self._get_account_positions_via_api(account_id)
+                tasks.append(task)
+            
+            # 并发获取所有账户的持仓
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # 聚合所有持仓
+            all_positions = []
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    account_id = list(accounts.keys())[i]
+                    logger.error(f"Failed to get positions for account {account_id}: {result}")
+                    continue
+                all_positions.extend(result)
+            
+            # 统计信息
+            option_count = sum(1 for pos in all_positions if pos.is_option)
+            zero_day_count = sum(1 for pos in all_positions if pos.is_option and pos.is_zero_day_option)
+            logger.info(f"✅ Retrieved {len(all_positions)} positions ({option_count} options, {zero_day_count} zero-day) from {len(accounts)} accounts via API")
+            
+            return all_positions
+            
+        except Exception as e:
+            logger.error(f"Failed to get all positions via API: {e}")
+            # 返回空列表而不是抛异常，保持服务稳定性
+            return []
+    
+    async def _get_all_positions_via_pool(self) -> List[Position]:
+        """通过连接池获取所有持仓（原始方法）"""
         try:
             # Optimized account retrieval and task creation
             accounts = await self.account_pool.get_all_accounts()
@@ -222,8 +302,50 @@ class PositionManager:
             # This ensures tests fail when there are real errors
             raise RuntimeError(f"Position retrieval failed: {e}") from e
     
+    async def _get_account_positions_via_api(self, account_id: str) -> List[Position]:
+        """通过 API 客户端获取单个账户的持仓"""
+        try:
+            logger.debug(f"通过 API 获取账户 [{account_id}] 的持仓")
+            
+            # 通过 HTTP API 获取该账户的持仓数据
+            positions_data = await self.api_client.get_all_positions(account_id=account_id)
+            
+            if not positions_data:
+                logger.debug(f"账户 [{account_id}] 未获取到任何持仓数据")
+                return []
+            
+            # 转换为 Position 对象
+            positions = []
+            option_count = 0
+            for pos_data in positions_data:
+                try:
+                    # 确保账户ID包含在数据中
+                    pos_data['account_id'] = account_id
+                    position = Position(pos_data)
+                    positions.append(position)
+                    
+                    # 统计期权数量
+                    if position.is_option:
+                        option_count += 1
+                    
+                    # 重要持仓日志
+                    if position.is_option and position.is_zero_day_option:
+                        logger.warning(f"⚠️ Zero-day option detected [{account_id}] {position.symbol} | "
+                                     f"Current: ${position.current_price} | P&L: {position.unrealized_plpc:.2%}")
+                except Exception as e:
+                    logger.warning(f"Failed to parse position data [{account_id}]: {e}")
+                    continue
+            
+            logger.info(f"✅ Account [{account_id}]: Retrieved {len(positions)} positions ({option_count} options)")
+            return positions
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to get positions for account [{account_id}] via API: {e}")
+            return []
+    
     async def _get_account_positions(self, account_id: str, connection) -> List[Position]:
         """
+        通过连接池获取单个账户的持仓（原始方法）
         High-performance single account position retrieval
         
         Args:
@@ -278,24 +400,57 @@ class PositionManager:
         if not short_positions:
             return
         
-        logger.warning(f"Found {len(short_positions)} short option positions, closing concurrently")
+        logger.warning(f"Found {len(short_positions)} short option positions, closing sequentially")
         
-        # High-concurrency position closing
-        tasks = [self._close_short_position(position) for position in short_positions]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Count failures
-        failed_count = sum(1 for result in results if isinstance(result, Exception))
+        # Sequentially close each short position to avoid concurrent orders
+        failed_count = 0
+        for position in short_positions:
+            try:
+                await self._close_short_position(position)
+            except Exception:
+                failed_count += 1
         if failed_count > 0:
             logger.error(f"{failed_count}/{len(short_positions)} short positions failed to close")
     
     async def _close_short_position(self, position: Position):
         """
-        High-performance short position closing
+        平仓空头持仓 - 支持API客户端或直接连接池访问
         
         Args:
             position: Short position to close
         """
+        if self.use_api_client:
+            await self._close_short_position_via_api(position)
+        else:
+            await self._close_short_position_via_pool(position)
+    
+    async def _close_short_position_via_api(self, position: Position):
+        """通过集中式订单管理平仓空头持仓"""
+        try:
+            # 使用集中式订单管理系统
+            if not hasattr(self, 'order_manager') or not self.order_manager:
+                logger.error(f"Order manager not available for closing position: {position.symbol}")
+                return
+            
+            result = await self.order_manager.place_buy_order(
+                account_id=position.account_id,
+                symbol=position.symbol,
+                qty=abs(int(position.qty)),
+                order_type='market'  # 空头平仓总是使用市价单
+            )
+            
+            if "error" not in result:
+                logger.info(f"✅ Short position closed [{position.account_id}] {position.symbol}")
+            else:
+                logger.error(f"❌ Failed to close short position [{position.account_id}] {position.symbol}: {result.get('error')}")
+                raise Exception(result.get('error', 'Unknown error'))
+            
+        except Exception as e:
+            logger.error(f"Failed to close short position {position.symbol} via API: {e}")
+            raise
+    
+    async def _close_short_position_via_pool(self, position: Position):
+        """通过连接池平仓空头持仓（原始方法）"""
         try:
             # Streamlined connection and order placement
             connection = await self.account_pool.get_connection(position.account_id)

@@ -55,13 +55,38 @@ class AccountConnection:
         self._in_use = False
         
     async def test_connection(self) -> bool:
-        """Test connection health"""
+        """Test connection health, validate account type, and check minimum balance"""
         try:
             async with self._lock:
                 trading_client = await self.connection_manager.get_connection(ConnectionType.TRADING_CLIENT)
                 try:
                     account = trading_client.get_account()
-                    return account is not None
+                    if account is not None:
+                        # Account type detection: Check if account number starts with "PA" (paper) or not (live)
+                        account_number = account.account_number
+                        is_paper_account = account_number.startswith("PA")
+                        expected_paper = self.account_config.paper_trading
+                        
+                        if is_paper_account != expected_paper:
+                            logger.warning(f"Account type mismatch for {self.account_config.account_id}: "
+                                         f"Expected paper_trading={expected_paper}, but account {account_number} is "
+                                         f"{'paper' if is_paper_account else 'live'}")
+                        
+                        # Balance validation: Check minimum balance requirement
+                        from config import settings
+                        min_balance = settings.minimum_balance
+                        current_balance = float(account.cash) if account.cash else 0.0
+                        
+                        if current_balance < min_balance:
+                            logger.error(f"Account {self.account_config.account_id} balance ${current_balance:,.2f} "
+                                       f"is below minimum required ${min_balance:,.2f}")
+                            return False
+                        
+                        logger.info(f"Account {self.account_config.account_id} ({account_number}) validated: "
+                                  f"{'paper' if is_paper_account else 'live'} trading, "
+                                  f"balance ${current_balance:,.2f}")
+                        return True
+                    return False
                 finally:
                     self.connection_manager.release_connection(ConnectionType.TRADING_CLIENT)
         except Exception as e:
@@ -101,29 +126,6 @@ class AccountConnection:
         if self._lock.locked():
             self._lock.release()
     
-    async def get_trading_client(self) -> TradingClient:
-        """Get trading client"""
-        return await self.connection_manager.get_connection(ConnectionType.TRADING_CLIENT)
-    
-    def release_trading_client(self):
-        """Release trading client"""
-        self.connection_manager.release_connection(ConnectionType.TRADING_CLIENT)
-    
-    async def get_stock_data_client(self) -> StockHistoricalDataClient:
-        """Get stock data client"""
-        return await self.connection_manager.get_connection(ConnectionType.STOCK_DATA)
-    
-    def release_stock_data_client(self):
-        """Release stock data client"""
-        self.connection_manager.release_connection(ConnectionType.STOCK_DATA)
-    
-    async def get_option_data_client(self) -> OptionHistoricalDataClient:
-        """Get option data client"""
-        return await self.connection_manager.get_connection(ConnectionType.OPTION_DATA)
-    
-    def release_option_data_client(self):
-        """Release option data client"""
-        self.connection_manager.release_connection(ConnectionType.OPTION_DATA)
     
     @property
     def is_available(self) -> bool:
@@ -293,29 +295,49 @@ class AccountPool:
     
     async def _perform_health_checks(self):
         """Perform health checks"""
-        if not self._global_lock:
-            return
-            
-        async with self._global_lock:
-            for account_id, connection in self.account_connections.items():
-                try:
-                    await connection.test_connection()
-                except Exception as e:
-                    logger.error(f"Health check failed for account {account_id}: {e}")
+        # Perform health checks concurrently for all accounts without global lock
+        tasks = []
+        for account_id, connection in self.account_connections.items():
+            task = asyncio.create_task(self._health_check_account(account_id, connection))
+            tasks.append(task)
+        
+        # Wait for all health checks to complete
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+    
+    async def _health_check_account(self, account_id: str, connection: AccountConnection):
+        """Health check for a single account"""
+        try:
+            await connection.test_connection()
+        except Exception as e:
+            logger.error(f"Health check failed for account {account_id}: {e}")
     
     async def _cleanup_idle_connections(self):
         """Cleanup idle connections"""
-        if not self._global_lock:
-            return
+        # Perform cleanup concurrently for all accounts without global lock
+        tasks = []
+        for account_id, connection in self.account_connections.items():
+            task = asyncio.create_task(self._cleanup_account(account_id, connection))
+            tasks.append(task)
+        
+        # Wait for all cleanup operations to complete
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+    
+    async def _cleanup_account(self, account_id: str, connection: AccountConnection):
+        """Cleanup for a single account"""
+        try:
+            # Get connection stats for cleanup decisions
+            stats = connection.get_connection_stats()
+            logger.debug(f"Account {account_id} connection stats: {stats.get('total_connections', 0)} connections")
             
-        async with self._global_lock:
-            for account_id, connection in self.account_connections.items():
-                try:
-                    # Get connection stats for cleanup decisions
-                    stats = connection.get_connection_stats()
-                    logger.debug(f"Account {account_id} connection stats: {stats.get('total_connections', 0)} connections")
-                except Exception as e:
-                    logger.error(f"Failed to cleanup connections for account {account_id}: {e}")
+            # Cleanup if connection has been idle for too long
+            if stats.get('idle_time_seconds', 0) > 300:  # 5 minutes
+                logger.info(f"Cleaning up idle connection for account {account_id}")
+                await connection.cleanup_idle_connections()
+                
+        except Exception as e:
+            logger.error(f"Failed to cleanup connections for account {account_id}: {e}")
     
     def get_account_by_routing(self, routing_key: Optional[str] = None, strategy: str = "round_robin") -> Optional[str]:
         """Get account ID by routing strategy"""
@@ -374,15 +396,25 @@ class AccountPool:
             logger.debug(f"Account name '{account_identifier}' resolved to ID: {resolved_id}")
             return resolved_id
         
-        # Try partial matching
-        for name, account_id in self.account_name_to_id.items():
-            if account_name_lower in name or name in account_name_lower:
-                logger.debug(f"Account name '{account_identifier}' partially matched to ID: {account_id}")
-                return account_id
+        # No partial matching - exact match only for security
+        # Partial matching is dangerous and can lead to wrong account selection
         
         logger.warning(f"Cannot resolve account identifier: {account_identifier}")
         return None
     
+    def get_account_config(self, account_id: Optional[str] = None, routing_key: Optional[str] = None) -> Optional[AccountConfig]:
+        """获取账户配置 - 无锁，用于HTTP客户端创建"""
+        # 优先使用account_id
+        resolved_account_id = None
+        if account_id:
+            resolved_account_id = self.resolve_account_id(account_id)
+            # 如果指定了account_id但无法解析，直接返回None，不要fallback到其他账户
+            if not resolved_account_id:
+                logger.warning(f"Account ID '{account_id}' not found")
+                return None
+        
+        return self.account_configs.get(resolved_account_id) if resolved_account_id else None
+
     async def get_connection(self, account_id: Optional[str] = None, routing_key: Optional[str] = None) -> AccountConnection:
         """Get account connection"""
         if not self._initialized:
@@ -408,22 +440,22 @@ class AccountPool:
                 f"Available names: {available_names}"
             )
         
-        async with self._global_lock:
-            connection = self.account_connections[resolved_account_id]
-            usage_queue = self.usage_queues[resolved_account_id]
-            
-            if not connection.is_available:
-                logger.warning(f"Connection busy, waiting for availability (account: {resolved_account_id})")
-            
-            await connection.acquire()
-            
-            # Update usage queue
-            if connection in usage_queue:
-                usage_queue.remove(connection)
-            usage_queue.append(connection)
-            
-            logger.debug(f"Successfully acquired account connection (account: {resolved_account_id})")
-            return connection
+        # Get connection and usage queue (no global lock needed)
+        connection = self.account_connections[resolved_account_id]
+        usage_queue = self.usage_queues[resolved_account_id]
+        
+        if not connection.is_available:
+            logger.warning(f"Connection busy, waiting for availability (account: {resolved_account_id})")
+        
+        await connection.acquire()
+        
+        # Update usage queue (atomic operation with connection's own lock)
+        if connection in usage_queue:
+            usage_queue.remove(connection)
+        usage_queue.append(connection)
+        
+        logger.debug(f"Successfully acquired account connection (account: {resolved_account_id})")
+        return connection
     
     def release_connection(self, connection: AccountConnection):
         """Release connection"""
@@ -508,8 +540,3 @@ account_pool = AccountPool(health_check_interval_seconds=300)
 def get_account_pool() -> AccountPool:
     """Get account pool instance"""
     return account_pool
-
-
-# Backward compatibility alias
-connection_pool = account_pool
-get_connection_pool = get_account_pool

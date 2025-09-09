@@ -274,7 +274,7 @@ class ConnectionManager:
             
             # Get account information
             account_info = trading_client.get_account()
-            
+            # print(account_info)
             if account_info:
                 # Extract key account information
                 account_id = str(account_info.id) if hasattr(account_info, 'id') else 'N/A'

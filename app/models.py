@@ -24,9 +24,6 @@ class PositionSide(str, Enum):
     SHORT = "short"
 
 # Stock Models
-class StockQuoteRequest(BaseModel):
-    symbol: str = Field(..., description="Stock symbol (e.g., AAPL, TSLA)")
-
 class MultiStockQuoteRequest(BaseModel):
     symbols: List[str] = Field(..., description="List of stock symbols (e.g., ['AAPL', 'TSLA', 'GOOGL'])", example=["AAPL", "TSLA", "GOOGL", "MSFT", "AMZN"])
 
@@ -119,6 +116,7 @@ class OrderResponse(BaseModel):
     filled_at: Optional[datetime]
 
 class PositionResponse(BaseModel):
+    asset_id: Optional[str]
     symbol: str
     qty: float
     side: str
@@ -126,6 +124,11 @@ class PositionResponse(BaseModel):
     cost_basis: Optional[float]
     unrealized_pl: Optional[float]
     unrealized_plpc: Optional[float]
+    avg_entry_price: Optional[float]  # 平均成本价 - 直接来自Alpaca API
+    current_price: Optional[float]  # 当前价格
+    lastday_price: Optional[float]  # 昨日收盘价
+    asset_class: Optional[str]  # 资产类型 - 用于识别期权 (us_option)
+    qty_available: Optional[float]  # 可用数量 - 用于正确的卖出数量
 
 class AccountResponse(BaseModel):
     account_number: str
