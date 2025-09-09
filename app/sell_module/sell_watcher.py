@@ -388,6 +388,7 @@ class SellWatcher:
         try:
             # 使用qty_available确定正确的卖出数量
             if position.qty_available is None or position.qty_available <= 0:
+                # 负数或None为错误
                 error_msg = f"Invalid qty_available: {position.qty_available}"
                 logger.error(f"Position [{position.account_id}] {position.symbol}: {error_msg}")
                 return {"error": error_msg}
@@ -451,6 +452,9 @@ class SellWatcher:
             elif isinstance(result, dict) and result.get("error"):
                 failed_closes += 1
                 logger.error(f"❌ Zero-day close failed [{position.account_id}] {position.symbol}: {result['error']}")
+            elif isinstance(result, dict) and result.get("status") == "skipped":
+                # 跳过的情况（如订单待处理）不算失败
+                logger.info(f"⏭️ Skipped zero-day close [{position.account_id}] {position.symbol}: {result.get('reason', 'unknown')}")
             else:
                 successful_closes += 1
                 order_id = result.get('id', 'Unknown') if isinstance(result, dict) else 'Unknown'
