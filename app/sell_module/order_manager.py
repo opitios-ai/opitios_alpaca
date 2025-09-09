@@ -323,24 +323,36 @@ class OrderManager:
         results = []
         order_count = len(orders)
 
-        logger.debug(f"🔄 Cancelling {order_count} orders sequentially for account [{account_id}]")
+        logger.info(f"🔄 Cancelling {order_count} orders sequentially for account [{account_id}]")
 
         try:
             # Get connection once for all orders in this account
+            logger.info(f"🔗 Getting connection for account [{account_id}]...")
             connection = await self.account_pool.get_connection(account_id)
+            logger.info(f"✅ Connection established for account [{account_id}]")
 
             # Cancel each order sequentially using the same connection
             for i, order in enumerate(orders, 1):
                 try:
-                    result = await connection.alpaca_client.cancel_order(order.id)
+                    logger.info(f"🔄 Cancelling order {i}/{order_count}: {order.id} [{account_id}] {order.symbol}")
+                    
+                    # Add timeout to prevent hanging
+                    import asyncio
+                    result = await asyncio.wait_for(
+                        connection.alpaca_client.cancel_order(order.id),
+                        timeout=10.0  # 10 second timeout per order
+                    )
 
                     if "error" not in result:
-                        logger.debug(f"✅ Order {order.id} cancelled successfully [{account_id}] {order.symbol} ({i}/{order_count})")
+                        logger.info(f"✅ Order {order.id} cancelled successfully [{account_id}] {order.symbol} ({i}/{order_count})")
                         results.append(True)
                     else:
                         logger.error(f"❌ Failed to cancel order {order.id} [{account_id}] {order.symbol}: {result.get('error')}")
                         results.append(Exception(f"Cancellation failed: {result.get('error')}"))
 
+                except asyncio.TimeoutError:
+                    logger.error(f"⏰ Timeout cancelling order {order.id} [{account_id}] {order.symbol} - skipping")
+                    results.append(Exception("Cancellation timeout"))
                 except Exception as e:
                     logger.error(f"❌ Error cancelling order {order.id} [{account_id}] {order.symbol}: {e}")
                     results.append(e)

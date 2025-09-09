@@ -84,7 +84,8 @@ class BaseStrategy(ABC):
                 limit_price=0.01  # 使用测试价格
             )
             
-            if "error" not in result:
+            if "error" not in result:   
+                # 正常下单成功
                 order_id = result.get('id', 'Unknown')
                 logger.warning(
                     f"{self.name}策略执行 账户: {position.account_id}, "
@@ -94,9 +95,9 @@ class BaseStrategy(ABC):
                     f"订单ID: {order_id}"
                 )
                 return True
-            else:
-                logger.error(f"{self.name}策略下单失败")
-                return False
+
+            logger.error(f"{self.name}策略下单失败: {result.get('error', 'Unknown error')}")
+            return False
                 
         except Exception as e:
             logger.error(f"{self.name}策略执行失败: {e}")
