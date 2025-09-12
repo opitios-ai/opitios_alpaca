@@ -11,7 +11,7 @@ import sys
 import os
 import time
 import yaml
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Any
 
 # Add project path
@@ -480,13 +480,46 @@ class HealthChecker:
             account_data = await client.get_account()
             positions = await client.get_positions()
             
+            # Get this week's orders to match with current positions for time tracking
+            entry_times = await self._get_weekly_entry_times(client)
+            
+            # Process positions with time tracking
+            processed_positions = []
+            if positions:
+                for pos in positions:
+                    symbol = pos.get('symbol', 'Unknown')
+                    
+                    # Find real entry time from this week's orders
+                    real_entry_time = entry_times.get(symbol)
+                    if real_entry_time:
+                        entry_time_str = datetime.fromtimestamp(real_entry_time).strftime('%m-%d %H:%M')
+                        hold_duration_minutes = (datetime.now().timestamp() - real_entry_time) / 60
+                    else:
+                        entry_time_str = 'Unknown (24h+)'
+                        hold_duration_minutes = 24 * 60 + 1  # Default to 24+ hours for risk management
+                    
+                    processed_positions.append({
+                        'symbol': symbol,
+                        'asset_class': pos.get('asset_class', 'unknown'),
+                        'qty': pos.get('qty', 0),
+                        'side': pos.get('side', 'unknown'),
+                        'current_price': pos.get('current_price', 0),
+                        'market_value': pos.get('market_value', 0),
+                        'unrealized_plpc': pos.get('unrealized_plpc', 0),
+                        'hold_duration_minutes': round(hold_duration_minutes, 1),
+                        'entry_time': entry_time_str,
+                        'is_option': pos.get('asset_class') == 'us_option',
+                        'is_zero_day': self._is_zero_day_option(symbol)
+                    })
+            
             return {
                 "status": "HEALTHY",
                 "account_number": account_data.get("account_number", "N/A"),
                 "equity": float(account_data.get("equity", 0)),
                 "buying_power": float(account_data.get("buying_power", 0)),
                 "cash": float(account_data.get("cash", 0)),
-                "positions_count": len(positions) if positions else 0,
+                "positions_count": len(processed_positions),
+                "positions": processed_positions,
                 "error": None
             }
         except Exception as e:
@@ -500,6 +533,103 @@ class HealthChecker:
                 "positions_count": 0
             }
     
+    def _is_zero_day_option(self, symbol: str) -> bool:
+        """Check if option symbol is zero-day (expires today)"""
+        if not symbol or len(symbol) < 15:
+            return False
+        
+        try:
+            # Parse option symbol: AAPL250912C00150000 -> 250912
+            # Find first digit position
+            first_digit_pos = -1
+            for i, char in enumerate(symbol):
+                if char.isdigit():
+                    first_digit_pos = i
+                    break
+            
+            if first_digit_pos == -1 or first_digit_pos + 6 > len(symbol):
+                return False
+            
+            # Extract date part (6 digits after first digit)
+            date_part = symbol[first_digit_pos:first_digit_pos + 6]
+            if len(date_part) != 6 or not date_part.isdigit():
+                return False
+            
+            # Convert to date: 250912 -> 2025-09-12
+            year = int("20" + date_part[:2])
+            month = int(date_part[2:4])
+            day = int(date_part[4:6])
+            
+            option_date = datetime(year, month, day).date()
+            today = datetime.now().date()
+            
+            return option_date == today
+            
+        except Exception:
+            return False
+    
+    async def _get_weekly_entry_times(self, client) -> Dict[str, float]:
+        """Get entry times from this week's orders for position time tracking"""
+        entry_times = {}
+        
+        try:
+            # Calculate start of week (Monday) and format for API
+            today = datetime.now().date()
+            start_of_week = today - timedelta(days=today.weekday())
+            
+            # Format dates for Alpaca API (ISO format)
+            after_date = start_of_week.strftime('%Y-%m-%dT00:00:00Z')
+            before_date = today.strftime('%Y-%m-%dT23:59:59Z')
+            
+            logger.debug(f"Querying orders from {after_date} to {before_date}")
+            
+            # Query orders with date range
+            weekly_orders = await client.get_orders(limit=1000, after=after_date, before=before_date)
+            if not weekly_orders:
+                logger.debug("No orders found for this week")
+                return entry_times
+            
+            logger.debug(f"Retrieved {len(weekly_orders)} orders from this week")
+            
+            for order in weekly_orders:
+                symbol = order.get('symbol')
+                side = order.get('side')
+                status = order.get('status')
+                
+                # Only process buy orders with valid status
+                if not (symbol and side == 'buy' and status in ['filled', 'done_for_day', 'accepted', 'new']):
+                    continue
+                
+                # Get the most relevant timestamp
+                timestamp_str = order.get('filled_at') or order.get('submitted_at') or order.get('created_at')
+                if not timestamp_str:
+                    continue
+                
+                try:
+                    # Parse timestamp
+                    if 'T' in timestamp_str:
+                        if timestamp_str.endswith('Z'):
+                            order_time = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                        else:
+                            order_time = datetime.fromisoformat(timestamp_str)
+                    else:
+                        order_time = datetime.fromisoformat(timestamp_str)
+                    
+                    timestamp = order_time.timestamp()
+                    # Keep the most recent entry time for each symbol
+                    if symbol not in entry_times or timestamp > entry_times[symbol]:
+                        entry_times[symbol] = timestamp
+                        
+                except Exception as e:
+                    logger.debug(f"Failed to parse timestamp '{timestamp_str}' for order {order.get('id')}: {e}")
+                    continue
+            
+            logger.debug(f"Found entry times for {len(entry_times)} symbols from {len(weekly_orders)} this week's orders")
+            
+        except Exception as e:
+            logger.debug(f"Failed to get weekly orders: {e}")
+        
+        return entry_times
     
     async def check_single_account(self, account_id: str, include_options_chain: bool = False) -> Dict[str, Any]:
         """Comprehensive check for a single account with all endpoints
@@ -616,6 +746,81 @@ class HealthChecker:
             logger.warning(summary)
         else:
             logger.error(summary)
+        
+        # Display position time table
+        self._display_position_time_table(result["basics"]["positions"])
+    
+    def _display_position_time_table(self, positions: List[Dict[str, Any]]):
+        """Display a table showing position hold times"""
+        if not positions:
+            return
+        
+        # Filter for options only (since stocks don't have time-sensitive expiry)
+        option_positions = [pos for pos in positions if pos.get('is_option', False)]
+        
+        if not option_positions:
+            return
+        
+        # Create table
+        table = Table(
+            title="⏰ 期权持仓时间表",
+            box=box.ROUNDED,
+            show_header=True,
+            header_style="bold magenta",
+            title_style="bold blue"
+        )
+        
+        # Add columns
+        table.add_column("期权代码", style="cyan", no_wrap=True)
+        table.add_column("数量", justify="right", style="green")
+        table.add_column("当前价格", justify="right", style="yellow")
+        table.add_column("市值", justify="right", style="green")
+        table.add_column("盈亏%", justify="right", style="red")
+        table.add_column("持仓时间", justify="right", style="blue")
+        table.add_column("入场时间", style="magenta")
+        table.add_column("零日期权", justify="center", style="red")
+        
+        # Add rows
+        for pos in option_positions[:20]:  # Limit to first 20 for readability
+            symbol = pos.get('symbol', 'Unknown')
+            qty = pos.get('qty', 0)
+            current_price = pos.get('current_price', 0)
+            market_value = pos.get('market_value', 0)
+            unrealized_plpc = pos.get('unrealized_plpc', 0)
+            hold_duration_minutes = pos.get('hold_duration_minutes', 0)
+            entry_time = pos.get('entry_time', 'Unknown')
+            is_zero_day = pos.get('is_zero_day', False)
+            
+            # Format hold duration
+            if hold_duration_minutes >= 1440:  # 24+ hours
+                hold_duration_str = f"{hold_duration_minutes/1440:.1f}天"
+            else:
+                hold_duration_str = f"{hold_duration_minutes:.0f}分钟"
+            
+            # Format P&L with color
+            pl_str = f"{unrealized_plpc*100:+.1f}%"
+            pl_style = "green" if unrealized_plpc >= 0 else "red"
+            
+            # Zero day indicator
+            zero_day_str = "⚠️" if is_zero_day else ""
+            
+            table.add_row(
+                symbol,
+                f"{qty:.0f}",
+                f"${current_price:.2f}",
+                f"${market_value:,.0f}",
+                pl_str,
+                hold_duration_str,
+                entry_time,
+                zero_day_str
+            )
+        
+        # Display table
+        console = Console()
+        console.print(table)
+        
+        if len(option_positions) > 20:
+            console.print(f"[dim]显示前20个期权持仓，共{len(option_positions)}个[/dim]")
     
     def _create_health_table(self, results: Dict[str, Any]) -> Table:
         """Create a beautiful Rich table for health check results"""
