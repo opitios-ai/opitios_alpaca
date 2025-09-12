@@ -71,9 +71,14 @@ class Position:
         except (ValueError, TypeError):
             self.qty_available = 0.0
         
+        # 持仓时间跟踪字段
+        self.entry_timestamp = data.get('entry_timestamp')
+        self.first_seen_timestamp = data.get('first_seen_timestamp')
+        
         # Log if avg_entry_price is missing
         if self.avg_entry_price == 0 and self.symbol:
             logger.warning(f"Position {self.symbol}: avg_entry_price为0，可能是Alpaca paper账户数据问题")
+            logger.warning(data)
         
         # 期权特定字段 - 基于symbol解析
         if self.is_option:
@@ -121,6 +126,22 @@ class Position:
             return exp_date == date.today()
         except:
             return False
+    
+    @property
+    def hold_duration_minutes(self) -> float:
+        """计算持仓时间（分钟）"""
+        if self.entry_timestamp:
+            return (datetime.now().timestamp() - self.entry_timestamp) / 60
+        elif self.first_seen_timestamp:
+            return (datetime.now().timestamp() - self.first_seen_timestamp) / 60
+        else:
+            # 如果没有找到任何时间戳，默认认为超过24小时
+            # 这是为了风险管理，确保所有持仓都有时间限制
+            return 24 * 60 + 1  # 24+ hours
+    
+    def is_time_limit_exceeded(self, max_minutes: float) -> bool:
+        """检查是否超过持仓时间限制"""
+        return self.hold_duration_minutes >= max_minutes
     
     def _parse_underlying_symbol(self) -> str:
         """从期权symbol解析标的股票"""
@@ -213,6 +234,8 @@ class PositionManager:
         self.use_api_client = api_client is not None
         # 集中式订单管理器（用于统一订单管理）
         self.order_manager = order_manager
+        # 持仓时间跟踪器
+        self.position_tracker = {}
     
     async def get_all_positions(self) -> List[Position]:
         """
@@ -321,6 +344,20 @@ class PositionManager:
                 try:
                     # 确保账户ID包含在数据中
                     pos_data['account_id'] = account_id
+                    
+                    # 添加时间跟踪
+                    symbol = pos_data.get('symbol')
+                    if symbol and symbol not in self.position_tracker:
+                        self.position_tracker[symbol] = {
+                            'first_seen': datetime.now().timestamp(),
+                            'entry_time': pos_data.get('entry_timestamp', datetime.now().timestamp())
+                        }
+                    
+                    # 添加时间信息到position数据
+                    if symbol in self.position_tracker:
+                        pos_data['first_seen_timestamp'] = self.position_tracker[symbol]['first_seen']
+                        pos_data['entry_timestamp'] = self.position_tracker[symbol]['entry_time']
+                    
                     position = Position(pos_data)
                     positions.append(position)
                     

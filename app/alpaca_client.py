@@ -696,15 +696,24 @@ class AlpacaClient:
             logger.error(f"Error getting positions: {e}")
             return [{"error": str(e)}]
 
-    async def get_orders(self, status: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
+    async def get_orders(self, status: Optional[str] = None, limit: int = 100, 
+                        after: Optional[str] = None, before: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get orders
 
         Supports comma-separated statuses (e.g., "open,accepted,replaced").
         Special keyword "open" maps to multiple underlying open statuses.
+        Supports date range filtering with after and before parameters.
         """
         try:
-            request = GetOrdersRequest(limit=limit)
-            orders = self.trading_client.get_orders(request)
+            # Import QueryOrderStatus enum
+            from alpaca.trading.enums import QueryOrderStatus
+            
+            # Create request with status parameter (required by official docs)
+            request_params = GetOrdersRequest(
+                limit=limit,
+                status=QueryOrderStatus.ALL if status is None else QueryOrderStatus(status.upper())
+            )
+            orders = self.trading_client.get_orders(filter=request_params)
 
             logger.debug(f"Retrieved {len(orders)} total orders from Alpaca API (status filter: {status})")
 
@@ -885,10 +894,11 @@ class PooledAlpacaClient:
         return await client.get_positions()
 
     async def get_orders(self, status: Optional[str] = None, limit: int = 100,
+                         after: Optional[str] = None, before: Optional[str] = None,
                          account_id: Optional[str] = None, routing_key: Optional[str] = None) -> List[Dict[str, Any]]:
         """获取订单信息 - 使用HTTP客户端（无锁）"""
         client = self._get_http_client(account_id, routing_key)
-        return await client.get_orders(status, limit)
+        return await client.get_orders(status, limit, after, before)
 
     async def cancel_order(self, order_id: str, account_id: Optional[str] = None,
                            routing_key: Optional[str] = None) -> Dict[str, Any]:
