@@ -75,3 +75,10 @@ class ConfigManager:
     def get_order_cancel_minutes(self) -> int:
         """获取订单取消时间（分钟）"""
         return self.settings.sell_module['order_cancel_minutes']
+    
+    def get_position_time_limit_config(self) -> Dict:
+        """获取持仓时间限制配置"""
+        return {
+            'enabled': self.settings.sell_module['position_time_limit']['enabled'],
+            'max_hold_minutes': self.settings.sell_module['position_time_limit']['max_hold_minutes']            
+        }
