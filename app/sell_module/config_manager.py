@@ -80,6 +80,5 @@ class ConfigManager:
         """获取持仓时间限制配置"""
         return {
             'enabled': self.settings.sell_module['position_time_limit']['enabled'],
-            'max_hold_minutes': self.settings.sell_module['position_time_limit']['max_hold_minutes'],
-            'check_interval_minutes': self.settings.sell_module['position_time_limit']['check_interval_minutes']
+            'max_hold_minutes': self.settings.sell_module['position_time_limit']['max_hold_minutes']            
         }
