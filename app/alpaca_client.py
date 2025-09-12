@@ -708,11 +708,9 @@ class AlpacaClient:
             # Import QueryOrderStatus enum
             from alpaca.trading.enums import QueryOrderStatus
             
-            # Create request with status parameter (required by official docs)
-            request_params = GetOrdersRequest(
-                limit=limit,
-                status=QueryOrderStatus.ALL if status is None else QueryOrderStatus(status.upper())
-            )
+            # Handle multiple statuses - QueryOrderStatus doesn't support comma-separated values
+            # So we need to get all orders and filter manually
+            request_params = GetOrdersRequest(limit=limit)
             orders = self.trading_client.get_orders(filter=request_params)
 
             logger.debug(f"Retrieved {len(orders)} total orders from Alpaca API (status filter: {status})")
