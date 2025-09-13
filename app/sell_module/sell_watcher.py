@@ -387,7 +387,7 @@ class SellWatcher:
 
     async def _execute_single_sell_order(self, position: Position) -> Dict[str, any]:
         """
-        执行单个持仓的卖出订单 - 使用集中式订单管理
+        执行单个持仓的卖出订单 - 使用集中式订单管理，智能回退机制
         
         Args:
             position: 需要卖出的持仓
@@ -411,17 +411,7 @@ class SellWatcher:
                 logger.error(f"Position [{position.account_id}] {position.symbol}: {error_msg}")
                 return {"error": error_msg}
 
-            # 测试代码 - 限价0.01（已注释，恢复为市价平仓）
-            # logger.info(f"Placing sell order [{position.account_id}] {position.symbol} x{qty_to_sell} @ limit 0.01")
-            # result = await self.order_manager.place_sell_order(
-            #     account_id=position.account_id,
-            #     symbol=position.symbol,
-            #     qty=qty_to_sell,
-            #     order_type='limit',
-            #     limit_price=0.01
-            # )
-
-            # 正常市价平仓
+            # 第一步：尝试市价订单（优先选择，执行最快）
             logger.info(f"Placing sell order [{position.account_id}] {position.symbol} x{qty_to_sell} @ market")
 
             result = await self.order_manager.place_sell_order(
@@ -431,7 +421,50 @@ class SellWatcher:
                 order_type='market'
             )
 
-            return result
+            # 检查市价订单是否成功
+            if "error" not in result:
+                return result
+
+            # 第二步：市价订单失败，检查是否是"no available bid"错误
+            error_msg = str(result.get("error", "")).lower()
+            if "no available bid" in error_msg or "no available" in error_msg:
+                logger.warning(f"市价订单失败，尝试限价订单: {position.symbol} - {result.get('error')}")
+                
+                # 尝试限价订单 $0.01
+                result = await self.order_manager.place_sell_order(
+                    account_id=position.account_id,
+                    symbol=position.symbol,
+                    qty=qty_to_sell,
+                    order_type='limit',
+                    limit_price=0.01
+                )
+                
+                # 检查限价订单是否成功
+                if "error" not in result:
+                    logger.info(f"限价订单成功: {position.symbol} @ $0.01")
+                    return result
+                
+                # 第三步：$0.01限价也失败，尝试更低价格 $0.005
+                logger.warning(f"限价$0.01失败，尝试$0.005: {position.symbol} - {result.get('error')}")
+                result = await self.order_manager.place_sell_order(
+                    account_id=position.account_id,
+                    symbol=position.symbol,
+                    qty=qty_to_sell,
+                    order_type='limit',
+                    limit_price=0.005
+                )
+                
+                if "error" not in result:
+                    logger.info(f"限价订单成功: {position.symbol} @ $0.005")
+                    return result
+                
+                # 第四步：所有尝试都失败，记录并返回错误
+                logger.error(f"所有卖出尝试都失败: {position.symbol} - 市价和限价均无流动性")
+                return {"error": f"All sell attempts failed: {result.get('error', 'Unknown error')}"}
+            else:
+                # 其他类型的错误，直接返回
+                logger.error(f"市价订单失败（非流动性问题）: {position.symbol} - {result.get('error')}")
+                return result
 
         except Exception as e:
             logger.error(f"Exception executing sell [{position.account_id}] {position.symbol}: {e}")
