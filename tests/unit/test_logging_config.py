@@ -176,10 +176,10 @@ class TestLoggingConfigSimplification:
                 assert console_call[0][0] == sys.stdout
                 
                 console_kwargs = console_call[1]
-                expected_format = "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | <level>{message}</level>"
+                expected_format = "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} | {message}"
                 assert console_kwargs['format'] == expected_format
                 assert console_kwargs['level'] == "DEBUG"
-                assert console_kwargs['colorize'] is True
+                assert console_kwargs['colorize'] is False
     
     def test_file_logging_format(self):
         """Test file logging format."""
