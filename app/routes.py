@@ -4,7 +4,8 @@ from app.models import (
     MultiStockQuoteRequest, StockOrderRequest, 
     OptionOrderRequest, OptionsChainRequest, OptionQuoteRequest, MultiOptionQuoteRequest,
     OrderResponse, PositionResponse, AccountResponse,
-    BulkOrderResponse
+    BulkOrderResponse, DashboardResponse, DashboardAccountDetails, 
+    HoldingInfo, ContractInfo, TradingHistory, DailySummary
 )
 from app.alpaca_client import AlpacaClient, pooled_client
 from app.middleware import internal_or_jwt_auth
@@ -24,7 +25,18 @@ def get_routing_info(
 
 # Dependency to get Alpaca client (for compatibility with non-authenticated endpoints)
 def get_alpaca_client() -> AlpacaClient:
-    return AlpacaClient()
+    # This is only used for non-authenticated endpoints, so we use default credentials
+    from config import settings
+    if not settings.accounts:
+        raise HTTPException(status_code=500, detail="No account configuration available")
+    
+    # Use the first available account
+    first_account = list(settings.accounts.values())[0]
+    return AlpacaClient(
+        api_key=first_account.api_key,
+        secret_key=first_account.secret_key,
+        paper_trading=first_account.paper_trading
+    )
 
 # Health check endpoint
 @router.get("/health")
@@ -909,4 +921,306 @@ async def cancel_order(
         raise
     except Exception as e:
         logger.error(f"Error in cancel_order: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+# Dashboard endpoint
+@router.get("/dashboard/{account_name}", 
+    summary="Get Trading Dashboard",
+    description="""
+    🔐 **AUTHENTICATION REQUIRED** - Get comprehensive trading dashboard (Internal network or JWT)
+    
+    Returns a complete dashboard view similar to Tiger API format, including:
+    - Account details (cash, portfolio value, etc.)
+    - Current holdings (stocks and options with P&L)
+    - Trading history with daily summaries
+    
+    **Parameters:**
+    - `account_name`: Account identifier for routing
+    - `all_holdings`: Include all holdings (default: true)
+    - `days`: Number of days for trading history and recent orders (default: 30)
+    - `include_recent_orders`: Include recent orders in response (default: false)
+    
+    **Example Response:**
+    ```json
+    {
+        "account_details": {
+            "account_name": "demo_user",
+            "paper_trading": 1,
+            "currency": "USD",
+            "cash": 10000.0,
+            "net_liquidation": 15000.0
+        },
+        "holdings": [
+            {
+                "quantity": 10,
+                "average_cost": 150.0,
+                "market_value": 1600.0,
+                "market_price": 160.0,
+                "unrealized_pnl": 100.0,
+                "realized_pnl": 0.0,
+                "contract": {
+                    "symbol": "AAPL",
+                    "currency": "USD",
+                    "sec_type": "STK",
+                    "identifier": "AAPL"
+                }
+            }
+        ],
+        "trading_history": {
+            "overall_profit": 500.0,
+            "overall_commission": 25.0,
+            "daily_summary": [
+                {
+                    "date": "2024-01-15",
+                    "net_profit": 100.0,
+                    "sold_qty": 5,
+                    "commission": 5.0,
+                    "avg_sold_price": 155.0
+                }
+            ],
+            "has_data": true
+        }
+    }
+    ```
+    """,
+    response_model=DashboardResponse)
+async def get_dashboard(
+    account_name: str,
+    all_holdings: bool = Query(True, description="Include all holdings"),
+    days: int = Query(30, description="Number of days for trading history and recent orders"),
+    include_recent_orders: bool = Query(False, description="Include recent orders in response"),
+    routing_info: dict = Depends(get_routing_info),
+    auth_data: dict = Depends(internal_or_jwt_auth)
+):
+    """Get comprehensive trading dashboard matching Tiger API format"""
+    try:
+        # Security: Require explicit account_id to prevent unauthorized access
+        if not routing_info["account_id"]:
+            raise HTTPException(
+                status_code=400, 
+                detail="account_id parameter is required"
+            )
+        
+        logger.info(f"Getting dashboard for account {account_name} (ID: {routing_info['account_id']})")
+        
+        # Get account information
+        account_data = await pooled_client.get_account(
+            account_id=routing_info["account_id"],
+            routing_key=routing_info["routing_key"]
+        )
+        if "error" in account_data:
+            raise HTTPException(status_code=500, detail=account_data["error"])
+        
+        # Get positions
+        positions = await pooled_client.get_positions(
+            account_id=routing_info["account_id"],
+            routing_key=routing_info["routing_key"]
+        )
+        if positions and "error" in positions[0]:
+            raise HTTPException(status_code=500, detail=positions[0]["error"])
+        
+        # Get trading history
+        trading_history = await pooled_client.get_trading_history(
+            days=days,
+            account_id=routing_info["account_id"],
+            routing_key=routing_info["routing_key"]
+        )
+        
+        # Get profit report
+        profit_report_data = await pooled_client.get_profit_report(
+            days=days,
+            account_id=routing_info["account_id"],
+            routing_key=routing_info["routing_key"]
+        )
+        
+        # Get recent orders if requested
+        recent_orders = []
+        if include_recent_orders:
+            try:
+                # Use days parameter to determine how many orders to fetch
+                # Estimate: assume max 10 orders per day, so days * 10 should be sufficient
+                estimated_limit = max(days * 10, 50)  # At least 50 orders
+                orders_data = await pooled_client.get_orders(
+                    status="all",
+                    limit=estimated_limit,
+                    account_id=routing_info["account_id"],
+                    routing_key=routing_info["routing_key"]
+                )
+                if orders_data and "error" not in orders_data[0]:
+                    # Filter orders to only include those within the specified days
+                    from datetime import datetime, timedelta
+                    cutoff_date = datetime.now() - timedelta(days=days)
+                    
+                    filtered_orders = []
+                    for order in orders_data:
+                        try:
+                            # Parse the submitted_at date to check if it's within the range
+                            submitted_at_str = order.get('submitted_at', '')
+                            if submitted_at_str:
+                                # Use the same parsing logic as OrderResponse
+                                import re
+                                clean_date = re.sub(r'\s+(EDT|EST|PDT|PST|CDT|CST|MDT|MST|UTC|GMT)\s*$', '', submitted_at_str.strip())
+                                order_date = datetime.fromisoformat(clean_date.replace(' ', 'T'))
+                                if order_date >= cutoff_date:
+                                    filtered_orders.append(order)
+                        except (ValueError, TypeError):
+                            # If we can't parse the date, include the order to be safe
+                            filtered_orders.append(order)
+                    
+                    recent_orders = filtered_orders
+                    logger.info(f"Retrieved {len(recent_orders)} recent orders for dashboard")
+            except Exception as e:
+                logger.warning(f"Failed to retrieve recent orders for dashboard: {e}")
+                recent_orders = []
+        
+        # Transform account data to dashboard format
+        account_details = DashboardAccountDetails(
+            account_name=account_name,
+            paper_trading=1 if account_data.get("pattern_day_trader") else 0,
+            currency="USD",
+            cash=account_data.get("cash", 0.0),
+            net_liquidation=account_data.get("portfolio_value", 0.0)
+        )
+        
+        # Transform positions to holdings format
+        holdings = []
+        for position in positions:
+            if "error" not in position:
+                # Apply all_holdings filter if needed
+                if not all_holdings and position.get("qty", 0) == 0:
+                    continue  # Skip zero quantity positions if all_holdings is False
+                # Determine security type
+                sec_type = "OPT" if position.get("asset_class") == "us_option" else "STK"
+                
+                # Parse option details if it's an option
+                expiry = None
+                strike = None
+                right = None
+                identifier = position.get("symbol", "")
+                
+                if sec_type == "OPT":
+                    # Parse option symbol to extract details
+                    # Format: SYMBOL[YY]MMDD[C/P]XXXXXXXX
+                    symbol = position.get("symbol", "")
+                    if len(symbol) >= 15:
+                        try:
+                            # Extract underlying symbol
+                            date_start_idx = 0
+                            for i, char in enumerate(symbol):
+                                if char.isdigit():
+                                    date_start_idx = i
+                                    break
+                            
+                            if date_start_idx > 0 and len(symbol) >= date_start_idx + 7:
+                                date_part = symbol[date_start_idx:date_start_idx + 6]
+                                option_type_char = symbol[date_start_idx + 6]
+                                strike_part = symbol[date_start_idx + 7:]
+                                
+                                expiry = f"20{date_part[:2]}-{date_part[2:4]}-{date_part[4:6]}"
+                                strike = str(float(strike_part) / 1000)
+                                right = "CALL" if option_type_char.upper() == 'C' else "PUT"
+                                identifier = symbol
+                        except Exception as e:
+                            logger.warning(f"Failed to parse option symbol {symbol}: {e}")
+                
+                contract = ContractInfo(
+                    symbol=position.get("symbol", ""),
+                    currency="USD",
+                    sec_type=sec_type,
+                    expiry=expiry,
+                    strike=strike,
+                    right=right,
+                    identifier=identifier
+                )
+                
+                holding = HoldingInfo(
+                    quantity=position.get("qty", 0.0),
+                    average_cost=position.get("avg_entry_price", 0.0),
+                    market_value=position.get("market_value", 0.0),
+                    market_price=position.get("current_price", 0.0),
+                    unrealized_pnl=position.get("unrealized_pl", 0.0),
+                    realized_pnl=0.0,  # This would need to be calculated from trade history
+                    contract=contract
+                )
+                holdings.append(holding)
+        
+        # Transform trading history
+        daily_summaries = []
+        if "daily_summary" in trading_history:
+            for daily in trading_history["daily_summary"]:
+                daily_summaries.append(DailySummary(
+                    date=daily["date"],
+                    net_profit=daily["net_profit"],
+                    sold_qty=daily["sold_qty"],
+                    commission=daily["commission"],
+                    avg_sold_price=daily.get("avg_sold_price")
+                ))
+        
+        trading_history_obj = TradingHistory(
+            overall_profit=trading_history.get("overall_profit", 0.0),
+            overall_commission=trading_history.get("overall_commission", 0.0),
+            daily_summary=daily_summaries,
+            has_data=trading_history.get("has_data", False)
+        )
+        
+        # Build profit report
+        from app.models import ProfitPeriod, ProfitChartData, ProfitReport
+        
+        # Daily profit period
+        daily_period = ProfitPeriod(
+            profit=profit_report_data.get("daily", {}).get("profit", 0.0),
+            commission=profit_report_data.get("daily", {}).get("commission", 0.0),
+            has_data=profit_report_data.get("daily", {}).get("has_data", False)
+        )
+        
+        # Weekly profit period
+        weekly_period = ProfitPeriod(
+            profit=profit_report_data.get("weekly", {}).get("profit", 0.0),
+            commission=profit_report_data.get("weekly", {}).get("commission", 0.0),
+            has_data=profit_report_data.get("weekly", {}).get("has_data", False)
+        )
+        
+        # Chart data
+        chart_daily_summaries = []
+        chart_data = profit_report_data.get("total_for_chart", {})
+        if "daily_summary" in chart_data:
+            for daily in chart_data["daily_summary"]:
+                chart_daily_summaries.append(DailySummary(
+                    date=daily["date"],
+                    net_profit=daily["net_profit"],
+                    sold_qty=daily["sold_qty"],
+                    commission=daily["commission"],
+                    avg_sold_price=daily.get("avg_sold_price")
+                ))
+        
+        chart_data_obj = ProfitChartData(
+            overall_profit=chart_data.get("overall_profit", 0.0),
+            overall_commission=chart_data.get("overall_commission", 0.0),
+            daily_summary=chart_daily_summaries,
+            has_data=chart_data.get("has_data", False)
+        )
+        
+        # Complete profit report
+        profit_report = ProfitReport(
+            daily=daily_period,
+            weekly=weekly_period,
+            total_for_chart=chart_data_obj
+        )
+        
+        # Create dashboard response
+        dashboard = DashboardResponse(
+            account_details=account_details,
+            holdings=holdings,
+            trading_history=trading_history_obj,
+            profit_report=profit_report,
+            recent_orders=[OrderResponse(**order) for order in recent_orders] if recent_orders else None
+        )
+        
+        logger.info(f"Dashboard generated for {account_name}: {len(holdings)} holdings, {len(daily_summaries)} trading days, {len(recent_orders) if recent_orders else 0} recent orders")
+        return dashboard
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_dashboard for {account_name}: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e

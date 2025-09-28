@@ -80,17 +80,33 @@ class AccountConnection:
                         if current_balance < min_balance:
                             logger.error(f"Account {self.account_config.account_id} balance ${current_balance:,.2f} "
                                        f"is below minimum required ${min_balance:,.2f}")
+                            # Update health status before returning
+                            if ConnectionType.TRADING_CLIENT in self.connection_manager.connection_stats:
+                                self.connection_manager.connection_stats[ConnectionType.TRADING_CLIENT].is_healthy = False
+                                self.connection_manager.connection_stats[ConnectionType.TRADING_CLIENT].error_count += 1
                             return False
                         
                         logger.info(f"Account {self.account_config.account_id} ({account_number}) validated: "
                                   f"{'paper' if is_paper_account else 'live'} trading, "
                                   f"balance ${current_balance:,.2f}")
+                        # Update health status on success
+                        if ConnectionType.TRADING_CLIENT in self.connection_manager.connection_stats:
+                            self.connection_manager.connection_stats[ConnectionType.TRADING_CLIENT].is_healthy = True
                         return True
+                    
+                    # Update health status when account is None
+                    if ConnectionType.TRADING_CLIENT in self.connection_manager.connection_stats:
+                        self.connection_manager.connection_stats[ConnectionType.TRADING_CLIENT].is_healthy = False
+                        self.connection_manager.connection_stats[ConnectionType.TRADING_CLIENT].error_count += 1
                     return False
                 finally:
                     self.connection_manager.release_connection(ConnectionType.TRADING_CLIENT)
         except Exception as e:
             logger.error(f"Connection test failed for account {self.account_config.account_id}: {e}")
+            # Update health status on exception
+            if ConnectionType.TRADING_CLIENT in self.connection_manager.connection_stats:
+                self.connection_manager.connection_stats[ConnectionType.TRADING_CLIENT].is_healthy = False
+                self.connection_manager.connection_stats[ConnectionType.TRADING_CLIENT].error_count += 1
             return False
     
     @property
@@ -136,6 +152,20 @@ class AccountConnection:
     def connection_count(self) -> int:
         """Current connection count"""
         return self.connection_manager.connection_count
+    
+    @property
+    def age_minutes(self) -> float:
+        """Connection age in minutes"""
+        # Use trading client creation time as reference
+        stats = self.get_connection_stats()
+        trading_stats = stats.get('connections', {}).get('trading_client', {})
+        if 'created_at' in trading_stats:
+            from datetime import datetime
+            created_at_str = trading_stats['created_at']
+            created_at = datetime.fromisoformat(created_at_str)
+            age_seconds = (datetime.utcnow() - created_at).total_seconds()
+            return age_seconds / 60.0
+        return 0.0
     
     def get_connection_stats(self) -> Dict:
         """Get connection statistics"""
