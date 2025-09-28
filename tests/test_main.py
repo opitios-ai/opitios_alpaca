@@ -50,9 +50,11 @@ class TestConfiguration:
         
         # Create an instance to check attributes
         settings = Settings()
-        assert hasattr(settings, 'alpaca_api_key')
-        assert hasattr(settings, 'alpaca_secret_key')
-        assert hasattr(settings, 'alpaca_paper_trading')
+        assert hasattr(settings, 'accounts')
+        assert isinstance(settings.accounts, dict)
+        assert hasattr(settings, 'app_name')
+        assert hasattr(settings, 'debug')
+        assert hasattr(settings, 'real_data_only')
         print("✅ Settings class has required attributes")
 
     def test_secrets_file_structure(self, secrets_file_path):
@@ -62,13 +64,25 @@ class TestConfiguration:
         
         import yaml
         try:
-            with open(secrets_file_path, 'r') as f:
+            with open(secrets_file_path, 'r', encoding='utf-8') as f:
                 secrets = yaml.safe_load(f)
             
             # Check basic structure
             assert 'accounts' in secrets
             assert isinstance(secrets['accounts'], dict)
-            print("✅ Secrets file has correct structure")
+            
+            # Check that bowen_paper_trading account exists
+            assert 'bowen_paper_trading' in secrets['accounts']
+            bowen_account = secrets['accounts']['bowen_paper_trading']
+            
+            # Verify required fields
+            assert 'api_key' in bowen_account
+            assert 'secret_key' in bowen_account
+            assert 'paper_trading' in bowen_account
+            assert bowen_account['paper_trading'] is True
+            assert bowen_account.get('enabled', True) is True
+            
+            print("✅ Secrets file has correct structure with bowen_paper_trading account")
             
         except Exception as e:
             pytest.fail(f"Failed to load secrets file: {e}")

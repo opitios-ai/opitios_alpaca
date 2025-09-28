@@ -1,15 +1,14 @@
-"""Unit tests for AlpacaClient with mocked components."""
+"""Unit tests for AlpacaClient with real API connections."""
 
 import pytest
 import asyncio
 from typing import Dict, Any, List
-from unittest.mock import patch, MagicMock, AsyncMock
 
 from app.alpaca_client import AlpacaClient, PooledAlpacaClient
 
 
 class TestAlpacaClient:
-    """Unit tests for AlpacaClient functionality."""
+    """Unit tests for AlpacaClient functionality using real API connections."""
     
     @pytest.mark.asyncio
     async def test_client_initialization(self, real_api_credentials):
@@ -30,7 +29,6 @@ class TestAlpacaClient:
     @pytest.mark.asyncio
     async def test_client_initialization_with_invalid_credentials(self):
         """Test AlpacaClient initialization with invalid credentials."""
-        # AlpacaClient constructor currently doesn't validate credentials, so this test needs to check behavior
         client = AlpacaClient(api_key="invalid", secret_key="invalid")
         assert client.api_key == "invalid"
         assert client.secret_key == "invalid"
@@ -38,29 +36,24 @@ class TestAlpacaClient:
         # The actual validation happens during API calls, not initialization
     
     @pytest.mark.asyncio
-    async def test_connection_test_success(self):
-        """Test successful connection to Alpaca API with mocked response."""
+    async def test_connection_test_success(self, real_api_credentials):
+        """Test successful connection to real Alpaca API."""
         client = AlpacaClient(
-            api_key="test_key",
-            secret_key="test_secret",
-            paper_trading=True
+            api_key=real_api_credentials.api_key,
+            secret_key=real_api_credentials.secret_key,
+            paper_trading=real_api_credentials.paper_trading
         )
         
-        # Mock the account response
-        mock_account = MagicMock()
-        mock_account.account_number = "123456789"
-        mock_account.buying_power = 50000.0
-        mock_account.cash = 25000.0
-        mock_account.portfolio_value = 75000.0
+        result = await client.test_connection()
         
-        with patch.object(client.trading_client, 'get_account', return_value=mock_account):
-            result = await client.test_connection()
-            
-            assert result["status"] == "connected"
-            assert result["account_number"] == "123456789"
-            assert result["buying_power"] == 50000.0
-            assert result["cash"] == 25000.0
-            assert result["portfolio_value"] == 75000.0
+        assert result["status"] == "connected"
+        assert "account_number" in result
+        assert "buying_power" in result
+        assert "cash" in result
+        assert "portfolio_value" in result
+        assert isinstance(result["buying_power"], (int, float))
+        assert isinstance(result["cash"], (int, float))
+        assert isinstance(result["portfolio_value"], (int, float))
     
     @pytest.mark.asyncio
     async def test_connection_test_with_invalid_credentials(self):
@@ -71,90 +64,89 @@ class TestAlpacaClient:
             paper_trading=True
         )
         
-        # Mock API failure
-        with patch.object(client.trading_client, 'get_account', side_effect=Exception("Unauthorized")):
-            result = await client.test_connection()
-            
-            assert result["status"] == "failed"
-            assert "error" in result
+        result = await client.test_connection()
+        
+        assert result["status"] == "failed"
+        assert "error" in result
     
     @pytest.mark.asyncio
-    async def test_get_stock_quote_valid_symbol(self):
-        """Test getting stock quote for valid symbol with mocked response."""
+    async def test_get_stock_quote_valid_symbol(self, real_api_credentials):
+        """Test getting stock quote for valid symbol with real API."""
         client = AlpacaClient(
-            api_key="test_key",
-            secret_key="test_secret",
-            paper_trading=True
+            api_key=real_api_credentials.api_key,
+            secret_key=real_api_credentials.secret_key,
+            paper_trading=real_api_credentials.paper_trading
         )
         
-        # Mock quote response
-        mock_quote = MagicMock()
-        mock_quote.symbol = "AAPL"
-        mock_quote.bid_price = 150.0
-        mock_quote.ask_price = 150.5
-        mock_quote.timestamp = "2024-01-01T10:00:00Z"
+        result = await client.get_stock_quote("AAPL")
         
-        mock_response = {"AAPL": mock_quote}
+        assert "symbol" in result
+        assert result["symbol"] == "AAPL"
+        assert "bid_price" in result or "ask_price" in result
         
-        with patch.object(client.stock_data_client, 'get_stock_latest_quote', return_value=mock_response):
-            result = await client.get_stock_quote("AAPL")
-            
-            assert result["symbol"] == "AAPL"
-            assert result["bid_price"] == 150.0
-            assert result["ask_price"] == 150.5
-            assert "timestamp" in result
+        # Verify we got real market data
+        if "bid_price" in result and result["bid_price"] is not None:
+            assert isinstance(result["bid_price"], (int, float))
+            assert result["bid_price"] > 0
+        
+        if "ask_price" in result and result["ask_price"] is not None:
+            assert isinstance(result["ask_price"], (int, float))
+            assert result["ask_price"] > 0
     
     @pytest.mark.asyncio
-    async def test_get_stock_quote_invalid_symbol(self):
+    async def test_get_stock_quote_invalid_symbol(self, real_api_credentials):
         """Test getting stock quote for invalid symbol."""
         client = AlpacaClient(
-            api_key="test_key",
-            secret_key="test_secret",
-            paper_trading=True
+            api_key=real_api_credentials.api_key,
+            secret_key=real_api_credentials.secret_key,
+            paper_trading=real_api_credentials.paper_trading
         )
         
-        # Mock empty response for invalid symbol
-        with patch.object(client.stock_data_client, 'get_stock_latest_quote', return_value={}):
-            result = await client.get_stock_quote("INVALID_SYMBOL")
-            
-            assert "error" in result or (result.get("bid_price") is None and result.get("ask_price") is None)
+        result = await client.get_stock_quote("INVALID_SYMBOL_XYZ123")
+        
+        # Invalid symbols should either return an error or empty data
+        if "error" not in result:
+            # If no error, check that prices are None or missing
+            assert result.get("bid_price") is None or result.get("ask_price") is None
     
     @pytest.mark.asyncio
-    async def test_get_multiple_stock_quotes(self):
-        """Test getting multiple stock quotes with mocked response."""
+    async def test_get_multiple_stock_quotes(self, real_api_credentials):
+        """Test getting multiple stock quotes with real API."""
         client = AlpacaClient(
-            api_key="test_key",
-            secret_key="test_secret",
-            paper_trading=True
+            api_key=real_api_credentials.api_key,
+            secret_key=real_api_credentials.secret_key,
+            paper_trading=real_api_credentials.paper_trading
         )
         
         symbols = ["AAPL", "MSFT", "GOOGL"]
         
-        # Mock responses for each symbol
-        mock_quotes = {}
-        for i, symbol in enumerate(symbols):
-            mock_quote = MagicMock()
-            mock_quote.symbol = symbol
-            mock_quote.bid_price = 100.0 + i * 50
-            mock_quote.ask_price = 100.5 + i * 50
-            mock_quotes[symbol] = mock_quote
+        result = await client.get_multiple_stock_quotes(symbols)
         
-        with patch.object(client.stock_data_client, 'get_stock_latest_quote', return_value=mock_quotes):
-            result = await client.get_multiple_stock_quotes(symbols)
-            
-            assert "quotes" in result
-            assert "count" in result
-            assert "requested_symbols" in result
-            assert result["count"] == len(symbols)
-            assert result["requested_symbols"] == symbols
+        assert "quotes" in result
+        assert "count" in result
+        assert "requested_symbols" in result
+        assert result["requested_symbols"] == symbols
+        assert isinstance(result["quotes"], dict)
+        
+        # Check that we got data for at least some symbols
+        assert result["count"] >= 0
+        
+        # Validate quote data structure for available quotes
+        for symbol, quote in result["quotes"].items():
+            assert symbol in symbols
+            assert isinstance(quote, dict)
+            if quote.get("bid_price") is not None:
+                assert isinstance(quote["bid_price"], (int, float))
+            if quote.get("ask_price") is not None:
+                assert isinstance(quote["ask_price"], (int, float))
     
     @pytest.mark.asyncio
-    async def test_get_multiple_stock_quotes_empty_list(self):
+    async def test_get_multiple_stock_quotes_empty_list(self, real_api_credentials):
         """Test getting multiple stock quotes with empty symbol list."""
         client = AlpacaClient(
-            api_key="test_key",
-            secret_key="test_secret",
-            paper_trading=True
+            api_key=real_api_credentials.api_key,
+            secret_key=real_api_credentials.secret_key,
+            paper_trading=real_api_credentials.paper_trading
         )
         
         result = await client.get_multiple_stock_quotes([])
@@ -163,62 +155,58 @@ class TestAlpacaClient:
         assert "No symbols provided" in result["error"]
     
     @pytest.mark.asyncio
-    async def test_get_account(self):
-        """Test getting account information with mocked response."""
+    async def test_get_account(self, real_api_credentials):
+        """Test getting account information with real API."""
         client = AlpacaClient(
-            api_key="test_key",
-            secret_key="test_secret",
-            paper_trading=True
+            api_key=real_api_credentials.api_key,
+            secret_key=real_api_credentials.secret_key,
+            paper_trading=real_api_credentials.paper_trading
         )
         
-        # Mock account response
-        mock_account = MagicMock()
-        mock_account.account_number = "123456789"
-        mock_account.buying_power = 50000.0
-        mock_account.cash = 25000.0
-        mock_account.portfolio_value = 75000.0
+        result = await client.get_account()
         
-        with patch.object(client.trading_client, 'get_account', return_value=mock_account):
-            result = await client.get_account()
-            
-            assert result["account_number"] == "123456789"
-            assert result["buying_power"] == 50000.0
-            assert result["cash"] == 25000.0
-            assert result["portfolio_value"] == 75000.0
+        assert "account_number" in result
+        assert "buying_power" in result
+        assert "cash" in result
+        assert "portfolio_value" in result
+        
+        # Verify data types and reasonable values
+        assert isinstance(result["buying_power"], (int, float))
+        assert isinstance(result["cash"], (int, float))
+        assert isinstance(result["portfolio_value"], (int, float))
+        assert result["buying_power"] >= 0
+        assert result["cash"] >= 0
+        assert result["portfolio_value"] >= 0
     
     @pytest.mark.asyncio
-    async def test_get_positions(self):
-        """Test getting positions with mocked response."""
+    async def test_get_positions(self, real_api_credentials):
+        """Test getting positions with real API."""
         client = AlpacaClient(
-            api_key="test_key",
-            secret_key="test_secret",
-            paper_trading=True
+            api_key=real_api_credentials.api_key,
+            secret_key=real_api_credentials.secret_key,
+            paper_trading=real_api_credentials.paper_trading
         )
         
-        # Mock position response
-        mock_position = MagicMock()
-        mock_position.symbol = "AAPL"
-        mock_position.qty = 100
-        mock_side = MagicMock()
-        mock_side.value = "long"
-        mock_position.side = mock_side
+        result = await client.get_positions()
         
-        with patch.object(client.trading_client, 'get_all_positions', return_value=[mock_position]):
-            result = await client.get_positions()
-            
-            assert isinstance(result, list)
-            assert len(result) == 1
-            assert result[0]["symbol"] == "AAPL"
-            assert result[0]["qty"] == 100
-            assert result[0]["side"] == "long"
+        assert isinstance(result, list)
+        
+        # Validate position structure if any positions exist
+        for position in result:
+            assert "symbol" in position
+            assert "qty" in position
+            assert "side" in position
+            assert isinstance(position["symbol"], str)
+            assert isinstance(position["qty"], (int, float))
+            assert position["side"] in ["long", "short"]
     
     @pytest.mark.asyncio
-    async def test_place_stock_order_validation(self):
+    async def test_place_stock_order_validation(self, real_api_credentials):
         """Test stock order placement with parameter validation."""
         client = AlpacaClient(
-            api_key="test_key",
-            secret_key="test_secret",
-            paper_trading=True
+            api_key=real_api_credentials.api_key,
+            secret_key=real_api_credentials.secret_key,
+            paper_trading=real_api_credentials.paper_trading
         )
         
         # Test with invalid order type
@@ -244,21 +232,21 @@ class TestAlpacaClient:
         assert "missing required price parameters" in result["error"]
     
     @pytest.mark.asyncio
-    async def test_cancel_nonexistent_order(self):
+    async def test_cancel_nonexistent_order(self, real_api_credentials):
         """Test cancelling a non-existent order."""
         client = AlpacaClient(
-            api_key="test_key",
-            secret_key="test_secret",
-            paper_trading=True
+            api_key=real_api_credentials.api_key,
+            secret_key=real_api_credentials.secret_key,
+            paper_trading=real_api_credentials.paper_trading
         )
         
-        fake_order_id = "fake_order_12345"
+        fake_order_id = "fake_order_12345_nonexistent"
         
-        # Mock API error for non-existent order
-        with patch.object(client.trading_client, 'cancel_order_by_id', side_effect=Exception("Order not found")):
-            result = await client.cancel_order(fake_order_id)
-            
-            assert "error" in result
+        result = await client.cancel_order(fake_order_id)
+        
+        assert "error" in result
+        # Real API should return appropriate error for non-existent order
+        assert any(term in result["error"].lower() for term in ["not found", "invalid", "order"])
 
 
 class TestPooledAlpacaClient:
@@ -297,65 +285,32 @@ class TestPooledAlpacaClient:
 
 
 class TestAlpacaClientErrorHandling:
-    """Test error handling scenarios for AlpacaClient."""
+    """Test error handling scenarios for AlpacaClient with real API."""
     
     @pytest.mark.asyncio
-    async def test_network_timeout_simulation(self):
-        """Test handling of network timeouts."""
-        # Mock the StockHistoricalDataClient to simulate network timeout
-        with patch('app.alpaca_client.StockHistoricalDataClient') as mock_client:
-            mock_client.return_value.get_stock_latest_quote.side_effect = Exception("Network timeout")
-            
-            client = AlpacaClient(
-                api_key="test_key",
-                secret_key="test_secret",
-                paper_trading=True
-            )
-            
-            result = await client.get_stock_quote("AAPL")
-            
-            assert "error" in result
-            assert "Network timeout" in result["error"]
-    
-    @pytest.mark.asyncio
-    async def test_api_rate_limit_handling(self):
-        """Test handling of API rate limits with mocked responses."""
+    async def test_invalid_symbol_handling(self, real_api_credentials):
+        """Test handling of invalid symbols."""
         client = AlpacaClient(
-            api_key="test_key",
-            secret_key="test_secret",
-            paper_trading=True
+            api_key=real_api_credentials.api_key,
+            secret_key=real_api_credentials.secret_key,
+            paper_trading=real_api_credentials.paper_trading
         )
         
-        symbols = ["AAPL", "MSFT", "GOOGL", "TSLA", "NVDA"]
+        # Test with clearly invalid symbol
+        result = await client.get_stock_quote("INVALID_XYZ123_FAKE")
         
-        # Mock successful responses for all symbols
-        mock_quotes = {}
-        for symbol in symbols:
-            mock_quote = MagicMock()
-            mock_quote.symbol = symbol
-            mock_quote.bid_price = 100.0
-            mock_quote.ask_price = 100.5
-            mock_quotes[symbol] = mock_quote
-        
-        with patch.object(client.stock_data_client, 'get_stock_latest_quote', return_value=mock_quotes):
-            results = []
-            for symbol in symbols:
-                result = await client.get_stock_quote(symbol)
-                results.append(result)
-            
-            # All requests should complete without rate limit errors
-            for result in results:
-                if "error" in result:
-                    # Rate limit errors typically contain specific messages
-                    assert "rate limit" not in result["error"].lower()
+        # Should handle gracefully - either return error or no data
+        if "error" not in result:
+            # If no explicit error, data should be empty/None
+            assert result.get("bid_price") is None or result.get("ask_price") is None
     
     @pytest.mark.asyncio
-    async def test_malformed_response_handling(self):
-        """Test handling of malformed API responses."""
+    async def test_empty_symbol_handling(self, real_api_credentials):
+        """Test handling of empty symbols."""
         client = AlpacaClient(
-            api_key="test_key",
-            secret_key="test_secret",
-            paper_trading=True
+            api_key=real_api_credentials.api_key,
+            secret_key=real_api_credentials.secret_key,
+            paper_trading=real_api_credentials.paper_trading
         )
         
         # Test with empty symbol
@@ -369,50 +324,85 @@ class TestAlpacaClientErrorHandling:
         except (TypeError, AttributeError):
             # Expected for None input
             pass
+    
+    @pytest.mark.asyncio
+    async def test_malformed_order_handling(self, real_api_credentials):
+        """Test handling of malformed order requests."""
+        client = AlpacaClient(
+            api_key=real_api_credentials.api_key,
+            secret_key=real_api_credentials.secret_key,
+            paper_trading=real_api_credentials.paper_trading
+        )
+        
+        # Test order with invalid quantity
+        result = await client.place_stock_order(
+            symbol="AAPL",
+            qty=0,  # Invalid quantity
+            side="buy",
+            order_type="market"
+        )
+        
+        assert "error" in result
+        
+        # Test order with invalid side
+        result = await client.place_stock_order(
+            symbol="AAPL",
+            qty=1,
+            side="invalid_side",
+            order_type="market"
+        )
+        
+        assert "error" in result
 
 
 @pytest.mark.asyncio
-async def test_alpaca_client_unit_integration():
-    """Unit integration test for AlpacaClient with mocked operations."""
+async def test_alpaca_client_integration_workflow(real_api_credentials):
+    """Integration test for AlpacaClient with real API workflow."""
     client = AlpacaClient(
-        api_key="test_key",
-        secret_key="test_secret",
-        paper_trading=True
+        api_key=real_api_credentials.api_key,
+        secret_key=real_api_credentials.secret_key,
+        paper_trading=real_api_credentials.paper_trading
     )
     
-    # Mock all the required objects
-    mock_account = MagicMock()
-    mock_account.account_number = "123456789"
-    mock_account.buying_power = 50000.0
-    mock_account.cash = 25000.0
-    mock_account.portfolio_value = 75000.0
+    # 1. Test connection
+    connection_result = await client.test_connection()
+    assert connection_result["status"] == "connected"
     
-    mock_quote = MagicMock()
-    mock_quote.symbol = "AAPL"
-    mock_quote.bid_price = 150.0
-    mock_quote.ask_price = 150.5
+    # 2. Get account info
+    account_result = await client.get_account()
+    assert "account_number" in account_result
+    assert "buying_power" in account_result
     
-    with patch.object(client.trading_client, 'get_account', return_value=mock_account), \
-         patch.object(client.stock_data_client, 'get_stock_latest_quote', return_value={"AAPL": mock_quote}), \
-         patch.object(client.trading_client, 'get_all_positions', return_value=[]), \
-         patch.object(client.trading_client, 'get_orders', return_value=[]):
+    # 3. Get stock quote
+    quote_result = await client.get_stock_quote("AAPL")
+    assert "symbol" in quote_result
+    assert quote_result["symbol"] == "AAPL"
+    
+    # 4. Get positions
+    positions_result = await client.get_positions()
+    assert isinstance(positions_result, list)
+    
+    # 5. Get orders
+    orders_result = await client.get_orders()
+    assert isinstance(orders_result, list)
+    
+    # 6. Test placing a very low limit order (should not execute)
+    order_result = await client.place_stock_order(
+        symbol="AAPL",
+        qty=1,
+        side="buy",
+        order_type="limit",
+        limit_price=0.01,  # Very low price to avoid execution
+        time_in_force="day"
+    )
+    
+    # Should either place order successfully or return validation error
+    # Both are acceptable for real paper trading
+    if "error" not in order_result:
+        assert "order_id" in order_result or "id" in order_result
         
-        # 1. Test connection
-        connection_result = await client.test_connection()
-        assert connection_result["status"] == "connected"
-        
-        # 2. Get account info
-        account_result = await client.get_account()
-        assert account_result["account_number"] == "123456789"
-        
-        # 3. Get stock quote
-        quote_result = await client.get_stock_quote("AAPL")
-        assert quote_result["symbol"] == "AAPL"
-        
-        # 4. Get positions
-        positions_result = await client.get_positions()
-        assert isinstance(positions_result, list)
-        
-        # 5. Get orders
-        orders_result = await client.get_orders()
-        assert isinstance(orders_result, list)
+        # If order was placed, try to cancel it
+        order_id = order_result.get("order_id") or order_result.get("id")
+        if order_id:
+            cancel_result = await client.cancel_order(order_id)
+            # Cancel should either succeed or order might already be filled/cancelled

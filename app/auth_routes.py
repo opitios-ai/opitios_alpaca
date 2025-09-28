@@ -43,9 +43,13 @@ async def verify_token(
             message="Token is valid"
         )
     except HTTPException as e:
-        return TokenVerificationResponse(
-            valid=False,
-            message=e.detail
+        # Re-raise HTTPException to return proper status codes
+        raise e
+    except Exception as e:
+        # For unexpected errors, return 400 Bad Request
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Token validation failed: {str(e)}"
         )
 
 
