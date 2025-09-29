@@ -284,9 +284,12 @@ class ConnectionManager:
                 status = account_info.status if hasattr(account_info, 'status') else 'UNKNOWN'
                 account_type = 'Paper Trading' if getattr(account_info, 'pattern_day_trader', None) is not None else 'Live'
                 
-                # Log successful account verification - One line format for easy tracking
-                logger.info('================')
-                logger.info(f"OK {self.user_id}: {status} | Account#{account_id[:8]}... | Equity=${equity:,.2f} | Cash=${cash:,.2f} | BuyPower=${buying_power:,.2f} | Type={account_type}")
+                # Log successful account verification - Enhanced format with emojis
+                account_type_emoji = "📄" if account_type == "Paper Trading" else "💰"
+                status_emoji = "✅" if status.upper() == "ACTIVE" else "⚠️"
+                logger.info('=' * 60)
+                logger.info(f"{status_emoji} {account_type_emoji} {self.user_id}: {status} | Account#{account_id[:8]}... | "
+                          f"Equity=${equity:,.2f} | Cash=${cash:,.2f} | BuyPower=${buying_power:,.2f} | Type={account_type}")
                 
                 # Check account status
                 if status.upper() != 'ACTIVE':

@@ -1,7 +1,8 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from enum import Enum
+import re
 
 class OrderSide(str, Enum):
     BUY = "buy"
@@ -33,8 +34,8 @@ class StockOrderRequest(BaseModel):
     side: OrderSide = Field(..., description="Buy or sell")
     type: OrderType = Field(default=OrderType.MARKET, description="Order type")
     time_in_force: TimeInForce = Field(default=TimeInForce.DAY, description="Time in force")
-    limit_price: Optional[float] = Field(None, description="Limit price for limit orders")
-    stop_price: Optional[float] = Field(None, description="Stop price for stop orders")
+    limit_price: Optional[float] = Field(None, gt=0, description="Limit price for limit orders")
+    stop_price: Optional[float] = Field(None, gt=0, description="Stop price for stop orders")
     bulk_place: Optional[bool] = Field(default=False, description="If true, place order for all accounts")
 
 # Options Models
@@ -59,7 +60,7 @@ class OptionOrderRequest(BaseModel):
     side: OrderSide = Field(..., description="Buy or sell")
     type: OrderType = Field(default=OrderType.MARKET, description="Order type")
     time_in_force: TimeInForce = Field(default=TimeInForce.DAY, description="Time in force")
-    limit_price: Optional[float] = Field(None, description="Limit price for limit orders")
+    limit_price: Optional[float] = Field(None, gt=0, description="Limit price for limit orders")
     bulk_place: Optional[bool] = Field(default=False, description="If true, place order for all accounts")
 
 # Response Models
@@ -114,6 +115,34 @@ class OrderResponse(BaseModel):
     filled_avg_price: Optional[float]
     submitted_at: datetime
     filled_at: Optional[datetime]
+    asset_class: Optional[str] = None  # 资产类型 - 用于识别期权 (us_option)
+    
+    @field_validator('submitted_at', 'filled_at', mode='before')
+    @classmethod
+    def parse_datetime_with_timezone(cls, v):
+        """Parse datetime strings that may contain timezone information like 'EDT'"""
+        if v is None:
+            return None
+        if isinstance(v, datetime):
+            return v
+        
+        # Handle timezone abbreviations like 'EDT', 'EST', etc.
+        # Remove timezone abbreviations and parse as naive datetime
+        if isinstance(v, str):
+            # Remove common timezone abbreviations
+            v_clean = re.sub(r'\s+(EDT|EST|PDT|PST|CDT|CST|MDT|MST|UTC|GMT)\s*$', '', v.strip())
+            try:
+                # Try parsing the cleaned string
+                return datetime.fromisoformat(v_clean.replace(' ', 'T'))
+            except ValueError:
+                # If that fails, try other common formats
+                try:
+                    return datetime.strptime(v_clean, '%Y-%m-%d %H:%M:%S')
+                except ValueError:
+                    # Last resort: try ISO format
+                    return datetime.fromisoformat(v_clean)
+        
+        return v
 
 class PositionResponse(BaseModel):
     asset_id: Optional[str]
@@ -183,6 +212,152 @@ class BulkOrderResponse(BaseModel):
                         "error": "Insufficient buying power"
                     }
                 ]
+            }
+        }
+
+# Dashboard Models
+class ContractInfo(BaseModel):
+    """Contract information for holdings"""
+    symbol: str
+    currency: str = "USD"
+    sec_type: str  # "STK" for stocks, "OPT" for options
+    expiry: Optional[str] = None  # For options: "20250919"
+    strike: Optional[str] = None  # For options: "170.0"
+    right: Optional[str] = None   # For options: "PUT" or "CALL"
+    identifier: str  # Full symbol identifier
+
+class HoldingInfo(BaseModel):
+    """Individual holding information"""
+    quantity: float
+    average_cost: float
+    market_value: float
+    market_price: float
+    unrealized_pnl: float
+    realized_pnl: float
+    contract: ContractInfo
+
+class DailySummary(BaseModel):
+    """Daily trading summary"""
+    date: str
+    net_profit: float
+    sold_qty: int
+    commission: float
+    avg_sold_price: Optional[float] = None
+
+class TradingHistory(BaseModel):
+    """Trading history summary"""
+    overall_profit: float
+    overall_commission: float
+    daily_summary: List[DailySummary]
+    has_data: bool
+
+class ProfitPeriod(BaseModel):
+    """Profit data for a specific period"""
+    profit: float
+    commission: float
+    has_data: bool
+
+class ProfitChartData(BaseModel):
+    """Profit data for chart display"""
+    overall_profit: float
+    overall_commission: float
+    daily_summary: List[DailySummary]
+    has_data: bool
+
+class ProfitReport(BaseModel):
+    """Complete profit report with daily, weekly, and chart data"""
+    daily: ProfitPeriod
+    weekly: ProfitPeriod
+    total_for_chart: ProfitChartData
+
+class DashboardAccountDetails(BaseModel):
+    """Account details for dashboard"""
+    account_name: str
+    real_account: Optional[str] = None
+    real_tiger_id: Optional[str] = None
+    sandbox_account: Optional[str] = None
+    sandbox_tiger_id: Optional[str] = None
+    key_path: Optional[str] = None
+    permission_group: str = "user"
+    paper_trading: int = 1
+    currency: str = "USD"
+    cash: float
+    net_liquidation: float
+
+class DashboardResponse(BaseModel):
+    """Complete dashboard response matching Tiger API format"""
+    account_details: DashboardAccountDetails
+    holdings: List[HoldingInfo]
+    trading_history: TradingHistory
+    profit_report: ProfitReport
+    recent_orders: Optional[List[OrderResponse]] = None
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "account_details": {
+                    "account_name": "demo_user",
+                    "paper_trading": 1,
+                    "currency": "USD",
+                    "cash": 10000.0,
+                    "net_liquidation": 15000.0
+                },
+                "holdings": [
+                    {
+                        "quantity": 10,
+                        "average_cost": 150.0,
+                        "market_value": 1600.0,
+                        "market_price": 160.0,
+                        "unrealized_pnl": 100.0,
+                        "realized_pnl": 0.0,
+                        "contract": {
+                            "symbol": "AAPL",
+                            "currency": "USD",
+                            "sec_type": "STK",
+                            "identifier": "AAPL"
+                        }
+                    }
+                ],
+                "trading_history": {
+                    "overall_profit": 500.0,
+                    "overall_commission": 25.0,
+                    "daily_summary": [
+                        {
+                            "date": "2024-01-15",
+                            "net_profit": 100.0,
+                            "sold_qty": 5,
+                            "commission": 5.0,
+                            "avg_sold_price": 155.0
+                        }
+                    ],
+                    "has_data": True
+                },
+                "profit_report": {
+                    "daily": {
+                        "profit": 100.0,
+                        "commission": 5.0,
+                        "has_data": True
+                    },
+                    "weekly": {
+                        "profit": 500.0,
+                        "commission": 25.0,
+                        "has_data": True
+                    },
+                    "total_for_chart": {
+                        "overall_profit": 500.0,
+                        "overall_commission": 25.0,
+                        "daily_summary": [
+                            {
+                                "date": "2024-01-15",
+                                "net_profit": 100.0,
+                                "sold_qty": 5,
+                                "commission": 5.0,
+                                "avg_sold_price": 155.0
+                            }
+                        ],
+                        "has_data": True
+                    }
+                }
             }
         }
 

@@ -2,18 +2,40 @@ from alpaca.trading.client import TradingClient
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.historical.option import OptionHistoricalDataClient
 from alpaca.trading.requests import MarketOrderRequest, LimitOrderRequest, StopOrderRequest, GetOrdersRequest
-from alpaca.trading.enums import OrderSide, TimeInForce, OrderType
+from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca.data.requests import StockLatestQuoteRequest, StockBarsRequest, OptionLatestQuoteRequest, OptionChainRequest
 from alpaca.data.timeframe import TimeFrame
-from sqlalchemy import false
 
-from config import settings
 from loguru import logger
 from typing import Optional, List, Dict, Any
-import pandas as pd
 import asyncio
 import time
-from datetime import datetime, timedelta
+import arrow
+
+
+def convert_utc_to_eastern(utc_timestamp_str: str) -> str:
+    """
+    将UTC时间戳转换为美东时间字符串
+    
+    Args:
+        utc_timestamp_str: UTC时间戳字符串 (格式: "2025-09-18T19:53:53.783132Z")
+    
+    Returns:
+        美东时间字符串 (格式: "2025-09-18 15:53:53 EDT")
+    """
+    if not utc_timestamp_str:
+        return None
+    
+    try:
+        # 解析UTC时间戳
+        utc_time = arrow.get(utc_timestamp_str)
+        # 转换为美东时间
+        eastern_time = utc_time.to('US/Eastern')
+        # 返回格式化的美东时间字符串
+        return eastern_time.format('YYYY-MM-DD HH:mm:ss ZZZ')
+    except Exception as e:
+        logger.warning(f"时间转换失败: {utc_timestamp_str} -> {e}")
+        return utc_timestamp_str  # 返回原始字符串
 
 
 class AlpacaClient:
@@ -80,7 +102,7 @@ class AlpacaClient:
                     "ask_price": float(quote.ask_price) if quote.ask_price else None,
                     "bid_size": quote.bid_size,
                     "ask_size": quote.ask_size,
-                    "timestamp": str(quote.timestamp) if quote.timestamp else None
+                    "timestamp": convert_utc_to_eastern(str(quote.timestamp)) if quote.timestamp else None
                 }
             else:
                 return {"error": f"No quote data found for {symbol}"}
@@ -108,7 +130,7 @@ class AlpacaClient:
                         "ask_price": float(quote.ask_price) if quote.ask_price else None,
                         "bid_size": quote.bid_size,
                         "ask_size": quote.ask_size,
-                        "timestamp": str(quote.timestamp) if quote.timestamp else None
+                        "timestamp": convert_utc_to_eastern(str(quote.timestamp)) if quote.timestamp else None
                     })
                 else:
                     results.append({
@@ -176,7 +198,7 @@ class AlpacaClient:
                 bars_data = []
                 for bar in bars.data[symbol]:
                     bars_data.append({
-                        "timestamp": str(bar.timestamp) if bar.timestamp else None,
+                        "timestamp": convert_utc_to_eastern(str(bar.timestamp)) if bar.timestamp else None,
                         "open": float(bar.open),
                         "high": float(bar.high),
                         "low": float(bar.low),
@@ -333,7 +355,7 @@ class AlpacaClient:
                                                                      'last_price') and quote.last_price else None,
                     "implied_volatility": float(quote.implied_volatility) if hasattr(quote,
                                                                                      'implied_volatility') and quote.implied_volatility else None,
-                    "timestamp": str(quote.timestamp) if quote.timestamp else None
+                    "timestamp": convert_utc_to_eastern(str(quote.timestamp)) if quote.timestamp else None
                 }
             else:
                 logger.warning(f"No real options data available for {option_symbol}")
@@ -526,8 +548,8 @@ class AlpacaClient:
                 "status": order.status.value,
                 "filled_qty": float(order.filled_qty) if order.filled_qty else 0,
                 "filled_avg_price": float(order.filled_avg_price) if order.filled_avg_price else None,
-                "submitted_at": str(order.submitted_at) if order.submitted_at else None,
-                "filled_at": str(order.filled_at) if order.filled_at else None,
+                "submitted_at": convert_utc_to_eastern(str(order.submitted_at)) if order.submitted_at else None,
+                "filled_at": convert_utc_to_eastern(str(order.filled_at)) if order.filled_at else None,
                 "timing": {
                     "prep_time_ms": round(order_prep_time, 2),
                     "submit_time_ms": round(order_submit_time, 2),
@@ -618,8 +640,8 @@ class AlpacaClient:
                 "status": order.status.value,
                 "filled_qty": float(order.filled_qty) if order.filled_qty else 0,
                 "filled_avg_price": float(order.filled_avg_price) if order.filled_avg_price else None,
-                "submitted_at": str(order.submitted_at) if order.submitted_at else None,
-                "filled_at": str(order.filled_at) if order.filled_at else None,
+                "submitted_at": convert_utc_to_eastern(str(order.submitted_at)) if order.submitted_at else None,
+                "filled_at": convert_utc_to_eastern(str(order.filled_at)) if order.filled_at else None,
                 "limit_price": float(order.limit_price) if order.limit_price else None,
                 "asset_class": "option",
                 "timing": {
@@ -705,12 +727,15 @@ class AlpacaClient:
         Supports date range filtering with after and before parameters.
         """
         try:
-            # Import QueryOrderStatus enum
-            from alpaca.trading.enums import QueryOrderStatus
-            
-            # Handle multiple statuses - QueryOrderStatus doesn't support comma-separated values
+            # Handle multiple statuses - GetOrdersRequest doesn't support comma-separated values
             # So we need to get all orders and filter manually
-            request_params = GetOrdersRequest(limit=limit)
+            # Check if status contains comma-separated values
+            if status is not None and isinstance(status, str) and ',' in status:
+                # For multiple statuses, get all orders and filter manually
+                request_params = GetOrdersRequest(limit=limit, status="all")
+            else:
+                # For single status, pass it directly to GetOrdersRequest
+                request_params = GetOrdersRequest(limit=limit, status=status)
             orders = self.trading_client.get_orders(filter=request_params)
 
             logger.debug(f"Retrieved {len(orders)} total orders from Alpaca API (status filter: {status})")
@@ -725,7 +750,7 @@ class AlpacaClient:
 
             # Build requested statuses set (supports comma-separated list)
             requested_statuses: Optional[set] = None
-            if status is not None:
+            if status is not None and status != "all":
                 requested_statuses = set()
                 # Split by comma and normalize
                 for raw in [s.strip() for s in status.split(',') if s.strip()]:
@@ -738,7 +763,7 @@ class AlpacaClient:
                 # Track order status counts for debugging
                 order_status = order.status.value
                 status_counts[order_status] = status_counts.get(order_status, 0) + 1
-                # If status is None, include all. Otherwise, include if in requested set
+                # If status is None or "all", include all. Otherwise, include if in requested set
                 if requested_statuses is None:
                     include_order = True
                 else:
@@ -761,10 +786,10 @@ class AlpacaClient:
                         "filled_avg_price": float(order.filled_avg_price) if order.filled_avg_price else None,
                         "limit_price": float(order.limit_price) if order.limit_price else None,
                         "stop_price": float(order.stop_price) if order.stop_price else None,
-                        "created_at": str(order.created_at) if order.created_at else None,
-                        "updated_at": str(order.updated_at) if order.updated_at else None,
-                        "submitted_at": str(order.submitted_at) if order.submitted_at else None,
-                        "filled_at": str(order.filled_at) if order.filled_at else None
+                        "created_at": convert_utc_to_eastern(str(order.created_at)) if order.created_at else None,
+                        "updated_at": convert_utc_to_eastern(str(order.updated_at)) if order.updated_at else None,
+                        "submitted_at": convert_utc_to_eastern(str(order.submitted_at)) if order.submitted_at else None,
+                        "filled_at": convert_utc_to_eastern(str(order.filled_at)) if order.filled_at else None
                     })
 
             # Log detailed debugging information
@@ -785,6 +810,235 @@ class AlpacaClient:
         except Exception as e:
             logger.error(f"Error cancelling order {order_id}: {e}")
             return {"error": str(e)}
+
+    async def get_trading_history(self, days: int = 30) -> Dict[str, Any]:
+        """Get trading history with daily PnL summary"""
+        try:
+            from datetime import datetime, timedelta
+            from collections import defaultdict
+            
+            # Get all filled orders from the last N days
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=days)
+            
+            # Get all orders using the same approach as get_orders method
+            # This ensures we get the same data format and filtering
+            orders_data = await self.get_orders(status="all", limit=1000)
+            
+            # Convert back to Alpaca order objects for processing
+            # We need to get the actual order objects for the trading history calculation
+            request_params = GetOrdersRequest(limit=1000, status="all")
+            orders = self.trading_client.get_orders(filter=request_params)
+            
+            # Log the number of orders retrieved from each method for debugging
+            logger.info(f"Retrieved {len(orders_data)} orders from get_orders method")
+            logger.info(f"Retrieved {len(orders)} orders from trading_client.get_orders method")
+            
+            # Filter orders by date range after retrieval
+            filtered_orders = []
+            for order in orders:
+                if order.filled_at:
+                    # Convert UTC time to Eastern time for date comparison
+                    order_utc = arrow.get(order.filled_at)
+                    order_eastern = order_utc.to('US/Eastern')
+                    order_date = order_eastern.replace(hour=0, minute=0, second=0, microsecond=0)
+                    
+                    # Convert start_date and end_date to Eastern timezone for comparison
+                    start_eastern = arrow.get(start_date).to('US/Eastern').replace(hour=0, minute=0, second=0, microsecond=0)
+                    end_eastern = arrow.get(end_date).to('US/Eastern').replace(hour=23, minute=59, second=59, microsecond=999999)
+                    
+                    if start_eastern <= order_date <= end_eastern:
+                        filtered_orders.append(order)
+            
+            orders = filtered_orders
+            
+            logger.info(f"Retrieved {len(orders)} orders for trading history (last {days} days)")
+            
+            # Group orders by date and calculate daily summaries
+            daily_data = defaultdict(lambda: {
+                'net_profit': 0.0,
+                'sold_qty': 0,
+                'commission': 0.0,
+                'total_sold_value': 0.0,
+                'sell_orders': 0,
+                'buy_orders': 0,
+                'total_buy_value': 0.0
+            })
+            
+            overall_profit = 0.0
+            overall_commission = 0.0
+            
+            # Track cost basis for each symbol to calculate realized P&L
+            cost_basis_tracker = defaultdict(list)  # symbol -> [(qty, price, date), ...]
+            
+            # Sort orders by filled_at time to ensure proper FIFO processing
+            orders.sort(key=lambda x: x.filled_at if x.filled_at else datetime.min)
+            
+            for order in orders:
+                if order.status.value == 'filled' and order.filled_at:
+                    # Parse the filled date using Eastern timezone
+                    order_utc = arrow.get(order.filled_at)
+                    order_eastern = order_utc.to('US/Eastern')
+                    filled_date = order_eastern.format('YYYY-MM-DD')
+                    symbol = order.symbol
+                    qty = float(order.filled_qty)
+                    price = float(order.filled_avg_price) if order.filled_avg_price else 0.0
+                    
+                    if order.side.value == 'buy':
+                        # Track buy orders for cost basis calculation
+                        cost_basis_tracker[symbol].append((qty, price, filled_date))
+                        daily_data[filled_date]['buy_orders'] += 1
+                        daily_data[filled_date]['total_buy_value'] += qty * price
+                        
+                    elif order.side.value == 'sell' and price > 0:
+                        # Calculate realized P&L for sell orders
+                        sold_value = qty * price
+                        daily_data[filled_date]['total_sold_value'] += sold_value
+                        daily_data[filled_date]['sold_qty'] += int(qty)
+                        daily_data[filled_date]['sell_orders'] += 1
+                        
+                        # Calculate realized P&L using FIFO method
+                        remaining_qty = qty
+                        realized_pnl = 0.0
+                        
+                        # Process cost basis in FIFO order
+                        while remaining_qty > 0 and cost_basis_tracker[symbol]:
+                            cost_qty, cost_price, cost_date = cost_basis_tracker[symbol][0]
+                            
+                            if cost_qty <= remaining_qty:
+                                # Use entire cost basis entry
+                                realized_pnl += cost_qty * (price - cost_price)
+                                remaining_qty -= cost_qty
+                                cost_basis_tracker[symbol].pop(0)
+                            else:
+                                # Partial use of cost basis entry
+                                realized_pnl += remaining_qty * (price - cost_price)
+                                cost_basis_tracker[symbol][0] = (cost_qty - remaining_qty, cost_price, cost_date)
+                                remaining_qty = 0
+                        
+                        daily_data[filled_date]['net_profit'] += realized_pnl
+                        overall_profit += realized_pnl
+                        
+                        # Estimate commission (Alpaca typically charges $0 per trade for stocks)
+                        estimated_commission = 0.0  # Adjust based on your broker's fee structure
+                        daily_data[filled_date]['commission'] += estimated_commission
+                        overall_commission += estimated_commission
+            
+            # Convert to daily summary format
+            daily_summaries = []
+            for date in sorted(daily_data.keys(), reverse=True):  # Most recent first
+                data = daily_data[date]
+                # Include days with any trading activity (buy or sell)
+                if data['sell_orders'] > 0 or data['buy_orders'] > 0:
+                    avg_sold_price = data['total_sold_value'] / data['sold_qty'] if data['sold_qty'] > 0 else 0.0
+                    daily_summaries.append({
+                        'date': date,
+                        'net_profit': data['net_profit'],
+                        'sold_qty': data['sold_qty'],
+                        'commission': data['commission'],
+                        'avg_sold_price': avg_sold_price
+                    })
+            
+            logger.info(f"Trading history summary: {len(daily_summaries)} trading days, overall profit: ${overall_profit:.2f}")
+            
+            return {
+                'overall_profit': overall_profit,
+                'overall_commission': overall_commission,
+                'daily_summary': daily_summaries,
+                'has_data': len(daily_summaries) > 0
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting trading history: {e}")
+            return {
+                'overall_profit': 0.0,
+                'overall_commission': 0.0,
+                'daily_summary': [],
+                'has_data': False,
+                'error': str(e)
+            }
+
+    async def get_profit_report(self, days: int = 30) -> Dict[str, Any]:
+        """Get comprehensive profit report with daily, weekly, and chart data"""
+        from datetime import datetime, timedelta
+        
+        try:
+            # Get trading history data
+            trading_history = await self.get_trading_history(days)
+            
+            if "error" in trading_history:
+                return {
+                    "daily": {"profit": 0.0, "commission": 0.0, "has_data": False},
+                    "weekly": {"profit": 0.0, "commission": 0.0, "has_data": False},
+                    "total_for_chart": {
+                        "overall_profit": 0.0,
+                        "overall_commission": 0.0,
+                        "daily_summary": [],
+                        "has_data": False
+                    }
+                }
+            
+            # Calculate daily profit (today's profit)
+            today = datetime.now().strftime("%Y-%m-%d")
+            daily_profit = 0.0
+            daily_commission = 0.0
+            daily_has_data = False
+            
+            if trading_history.get("daily_summary"):
+                for daily in trading_history["daily_summary"]:
+                    if daily["date"] == today:
+                        daily_profit = daily["net_profit"]
+                        daily_commission = daily["commission"]
+                        daily_has_data = True
+                        break
+            
+            # Calculate weekly profit (last 7 days)
+            weekly_profit = 0.0
+            weekly_commission = 0.0
+            weekly_has_data = False
+            
+            if trading_history.get("daily_summary"):
+                week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+                for daily in trading_history["daily_summary"]:
+                    if daily["date"] >= week_ago:
+                        weekly_profit += daily["net_profit"]
+                        weekly_commission += daily["commission"]
+                        weekly_has_data = True
+            
+            # Prepare chart data (same as trading history)
+            chart_data = {
+                "overall_profit": trading_history.get("overall_profit", 0.0),
+                "overall_commission": trading_history.get("overall_commission", 0.0),
+                "daily_summary": trading_history.get("daily_summary", []),
+                "has_data": trading_history.get("has_data", False)
+            }
+            
+            return {
+                "daily": {
+                    "profit": daily_profit,
+                    "commission": daily_commission,
+                    "has_data": daily_has_data
+                },
+                "weekly": {
+                    "profit": weekly_profit,
+                    "commission": weekly_commission,
+                    "has_data": weekly_has_data
+                },
+                "total_for_chart": chart_data
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting profit report: {e}")
+            return {
+                "daily": {"profit": 0.0, "commission": 0.0, "has_data": False},
+                "weekly": {"profit": 0.0, "commission": 0.0, "has_data": False},
+                "total_for_chart": {
+                    "overall_profit": 0.0,
+                    "overall_commission": 0.0,
+                    "daily_summary": [],
+                    "has_data": False
+                }
+            }
 
 
 class PooledAlpacaClient:
@@ -1118,6 +1372,18 @@ class PooledAlpacaClient:
             "failed_orders": failed_orders,
             "results": results
         }
+
+    async def get_trading_history(self, days: int = 30, account_id: Optional[str] = None, 
+                                 routing_key: Optional[str] = None) -> Dict[str, Any]:
+        """获取交易历史 - 使用HTTP客户端（无锁）"""
+        client = self._get_http_client(account_id, routing_key)
+        return await client.get_trading_history(days)
+
+    async def get_profit_report(self, days: int = 30, account_id: Optional[str] = None, 
+                               routing_key: Optional[str] = None) -> Dict[str, Any]:
+        """获取收益报告 - 使用HTTP客户端（无锁）"""
+        client = self._get_http_client(account_id, routing_key)
+        return await client.get_profit_report(days)
 
     async def test_connection(self, account_id: Optional[str] = None, routing_key: Optional[str] = None) -> Dict[
         str, Any]:

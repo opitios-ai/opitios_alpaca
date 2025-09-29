@@ -272,7 +272,12 @@ class TestGetCurrentContext:
             credentials=token
         )
         
-        context = await get_current_context(credentials)
+        # Create mock request
+        request = MagicMock(spec=Request)
+        request.client = MagicMock()
+        request.client.host = "203.0.113.1"  # External IP to force JWT auth (TEST-NET-3)
+        
+        context = await get_current_context(request, credentials)
         
         assert isinstance(context, RequestContext)
         assert context.user_id == "test_user_123"
@@ -288,10 +293,17 @@ class TestGetCurrentContext:
             credentials="invalid.token.here"
         )
         
-        with pytest.raises(HTTPException) as exc_info:
-            await get_current_context(credentials)
+        # Create mock request
+        request = MagicMock(spec=Request)
+        request.client = MagicMock()
+        request.client.host = "203.0.113.1"  # External IP to force JWT auth (TEST-NET-3)
         
-        assert exc_info.value.status_code == 401
+        # Mock is_internal_ip to return False for this test
+        with patch('app.middleware.is_internal_ip', return_value=False):
+            with pytest.raises(HTTPException) as exc_info:
+                await get_current_context(request, credentials)
+        
+            assert exc_info.value.status_code == 401
 
 
 class TestAuthenticationMiddleware:
@@ -568,7 +580,12 @@ class TestMiddlewareIntegration:
             credentials=token
         )
         
-        context = await get_current_context(credentials)
+        # Create mock request
+        request = MagicMock(spec=Request)
+        request.client = MagicMock()
+        request.client.host = "203.0.113.1"  # External IP to force JWT auth (TEST-NET-3)
+        
+        context = await get_current_context(request, credentials)
         
         assert context.user_id == "integration_user"
         assert context.has_permission("trading")

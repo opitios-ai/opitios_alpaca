@@ -43,20 +43,14 @@ async def verify_token(
             message="Token is valid"
         )
     except HTTPException as e:
-        return TokenVerificationResponse(
-            valid=False,
-            message=e.detail
+        # Re-raise HTTPException to return proper status codes
+        raise e
+    except Exception as e:
+        # For unexpected errors, return 400 Bad Request
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Token validation failed: {str(e)}"
         )
-
-
-# Demo JWT endpoint DISABLED for production security
-# @auth_router.get("/demo-token")
-# async def get_demo_jwt_token():
-#     """DISABLED: Demo JWT Token endpoint - disabled for production security"""
-#     raise HTTPException(
-#         status_code=404,
-#         detail="Demo token endpoint has been disabled for production security"
-#     )
 
 
 # 简化的管理员路由

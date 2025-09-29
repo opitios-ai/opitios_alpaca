@@ -12,8 +12,8 @@ from typing import Dict, Any, Optional
 # Configuration - can be set via environment variables
 # BASE_URL = os.getenv('API_BASE_URL', 'http://100.64.79.48:8090')  # Default to test environment
 BASE_URL = os.getenv('API_BASE_URL', 'http://100.64.79.48:8090')  # Default to test environment
-STOCK_ACCOUNT = os.getenv('STOCK_ACCOUNT', 'stock_ws')
-OPTION_ACCOUNT = os.getenv('OPTION_ACCOUNT', 'option_ws')
+STOCK_ACCOUNT = os.getenv('STOCK_ACCOUNT', 'bowen_paper_trading')
+OPTION_ACCOUNT = os.getenv('OPTION_ACCOUNT', 'bowen_paper_trading')
 TIMEOUT = int(os.getenv('API_TIMEOUT', '10'))
 
 class EndpointTester:

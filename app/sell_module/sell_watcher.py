@@ -187,10 +187,10 @@ class SellWatcher:
             logger.info("取消旧订单检查完成")
 
             # 5. 检查是否在交易时间内
-            if not self._is_market_open():
-                logger.info("市场未开放，跳过策略执行")
-                logger.info("=" * 60)
-                return
+            # if not self._is_market_open():
+            #     logger.info("市场未开放，跳过策略执行")
+            #     logger.info("=" * 60)
+            #     return
 
             # 6. 执行卖出策略
             await self._execute_sell_strategies(long_positions)

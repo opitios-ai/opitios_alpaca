@@ -41,14 +41,15 @@ class Order:
 
     @property
     def is_pending(self) -> bool:
-        """是否为待执行订单"""
+        """是否为待执行订单（包括部分成交的订单）"""
         return self.status in ['new', 'accepted', 'pending_new', 'accepted_for_bidding', 'pending_cancel',
-                               'pending_replace', 'replaced', 'open']
+                               'pending_replace', 'partially_filled']
 
     @property
     def is_option(self) -> bool:
         """是否为期权订单"""
-        return self.asset_class == 'option'
+        logger.debug(f"是否为期权订单: {self.asset_class}")
+        return self.asset_class == 'us_option'
 
     @property
     def age_minutes(self) -> float:
