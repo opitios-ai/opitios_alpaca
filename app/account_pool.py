@@ -68,9 +68,11 @@ class AccountConnection:
                         expected_paper = self.account_config.paper_trading
                         
                         if is_paper_account != expected_paper:
-                            logger.warning(f"Account type mismatch for {self.account_config.account_id}: "
-                                         f"Expected paper_trading={expected_paper}, but account {account_number} is "
-                                         f"{'paper' if is_paper_account else 'live'}")
+                            expected_emoji = "📄" if expected_paper else "💰"
+                            actual_emoji = "📄" if is_paper_account else "💰"
+                            logger.warning(f"⚠️ 🔄 Account type mismatch for {self.account_config.account_id}: "
+                                         f"Expected {expected_emoji} paper_trading={expected_paper}, but account {account_number} is "
+                                         f"{actual_emoji} {'paper' if is_paper_account else 'live'}")
                         
                         # Balance validation: Check minimum balance requirement
                         from config import settings
@@ -78,7 +80,7 @@ class AccountConnection:
                         current_balance = float(account.cash) if account.cash else 0.0
                         
                         if current_balance < min_balance:
-                            logger.error(f"Account {self.account_config.account_id} balance ${current_balance:,.2f} "
+                            logger.error(f"❌ 💸 Account {self.account_config.account_id} balance ${current_balance:,.2f} "
                                        f"is below minimum required ${min_balance:,.2f}")
                             # Update health status before returning
                             if ConnectionType.TRADING_CLIENT in self.connection_manager.connection_stats:
@@ -86,9 +88,10 @@ class AccountConnection:
                                 self.connection_manager.connection_stats[ConnectionType.TRADING_CLIENT].error_count += 1
                             return False
                         
-                        logger.info(f"Account {self.account_config.account_id} ({account_number}) validated: "
-                                  f"{'paper' if is_paper_account else 'live'} trading, "
-                                  f"balance ${current_balance:,.2f}")
+                        account_type_emoji = "📄" if is_paper_account else "💰"
+                        trading_type = "paper" if is_paper_account else "live"
+                        logger.info(f"✅ {account_type_emoji} Account {self.account_config.account_id} ({account_number}) validated: "
+                                  f"{trading_type} trading, balance ${current_balance:,.2f}")
                         # Update health status on success
                         if ConnectionType.TRADING_CLIENT in self.connection_manager.connection_stats:
                             self.connection_manager.connection_stats[ConnectionType.TRADING_CLIENT].is_healthy = True

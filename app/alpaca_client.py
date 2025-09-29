@@ -729,8 +729,13 @@ class AlpacaClient:
         try:
             # Handle multiple statuses - GetOrdersRequest doesn't support comma-separated values
             # So we need to get all orders and filter manually
-            # FIXED: Pass status parameter to GetOrdersRequest
-            request_params = GetOrdersRequest(limit=limit, status=status)
+            # Check if status contains comma-separated values
+            if status is not None and isinstance(status, str) and ',' in status:
+                # For multiple statuses, get all orders and filter manually
+                request_params = GetOrdersRequest(limit=limit, status="all")
+            else:
+                # For single status, pass it directly to GetOrdersRequest
+                request_params = GetOrdersRequest(limit=limit, status=status)
             orders = self.trading_client.get_orders(filter=request_params)
 
             logger.debug(f"Retrieved {len(orders)} total orders from Alpaca API (status filter: {status})")
