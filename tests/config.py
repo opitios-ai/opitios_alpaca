@@ -89,13 +89,16 @@ class RealAPITestConfig:
     def _load_config(self) -> Dict[str, Any]:
         """Load configuration from YAML file."""
         try:
-            with open(self.config_path, 'r') as f:
+            with open(self.config_path, 'r', encoding='utf-8') as f:
                 return yaml.safe_load(f)
         except FileNotFoundError:
             logger.error(f"Configuration file not found: {self.config_path}")
             raise
         except yaml.YAMLError as e:
             logger.error(f"Error parsing configuration file: {e}")
+            raise
+        except UnicodeDecodeError as e:
+            logger.error(f"Error decoding configuration file (encoding issue): {e}")
             raise
     
     def _load_test_accounts(self) -> List[TestAccount]:
@@ -221,13 +224,19 @@ class RealAPITestConfig:
         return self._test_environments[env_type]
     
     def get_test_credentials(self, account_name: Optional[str] = None) -> TestCredentials:
-        """Get test credentials for specified account or first available."""
+        """Get test credentials for specified account or bowen_paper_trading by default."""
         if account_name:
             for account in self._test_accounts:
-                if account.name == account_name:
+                if account.name == account_name or account.credentials.account_id == account_name:
                     return account.credentials
             raise ValueError(f"Account '{account_name}' not found")
         
+        # Default to bowen_paper_trading account if available
+        for account in self._test_accounts:
+            if account.credentials.account_id == "bowen_paper_trading" or account.name == "bowen_paper_trading":
+                return account.credentials
+        
+        # Fallback to first available account
         return self._test_accounts[0].credentials
     
     def get_test_accounts(self, tier: Optional[str] = None) -> List[TestAccount]:

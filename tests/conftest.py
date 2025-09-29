@@ -92,20 +92,75 @@ def secrets_file_path(test_config: RealAPITestConfig) -> Path:
 @pytest.fixture
 def real_api_credentials(test_config: RealAPITestConfig) -> TestCredentials:
     """Provide real Alpaca API credentials for testing."""
-    return test_config.get_test_credentials()
+    credentials = test_config.get_test_credentials()
+    
+    # Validate credentials before returning
+    try:
+        from alpaca.trading.client import TradingClient
+        client = TradingClient(
+            api_key=credentials.api_key,
+            secret_key=credentials.secret_key,
+            paper=credentials.paper_trading
+        )
+        # Quick test to validate credentials
+        account = client.get_account()
+        logger.info(f"Credentials validated for account: {account.account_number}")
+        return credentials
+    except Exception as e:
+        logger.warning(f"Invalid API credentials detected: {e}")
+        pytest.skip(f"Skipping test due to invalid API credentials: {e}")
 
 
 @pytest.fixture
 def primary_test_account(test_config: RealAPITestConfig) -> TestAccount:
     """Provide the primary test account."""
     accounts = test_config.get_test_accounts()
-    return accounts[0]
+    primary_account = accounts[0]
+    
+    # Validate primary account credentials
+    try:
+        from alpaca.trading.client import TradingClient
+        client = TradingClient(
+            api_key=primary_account.credentials.api_key,
+            secret_key=primary_account.credentials.secret_key,
+            paper=primary_account.credentials.paper_trading
+        )
+        # Quick test to validate credentials
+        account = client.get_account()
+        logger.info(f"Primary account validated: {account.account_number}")
+        return primary_account
+    except Exception as e:
+        logger.warning(f"Invalid primary account credentials: {e}")
+        pytest.skip(f"Skipping test due to invalid primary account credentials: {e}")
 
 
 @pytest.fixture
 def all_test_accounts(test_config: RealAPITestConfig) -> list[TestAccount]:
-    """Provide all available test accounts."""
-    return test_config.get_test_accounts()
+    """Provide all available test accounts (only those with valid credentials)."""
+    accounts = test_config.get_test_accounts()
+    valid_accounts = []
+    
+    from alpaca.trading.client import TradingClient
+    
+    for account in accounts:
+        try:
+            client = TradingClient(
+                api_key=account.credentials.api_key,
+                secret_key=account.credentials.secret_key,
+                paper=account.credentials.paper_trading
+            )
+            # Quick test to validate credentials
+            client.get_account()
+            valid_accounts.append(account)
+            logger.info(f"Account {account.name} credentials are valid")
+        except Exception as e:
+            logger.warning(f"Account {account.name} has invalid credentials: {e}")
+            continue
+    
+    if not valid_accounts:
+        pytest.skip("No valid test accounts available - all API credentials are invalid")
+    
+    return valid_accounts
 
 
 @pytest.fixture
@@ -175,6 +230,29 @@ def test_option_symbols() -> list[str]:
     ]
 
 
+# Credential validation fixture
+@pytest.fixture(scope="session")
+def api_credentials_available(test_config: RealAPITestConfig) -> bool:
+    """Check if any valid API credentials are available."""
+    from alpaca.trading.client import TradingClient
+    accounts = test_config.get_test_accounts()
+    
+    for account in accounts:
+        try:
+            client = TradingClient(
+                api_key=account.credentials.api_key,
+                secret_key=account.credentials.secret_key,
+                paper=account.credentials.paper_trading
+            )
+            client.get_account()
+            logger.info("Valid API credentials found")
+            return True
+        except Exception:
+            continue
+    
+    logger.warning("No valid API credentials found")
+    return False
+
 # Legacy fixtures for backward compatibility
 @pytest.fixture
 def mock_alpaca_credentials():
@@ -187,41 +265,6 @@ def mock_alpaca_credentials():
 
 
 # Pytest hooks for enhanced test management
-def pytest_configure(config):
-    """Configure pytest with custom settings."""
-    # Ensure test directories exist
-    test_reports_dir = Path("test-reports")
-    test_reports_dir.mkdir(exist_ok=True)
-    
-    htmlcov_dir = Path("htmlcov")
-    htmlcov_dir.mkdir(exist_ok=True)
-    
-    # Configure markers
-    config.addinivalue_line(
-        "markers", "real_api: mark test as using real API calls"
-    )
-
-
-def pytest_collection_modifyitems(config, items):
-    """Modify test collection to add markers based on test location."""
-    for item in items:
-        # Add markers based on test file location
-        test_file = str(item.fspath)
-        
-        if "/unit/" in test_file:
-            item.add_marker(pytest.mark.unit)
-        elif "/integration/" in test_file:
-            item.add_marker(pytest.mark.integration)
-        elif "/websocket/" in test_file:
-            item.add_marker(pytest.mark.websocket)
-        elif "/performance/" in test_file:
-            item.add_marker(pytest.mark.performance)
-        elif "/security/" in test_file:
-            item.add_marker(pytest.mark.security)
-        
-        # Add real_api marker for tests using real API
-        if "real_api" in test_file or "alpaca" in test_file.lower():
-            item.add_marker(pytest.mark.real_api)
 
 
 # New utility fixtures from utils package
@@ -599,6 +642,7 @@ def pytest_configure(config):
     
     # Configure additional markers
     markers = [
+        "real_api: mark test as using real API calls",
         "comprehensive: mark test as using comprehensive test data management",
         "cleanup_verification: mark test as requiring cleanup verification",
         "multi_account: mark test as requiring multiple accounts",

@@ -6,8 +6,8 @@ from typing import Dict, Any, List
 from unittest.mock import patch, MagicMock
 
 from tests.utils import RealAPITestClient, WebSocketTestManager, APITestHelper, WebSocketEndpoint
-from app.account_pool import AccountConnectionPool, AccountConfig
-from app.connection_pool import ConnectionPool
+from app.account_pool import AccountPool, AccountConfig
+from app.connection_pool import PoolManager, ConnectionType
 from app.middleware import RateLimiter, create_jwt_token, verify_jwt_token
 
 
@@ -17,7 +17,7 @@ class TestAccountPoolIntegration:
     @pytest.mark.asyncio
     async def test_account_pool_with_real_connections(self, primary_test_account):
         """Test account pool with real API connections."""
-        pool = AccountConnectionPool(max_connections_per_account=2)
+        pool = AccountPool(health_check_interval_seconds=300)
         
         # Mock settings with real test account
         with patch('app.account_pool.settings') as mock_settings:
@@ -61,7 +61,7 @@ class TestConnectionPoolIntegration:
     @pytest.mark.asyncio
     async def test_connection_pool_with_real_users(self, primary_test_account):
         """Test connection pool with real user credentials."""
-        pool = ConnectionPool(max_connections_per_user=2)
+        pool = PoolManager(max_idle_time_minutes=30, health_check_interval_seconds=300)
         
         # Create mock user object
         class MockUser:
@@ -77,20 +77,27 @@ class TestConnectionPoolIntegration:
         user = MockUser(primary_test_account)
         
         # Test connection acquisition and usage
-        async with pool.get_user_connection(user) as connection:
+        connection_manager = await pool.get_user_manager(user)
+        trading_client = await connection_manager.get_connection(ConnectionType.TRADING_CLIENT)
+        try:
             # Test connection functionality
-            is_healthy = await connection.test_connection()
+            is_healthy = await connection_manager.test_connection(ConnectionType.TRADING_CLIENT)
             
             if is_healthy:
-                assert connection.stats.is_healthy is True
-                assert connection.user_id == user.id
-                assert connection._in_use is True
+                stats = connection_manager.connection_stats[ConnectionType.TRADING_CLIENT]
+                assert stats.is_healthy is True
+                assert connection_manager.user_id == user.id
+                assert connection_manager._in_use[ConnectionType.TRADING_CLIENT] is True
             else:
                 # Connection might fail in test environment
-                assert connection.stats.is_healthy is False
+                stats = connection_manager.connection_stats[ConnectionType.TRADING_CLIENT]
+                assert stats.is_healthy is False
+        finally:
+            # Release connection
+            connection_manager.release_connection(ConnectionType.TRADING_CLIENT)
         
         # Connection should be released
-        assert connection._in_use is False
+        assert connection_manager._in_use[ConnectionType.TRADING_CLIENT] is False
         
         # Test pool statistics
         stats = pool.get_pool_stats()
