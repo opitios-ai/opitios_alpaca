@@ -115,6 +115,7 @@ class OrderResponse(BaseModel):
     filled_avg_price: Optional[float]
     submitted_at: datetime
     filled_at: Optional[datetime]
+    asset_class: Optional[str] = None  # 资产类型 - 用于识别期权 (us_option)
     
     @field_validator('submitted_at', 'filled_at', mode='before')
     @classmethod

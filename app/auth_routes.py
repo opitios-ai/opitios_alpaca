@@ -53,16 +53,6 @@ async def verify_token(
         )
 
 
-# Demo JWT endpoint DISABLED for production security
-# @auth_router.get("/demo-token")
-# async def get_demo_jwt_token():
-#     """DISABLED: Demo JWT Token endpoint - disabled for production security"""
-#     raise HTTPException(
-#         status_code=404,
-#         detail="Demo token endpoint has been disabled for production security"
-#     )
-
-
 # 简化的管理员路由
 admin_router = APIRouter(prefix="/admin", tags=["admin"])
 
