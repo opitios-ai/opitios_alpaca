@@ -8,7 +8,7 @@ from app.models import (
     HoldingInfo, ContractInfo, TradingHistory, DailySummary
 )
 from app.alpaca_client import AlpacaClient, pooled_client
-from app.middleware import internal_or_jwt_auth
+from app.middleware import internal_or_jwt_auth, role_required
 from config import settings
 from loguru import logger
 
@@ -990,7 +990,7 @@ async def get_dashboard(
     days: int = Query(30, description="Number of days for trading history and recent orders"),
     include_recent_orders: bool = Query(False, description="Include recent orders in response"),
     routing_info: dict = Depends(get_routing_info),
-    auth_data: dict = Depends(internal_or_jwt_auth)
+    _auth_data: dict = Depends(role_required(["admin"]))
 ):
     """Get comprehensive trading dashboard matching Tiger API format"""
     try:
