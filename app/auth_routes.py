@@ -5,13 +5,13 @@
 
 from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from typing import Dict, Optional
+from typing import Optional
 from pydantic import BaseModel
 
-from app.middleware import verify_jwt_token, create_jwt_token, is_internal_ip, internal_or_jwt_auth
+from app.middleware import verify_jwt_token, create_jwt_token, role_required, is_internal_ip
 # Demo JWT imports only for development - not used in production
 # from app.demo_jwt import generate_demo_jwt_token, get_demo_user_info
-from config import settings
+# from config import settings
 from fastapi import Request
 
 # 创建认证路由
@@ -58,16 +58,20 @@ admin_router = APIRouter(prefix="/admin", tags=["admin"])
 
 
 @admin_router.get("/account-pool/stats")
-async def get_account_pool_stats():
-    """获取账户连接池统计信息"""
+async def get_account_pool_stats(
+    _auth_data: dict = Depends(role_required(["admin"]))
+):
+    """获取账户连接池统计信息 - 内网直接放行，外网需要admin角色"""
     from app.account_pool import get_account_pool
     pool = get_account_pool()
     return pool.get_pool_stats()
 
 
 @admin_router.get("/system/health")
-async def get_system_health():
-    """获取系统健康状态"""
+async def get_system_health(
+    _auth_data: dict = Depends(role_required(["admin"]))
+):
+    """获取系统健康状态 - 内网直接放行，外网需要admin角色"""
     from app.account_pool import get_account_pool
     pool = get_account_pool()
     pool_stats = pool.get_pool_stats()
