@@ -403,6 +403,11 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         ]
         
     async def dispatch(self, request: Request, call_next: Callable):
+        # 预检请求直接放行 (CORS preflight)
+        if request.method == "OPTIONS":
+            response = Response()
+            return response
+
         # 跳过公共路径
         path = request.url.path
         
@@ -499,6 +504,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         }
         
     async def dispatch(self, request: Request, call_next: Callable):
+        # 预检请求直接放行 (CORS preflight)
+        if request.method == "OPTIONS":
+            response = Response()
+            return response
+
         # 跳过公共路径
         if request.url.path in ["/", "/docs", "/openapi.json", "/health"] or \
            request.url.path.startswith("/api/v1/health/"):
