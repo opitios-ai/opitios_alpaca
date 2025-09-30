@@ -342,31 +342,31 @@ get_current_user = get_current_context
 
 def role_required(roles: list[str]):
     """角色权限检查装饰器"""
-    def dependency(
+    async def dependency(
         request: Request,
         credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer(auto_error=False))
     ):
-        # 使用内网或JWT认证
-        import asyncio
-        auth_result = asyncio.create_task(internal_or_jwt_auth(request, credentials))
-        auth_data = asyncio.get_event_loop().run_until_complete(auth_result)
-        
+        # 使用内网或JWT认证（异步依赖，避免在线程池中使用事件循环）
+        auth_data = await internal_or_jwt_auth(request, credentials)
+
         # 内网/白名单IP直接放行
         if auth_data.get('internal'):
             logger.debug(f"Internal IP {auth_data.get('ip')} bypassing role check")
-            return
-            
+            return {"internal": True}
+
         payload = auth_data.get('user')
         if not payload:
             raise HTTPException(status_code=401, detail="Invalid user account")
-            
+
         user_role = payload.get('permission_group') or payload.get('role', 'user')
-        
+
         if user_role not in roles:
             raise HTTPException(
-                status_code=403, 
+                status_code=403,
                 detail=f"You need one of roles: {roles}. Current role: {user_role}"
             )
+
+        return {"internal": False, "role": user_role}
     return dependency
 
 class AuthenticationMiddleware(BaseHTTPMiddleware):
