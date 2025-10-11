@@ -729,6 +729,19 @@ async def place_stock_order(
         
         # 检查是否为批量下单
         if request.bulk_place:
+            # 批量下单仅允许管理员（内网默认允许；外网需JWT中具备admin/bulk_place权限或admin角色）
+            is_admin = False
+            if auth_data and auth_data.get("internal"):
+                is_admin = True
+            else:
+                payload = auth_data.get("user") if auth_data else None
+                if payload:
+                    user_role = payload.get("permission_group") or payload.get("role", "user")
+                    permissions = payload.get("permissions", [])
+                    is_admin = (user_role == "admin") or ("admin" in permissions) or ("bulk_place" in permissions)
+            if not is_admin:
+                logger.error(f"Bulk stock order denied - admin required. user_id={user_id}")
+                raise HTTPException(status_code=403, detail="Bulk order requires admin privileges")
             logger.info(f"Processing bulk stock order: {request.symbol} {request.qty} {request.side.value}")
             
             bulk_result = await pooled_client.bulk_place_stock_order(
@@ -822,6 +835,19 @@ async def place_option_order(
         
         # 检查是否为批量下单
         if request.bulk_place:
+            # 批量下单仅允许管理员（内网默认允许；外网需JWT中具备admin/bulk_place权限或admin角色）
+            is_admin = False
+            if auth_data and auth_data.get("internal"):
+                is_admin = True
+            else:
+                payload = auth_data.get("user") if auth_data else None
+                if payload:
+                    user_role = payload.get("permission_group") or payload.get("role", "user")
+                    permissions = payload.get("permissions", [])
+                    is_admin = (user_role == "admin") or ("admin" in permissions) or ("bulk_place" in permissions)
+            if not is_admin:
+                logger.error(f"Bulk option order denied - admin required. user_id={user_id}")
+                raise HTTPException(status_code=403, detail="Bulk order requires admin privileges")
             logger.info(f"Processing bulk option order: {request.option_symbol} {request.qty} {request.side.value}")
             
             bulk_result = await pooled_client.bulk_place_option_order(
