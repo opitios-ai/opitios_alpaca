@@ -61,7 +61,11 @@ class Order:
 
         try:
             parsed_time = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-            now = datetime.now().astimezone()
+            # Make both sides naive or both aware to avoid subtraction errors
+            if parsed_time.tzinfo is None:
+                now = datetime.now()
+            else:
+                now = datetime.now(parsed_time.tzinfo)
             return (now - parsed_time).total_seconds() / 60
         except:
             return 0
