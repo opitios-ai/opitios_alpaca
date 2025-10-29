@@ -1047,6 +1047,7 @@ async def get_dashboard(
             account_id=routing_info["account_id"],
             routing_key=routing_info["routing_key"]
         )
+        print(account_data)
         if "error" in account_data:
             raise HTTPException(status_code=500, detail=account_data["error"])
         
@@ -1113,9 +1114,13 @@ async def get_dashboard(
                 recent_orders = []
         
         # Transform account data to dashboard format
+        # Paper trading accounts start with 'PA', live accounts start with 'PB'
+        account_number = account_data.get("account_number", "")
+        is_paper = account_number.startswith("PA")
+        
         account_details = DashboardAccountDetails(
             account_name=account_name,
-            paper_trading=1 if account_data.get("pattern_day_trader") else 0,
+            paper_trading=1 if is_paper else 0,
             currency="USD",
             cash=account_data.get("cash", 0.0),
             net_liquidation=account_data.get("portfolio_value", 0.0)
