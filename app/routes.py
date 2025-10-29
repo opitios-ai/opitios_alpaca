@@ -1016,10 +1016,23 @@ async def get_dashboard(
     days: int = Query(30, description="Number of days for trading history and recent orders"),
     include_recent_orders: bool = Query(False, description="Include recent orders in response"),
     routing_info: dict = Depends(get_routing_info),
-    _auth_data: dict = Depends(role_required(["admin"]))
+    auth_data: dict = Depends(internal_or_jwt_auth)
 ):
     """Get comprehensive trading dashboard matching Tiger API format"""
     try:
+        # Ownership and role guard
+        # - Internal requests: allow
+        # - External: allow admin; otherwise only when JWT account_id matches requested account_id
+        if not auth_data.get("internal"):
+            payload = auth_data.get("user") or {}
+            user_role = payload.get("permission_group") or payload.get("role", "user")
+            permissions = payload.get("permissions", [])
+            is_admin = (user_role == "admin") or ("admin" in permissions)
+            requested_account_id = routing_info.get("account_id")
+            user_account_id = payload.get("account_id")
+            if not is_admin and requested_account_id != user_account_id:
+                raise HTTPException(status_code=403, detail="You can only access your own account dashboard")
+
         # Security: Require explicit account_id to prevent unauthorized access
         if not routing_info["account_id"]:
             raise HTTPException(
