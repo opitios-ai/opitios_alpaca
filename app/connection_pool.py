@@ -278,11 +278,13 @@ class ConnectionManager:
             if account_info:
                 # Extract key account information
                 account_id = str(account_info.id) if hasattr(account_info, 'id') else 'N/A'
+                account_number = str(account_info.account_number) if hasattr(account_info, 'account_number') else ''
                 equity = float(account_info.equity) if hasattr(account_info, 'equity') else 0.0
                 buying_power = float(account_info.buying_power) if hasattr(account_info, 'buying_power') else 0.0
                 cash = float(account_info.cash) if hasattr(account_info, 'cash') else 0.0
                 status = account_info.status if hasattr(account_info, 'status') else 'UNKNOWN'
-                account_type = 'Paper Trading' if getattr(account_info, 'pattern_day_trader', None) is not None else 'Live'
+                # Paper trading accounts start with 'PA', live accounts start with 'PB'
+                account_type = 'Paper Trading' if account_number.startswith('PA') else 'Live'
                 
                 # Log successful account verification - Enhanced format with emojis
                 account_type_emoji = "📄" if account_type == "Paper Trading" else "💰"
