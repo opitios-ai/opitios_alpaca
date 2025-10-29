@@ -855,14 +855,19 @@ class AlpacaClient:
             logger.info(f"Retrieved {len(orders)} orders for trading history (last {days} days)")
             
             # Group orders by date and calculate daily summaries
+            # Note: For options, monetary values must be multiplied by the contract multiplier (100)
+            # We keep avg_sold_price based on per-contract price (do NOT multiply by 100)
             daily_data = defaultdict(lambda: {
                 'net_profit': 0.0,
                 'sold_qty': 0,
                 'commission': 0.0,
-                'total_sold_value': 0.0,
+                # For avg price calculation (per-contract), keep unmultiplied totals
+                'total_sold_value_for_avg': 0.0,
+                # Monetary totals in USD (multiplied for options) - currently not exposed in response
+                'total_sold_value_usd': 0.0,
                 'sell_orders': 0,
                 'buy_orders': 0,
-                'total_buy_value': 0.0
+                'total_buy_value_usd': 0.0
             })
             
             overall_profit = 0.0
@@ -884,16 +889,35 @@ class AlpacaClient:
                     qty = float(order.filled_qty)
                     price = float(order.filled_avg_price) if order.filled_avg_price else 0.0
                     
+                    # Determine if this is an option order and select appropriate multiplier
+                    is_option = False
+                    try:
+                        asset_class_val = getattr(order, 'asset_class', None)
+                        if asset_class_val is not None:
+                            asset_class_str = getattr(asset_class_val, 'value', asset_class_val)
+                            if isinstance(asset_class_str, str) and 'option' in asset_class_str.lower():
+                                is_option = True
+                        # Fallback: detect option by symbol format
+                        if not is_option and hasattr(self, '_validate_option_symbol'):
+                            is_option = bool(self._validate_option_symbol(symbol))
+                    except Exception:
+                        # If any detection fails, default to stock behavior
+                        is_option = False
+                    multiplier = 100 if is_option else 1
+                    
                     if order.side.value == 'buy':
                         # Track buy orders for cost basis calculation
                         cost_basis_tracker[symbol].append((qty, price, filled_date))
                         daily_data[filled_date]['buy_orders'] += 1
-                        daily_data[filled_date]['total_buy_value'] += qty * price
+                        # Monetary total in USD (apply multiplier for options)
+                        daily_data[filled_date]['total_buy_value_usd'] += qty * price * multiplier
                         
                     elif order.side.value == 'sell' and price > 0:
                         # Calculate realized P&L for sell orders
-                        sold_value = qty * price
-                        daily_data[filled_date]['total_sold_value'] += sold_value
+                        # Maintain per-contract totals for avg price (no multiplier)
+                        daily_data[filled_date]['total_sold_value_for_avg'] += qty * price
+                        # Maintain USD totals with multiplier for options
+                        daily_data[filled_date]['total_sold_value_usd'] += qty * price * multiplier
                         daily_data[filled_date]['sold_qty'] += int(qty)
                         daily_data[filled_date]['sell_orders'] += 1
                         
@@ -906,13 +930,13 @@ class AlpacaClient:
                             cost_qty, cost_price, cost_date = cost_basis_tracker[symbol][0]
                             
                             if cost_qty <= remaining_qty:
-                                # Use entire cost basis entry
-                                realized_pnl += cost_qty * (price - cost_price)
+                                # Use entire cost basis entry (apply multiplier for options)
+                                realized_pnl += cost_qty * (price - cost_price) * multiplier
                                 remaining_qty -= cost_qty
                                 cost_basis_tracker[symbol].pop(0)
                             else:
-                                # Partial use of cost basis entry
-                                realized_pnl += remaining_qty * (price - cost_price)
+                                # Partial use of cost basis entry (apply multiplier for options)
+                                realized_pnl += remaining_qty * (price - cost_price) * multiplier
                                 cost_basis_tracker[symbol][0] = (cost_qty - remaining_qty, cost_price, cost_date)
                                 remaining_qty = 0
                         
@@ -930,7 +954,8 @@ class AlpacaClient:
                 data = daily_data[date]
                 # Include days with any trading activity (buy or sell)
                 if data['sell_orders'] > 0 or data['buy_orders'] > 0:
-                    avg_sold_price = data['total_sold_value'] / data['sold_qty'] if data['sold_qty'] > 0 else 0.0
+                    # avg_sold_price should reflect per-contract price, not USD totals
+                    avg_sold_price = data['total_sold_value_for_avg'] / data['sold_qty'] if data['sold_qty'] > 0 else 0.0
                     daily_summaries.append({
                         'date': date,
                         'net_profit': data['net_profit'],
