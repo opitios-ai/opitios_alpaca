@@ -32,13 +32,13 @@ class LoggingConfig:
                 colorize=False
             )
         
-        # Main application log
+        # Main application log - 保留INFO级别用于关键业务事件
         logger.add(
             self.log_dir / "alpaca_service.log",
             format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} | {message}",
             level="INFO",
-            rotation="100 MB",
-            retention="30 days",
+            rotation="50 MB",  # 减小rotation大小以更频繁清理
+            retention="14 days",  # 减少保留天数
             compression="gz",
             encoding="utf-8",
             enqueue=True
