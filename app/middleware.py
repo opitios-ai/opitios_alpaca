@@ -278,7 +278,7 @@ async def internal_or_jwt_auth(
     client_ip = request.client.host if request.client else "unknown"
     is_internal = is_internal_ip(client_ip)
     
-    logger.debug(f"Client IP: {client_ip}, Is Internal: {is_internal}")
+    # logger.debug(f"Client IP: {client_ip}, Is Internal: {is_internal}")
     
     if is_internal:
         # 内部访问：尝试解析token获取用户信息，如果没有token则仅标记为内部访问

@@ -184,7 +184,6 @@ class SellWatcher:
             cancel_minutes = self.config_manager.get_order_cancel_minutes()
             logger.info(f"开始取消超过 {cancel_minutes} 分钟的卖出订单")
             await self.order_manager.cancel_old_orders(minutes=cancel_minutes, side='all')
-            logger.info("取消旧订单检查完成")
 
             # 5. 检查是否在交易时间内
             # if not self._is_market_open():
