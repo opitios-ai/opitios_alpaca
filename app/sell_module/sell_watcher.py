@@ -153,18 +153,15 @@ class SellWatcher:
         """
         单次监控周期（类似Tiger的main循环内容）
         """
-        try:
-            logger.info("=" * 60)
-            logger.info("卖出监控周期开始")
-            logger.info("=" * 60)
+        try:            
+            logger.info("卖出监控周期开始")          
             start_time = datetime.now()
 
             # 1. 获取所有持仓
             all_positions = await self.position_manager.get_all_positions()
 
             if not all_positions:
-                logger.info("账户净持仓为0，没有持有期权")
-                logger.info("=" * 60)
+                logger.info("账户净持仓为0，没有持有期权")                
                 return
 
             # 2. 处理空头持仓（自动平仓）
@@ -174,8 +171,7 @@ class SellWatcher:
             long_positions = self.position_manager.filter_long_positions(all_positions)
 
             if not long_positions:
-                logger.info("没有多头期权持仓需要处理")
-                logger.info("=" * 60)
+                logger.info("没有多头期权持仓需要处理")                
                 return
 
             logger.info(f"发现 {len(long_positions)} 个多头期权持仓需要监控")
@@ -188,8 +184,7 @@ class SellWatcher:
 
             # 5. 检查是否在交易时间内
             # if not self._is_market_open():
-            #     logger.info("市场未开放，跳过策略执行")
-            #     logger.info("=" * 60)
+            #     logger.info("市场未开放，跳过策略执行")            
             #     return
 
             # 6. 执行卖出策略
@@ -199,10 +194,8 @@ class SellWatcher:
             await self._handle_zero_day_options(long_positions)
 
             # 计算执行时间
-            execution_time = (datetime.now() - start_time).total_seconds()
-            logger.info("=" * 60)
-            logger.info(f"卖出监控周期结束 - 用时 {execution_time:.2f}秒")
-            logger.info("=" * 60)
+            execution_time = (datetime.now() - start_time).total_seconds()            
+            logger.info(f"卖出监控周期结束 - 用时 {execution_time:.2f}秒")            
 
         except Exception as e:
             logger.error(f"监控周期异常: {e}")
