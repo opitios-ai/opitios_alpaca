@@ -128,7 +128,6 @@ class ConnectionManager:
             self._locks[connection_type] = asyncio.Lock()
             self._in_use[connection_type] = False
             
-            logger.info(f"Created {connection_type.value} connection successfully (user: {self.user_id})")
             return connection
             
         except Exception as e:
@@ -236,8 +235,6 @@ class ConnectionManager:
 
     async def shutdown(self):
         """Shutdown all connections"""
-        logger.info(f"Shutting down all connections for user {self.user_id}...")
-        
         # Release all locks
         for conn_type in list(self._locks.keys()):
             if self._locks[conn_type].locked():
@@ -345,7 +342,7 @@ class PoolManager:
             
         except RuntimeError:
             # No running event loop, delay task startup
-            logger.info("No running event loop, background tasks will be started later")
+            pass
     
     async def _ensure_async_components(self):
         """Ensure async components are initialized"""
@@ -419,8 +416,6 @@ class PoolManager:
                                 del manager._locks[conn_type]
                             if conn_type in manager._in_use:
                                 del manager._in_use[conn_type]
-                            
-                            logger.info(f"Cleaned up idle connection (user: {user_id}, connection: {conn_type.value}, idle time: {idle_time:.1f} minutes)")
                     except Exception as e:
                         logger.error(f"Failed to cleanup connection (user: {user_id}, connection: {conn_type.value}): {e}")
                 
@@ -433,7 +428,6 @@ class PoolManager:
                         try:
                             await manager.shutdown()
                             del self.user_managers[user_id]
-                            logger.info(f"Cleaned up user manager (user: {user_id}, idle time: {idle_time:.1f} minutes)")
                         except Exception as e:
                             logger.error(f"Failed to cleanup user manager (user: {user_id}): {e}")
     
@@ -456,7 +450,6 @@ class PoolManager:
                         paper_trading=user.alpaca_paper_trading
                     )
                     self.user_managers[user_id] = manager
-                    logger.info(f"Created user connection manager (user: {user_id})")
                     
                 except Exception as e:
                     logger.error(f"Failed to create user connection manager (user: {user_id}): {e}")
@@ -479,8 +472,6 @@ class PoolManager:
     
     async def shutdown(self):
         """Shutdown connection pool"""
-        logger.info("Shutting down connection pool...")
-        
         # Cancel background tasks
         for task in self._background_tasks:
             task.cancel()
@@ -507,8 +498,6 @@ class PoolManager:
                     logger.error(f"Failed to shutdown user manager (user: {user_id}): {e}")
             
             self.user_managers.clear()
-        
-        logger.info("Connection pool shutdown complete")
 
 
 # Global connection pool instance

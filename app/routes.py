@@ -546,10 +546,6 @@ async def get_multiple_option_quotes(request: MultiOptionQuoteRequest, routing_i
                 }
             )
         
-        # Log summary of batch request
-        success_rate = quotes_data.get('successful_count', 0) / len(request.option_symbols) * 100
-        logger.info(f"Batch option quotes: {success_rate:.1f}% success rate ({quotes_data.get('successful_count', 0)}/{len(request.option_symbols)})")
-        
         return quotes_data
     except HTTPException:
         raise
@@ -901,7 +897,6 @@ async def get_orders(
         if routing_info["account_id"] is None:
             logger.error("Account ID is required to get orders.")
             raise HTTPException(status_code=400, detail="Account ID is required for order retrieval")
-        logger.info(f"getting orders for account {routing_info['account_id']} with status {status} and limit {limit}")
         orders = await pooled_client.get_orders(
             status=status, 
             limit=limit,
@@ -930,7 +925,6 @@ async def cancel_order(
         if routing_info["account_id"] is None:
             logger.error(f"Account ID is required to cancel order {order_id}.")
             raise HTTPException(status_code=400, detail="Account ID is required for order cancellation")
-        logger.info(f"Cancelling order {order_id} for account {routing_info['account_id']}")
         if not order_id:
             logger.error("Order ID is required to cancel order.")
             raise HTTPException(status_code=400, detail="Order ID is required for cancellation")
@@ -1040,8 +1034,6 @@ async def get_dashboard(
                 detail="account_id parameter is required"
             )
         
-        logger.info(f"Getting dashboard for account {account_name} (ID: {routing_info['account_id']})")
-        
         # Get account information
         account_data = await pooled_client.get_account(
             account_id=routing_info["account_id"],
@@ -1108,7 +1100,6 @@ async def get_dashboard(
                             filtered_orders.append(order)
                     
                     recent_orders = filtered_orders
-                    logger.info(f"Retrieved {len(recent_orders)} recent orders for dashboard")
             except Exception as e:
                 logger.warning(f"Failed to retrieve recent orders for dashboard: {e}")
                 recent_orders = []

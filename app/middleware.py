@@ -51,7 +51,7 @@ def initialize_redis():
         # 测试连接
         redis_client.ping()
         redis_available = True
-        logger.info("Redis连接成功，启用分布式rate limiting")
+        logger.debug("Redis连接成功，启用分布式rate limiting")
     except (
         redis.ConnectionError,
         redis.TimeoutError,
@@ -253,9 +253,8 @@ def is_internal_ip(ip: str) -> bool:
 def verify_jwt_token(token: str) -> dict:
     """验证JWT token - 支持外部token"""
     try:
-        logger.info(f"Verifying JWT token with secret: {JWT_SECRET[:10]}... algorithm: {JWT_ALGORITHM}")
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        logger.info(f"JWT verification successful for user: {payload.get('username', 'unknown')}")
+        logger.debug(f"JWT verification successful for user: {payload.get('username', 'unknown')}")
         return payload
     except jwt.ExpiredSignatureError as e:
         logger.error(f"JWT token expired: {e}")
@@ -288,12 +287,9 @@ async def internal_or_jwt_auth(
             try:
                 payload = verify_jwt_token(credentials.credentials)
                 user_data = payload
-                logger.debug(f"Internal access with valid token: {user_data.get('user_id', 'unknown')}")
             except HTTPException:
                 logger.debug("Internal access with invalid token, proceeding without user data")
                 pass
-        else:
-            logger.debug("Internal access without token")
         
         return {
             "ip": client_ip, 
@@ -351,7 +347,6 @@ def role_required(roles: list[str]):
 
         # 内网/白名单IP直接放行
         if auth_data.get('internal'):
-            logger.debug(f"Internal IP {auth_data.get('ip')} bypassing role check")
             return {"internal": True}
 
         payload = auth_data.get('user')
@@ -411,18 +406,13 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         # 跳过公共路径
         path = request.url.path
         
-        # Debug logging
-        logger.debug(f"AuthMiddleware checking path: {path}")
-        
         # Check for health endpoints first
         if path.startswith("/api/v1/health"):
-            logger.debug(f"Skipping auth for health endpoint: {path}")
             return await call_next(request)
             
         if (path in self.public_paths or 
             path.startswith("/static/") or
             any(path.startswith("/api/v1/stocks/") and path.endswith("/quote") for _ in [None])):
-            logger.debug(f"Skipping auth for public path: {path}")
             return await call_next(request)
         
         # 获取客户端IP
@@ -568,35 +558,25 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         # 获取用户信息
         user_id = getattr(request.state, "user_id", "anonymous")
         
-        # 记录请求
-        logger.info(
-            "Request started",
-            extra={
-                "user_id": user_id,
-                "method": request.method,
-                "url": str(request.url),
-                "client_ip": request.client.host if request.client else None,
-                "user_agent": request.headers.get("user-agent")
-            }
-        )
-        
         # 执行请求
         response = await call_next(request)
         
         # 计算处理时间
         process_time = time.time() - start_time
         
-        # 记录响应
-        logger.info(
-            "Request completed",
-            extra={
-                "user_id": user_id,
-                "method": request.method,
-                "url": str(request.url),
-                "status_code": response.status_code,
-                "process_time": round(process_time, 4)
-            }
-        )
+        # 只记录慢请求（>1秒）或错误请求（4xx, 5xx）
+        if process_time > 1.0 or response.status_code >= 400:
+            logger.warning(
+                "Slow or error request",
+                extra={
+                    "user_id": user_id,
+                    "method": request.method,
+                    "url": str(request.url),
+                    "client_ip": request.client.host if request.client else None,
+                    "status_code": response.status_code,
+                    "process_time": round(process_time, 4)
+                }
+            )
         
         # 添加处理时间header
         response.headers["X-Process-Time"] = str(round(process_time, 4))

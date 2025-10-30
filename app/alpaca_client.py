@@ -304,9 +304,6 @@ class AlpacaClient:
                 else:
                     logger.warning(f"Could not get current stock price for {underlying_symbol}")
 
-                logger.info(
-                    f"Options chain for {underlying_symbol}: {len(options_data)} contracts, {quote_failures} quote failures")
-
                 return {
                     "underlying_symbol": underlying_symbol,
                     "underlying_price": current_price,
@@ -467,8 +464,6 @@ class AlpacaClient:
                     successful_quotes += 1
                 results.append(quote)
 
-            # Log summary of results
-            logger.info(f"Option quotes batch request: {successful_quotes}/{len(option_symbols)} successful")
             if failed_symbols:
                 logger.warning(f"Failed option symbols: {failed_symbols}")
 
@@ -528,10 +523,6 @@ class AlpacaClient:
                 return {"error": "Invalid order type or missing required price parameters"}
 
             order_prep_time = (time.time() - prep_start) * 1000  # Convert to milliseconds
-
-            # Submit order with timing
-            price_info = f" at ${limit_price}" if limit_price else f" at ${stop_price} (stop)" if stop_price else ""
-            logger.info(f"Placing stock order: {symbol} x{qty} {side.upper()} {order_type.upper()}{price_info}")
 
             submit_start = time.time()
             order = self.trading_client.submit_order(order_data)
@@ -793,7 +784,7 @@ class AlpacaClient:
                     })
 
             # Log detailed debugging information
-            logger.debug(f"Order status breakdown: {status_counts}")
+            # logger.debug(f"Order status breakdown: {status_counts}")
             logger.debug(f"Filtered {filtered_count}/{len(orders)} orders for status='{status}'")
 
             return order_list
@@ -830,10 +821,6 @@ class AlpacaClient:
             request_params = GetOrdersRequest(limit=1000, status="all")
             orders = self.trading_client.get_orders(filter=request_params)
             
-            # Log the number of orders retrieved from each method for debugging
-            logger.info(f"Retrieved {len(orders_data)} orders from get_orders method")
-            logger.info(f"Retrieved {len(orders)} orders from trading_client.get_orders method")
-            
             # Filter orders by date range after retrieval
             filtered_orders = []
             for order in orders:
@@ -851,8 +838,6 @@ class AlpacaClient:
                         filtered_orders.append(order)
             
             orders = filtered_orders
-            
-            logger.info(f"Retrieved {len(orders)} orders for trading history (last {days} days)")
             
             # Group orders by date and calculate daily summaries
             # Note: For options, monetary values must be multiplied by the contract multiplier (100)
@@ -963,8 +948,6 @@ class AlpacaClient:
                         'commission': data['commission'],
                         'avg_sold_price': avg_sold_price
                     })
-            
-            logger.info(f"Trading history summary: {len(daily_summaries)} trading days, overall profit: ${overall_profit:.2f}")
             
             return {
                 'overall_profit': overall_profit,
@@ -1241,14 +1224,6 @@ class PooledAlpacaClient:
                         order=OrderResponse(**order_result)
                     ))
 
-                    # 详细的成功日志 - 包含用户信息
-                    price_str = f" at ${order_result.get('limit_price')}" if order_result.get(
-                        'limit_price') else f" at ${order_result.get('stop_price')} (stop)" if order_result.get(
-                        'stop_price') else ""
-                    user_info = f"User: {user_id} | " if user_id else ""
-                    logger.info(
-                        f"✅ Stock order placed for {account_name}: {user_info}{order_result['symbol']} x{order_result['qty']} {order_result['side'].upper()}{price_str} | Order ID: {order_result['id']}")
-
                     # 发送Discord通知
                     # try:
                     #     from app.utils.discord_notifier import send_trade_notification
@@ -1302,12 +1277,10 @@ class PooledAlpacaClient:
         failed_orders = 0
 
         logger.info(f"🚀 Starting bulk option order for {len(account_stats)} accounts: {option_symbol} {qty} {side}")
-        logger.info(f"📊 Account stats: {list(account_stats.keys())}")
 
         # 为每个账户下单
         for i, (account_id, stats) in enumerate(account_stats.items()):
             account_name = stats.get("account_name")
-            logger.info(f"🔄 Processing account {i + 1}/{len(account_stats)}: {account_id} ({account_name})")
 
             try:
                 logger.info(f"📞 About to place option order for account {account_id}")
@@ -1374,8 +1347,6 @@ class PooledAlpacaClient:
                     success=False,
                     error=error_msg
                 ))
-
-            logger.info(f"🏁 Completed processing account {account_id} ({i + 1}/{len(account_stats)})")
 
         logger.info(
             f"🎯 Bulk option order COMPLETED: {successful_orders} successful, {failed_orders} failed out of {len(account_stats)} accounts")
