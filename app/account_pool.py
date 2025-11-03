@@ -527,6 +527,7 @@ class AccountPool:
                 "tier": account_config.tier if account_config else "unknown",
                 "connection_count": connection.connection_count,
                 "is_available": connection.is_available,
+                "paper_trading": account_config.paper_trading if account_config else True,
                 "connection_details": connection_stats.get('connections', {})
             }
             stats["account_stats"][account_id] = account_stats
