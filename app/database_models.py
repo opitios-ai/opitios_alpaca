@@ -131,6 +131,7 @@ class DatabaseManager:
         try:
             with self.SessionLocal() as session:
                 # Query with JOIN to trading_rules table (similar to Tiger service)
+                # Note: Relies on SQLAlchemy's table metadata to use the correct schema
                 query = text("""
                     SELECT 
                         au.id,
@@ -145,8 +146,8 @@ class DatabaseManager:
                         MAX(CASE WHEN tr.rule_name = 'MODE_STOCK_TRADE' AND tr.is_active = 1 AND tr.created_by_admin = 1 THEN 1 ELSE 0 END) AS MODE_STOCK_TRADE,
                         MAX(CASE WHEN tr.rule_name = 'MODE_OPTION_TRADE' AND tr.is_active = 1 AND tr.created_by_admin = 1 THEN 1 ELSE 0 END) AS MODE_OPTION_TRADE,
                         MAX(CASE WHEN tr.rule_name = 'MODE_DAY_TRADE' AND tr.is_active = 1 AND tr.created_by_admin = 1 THEN 1 ELSE 0 END) AS MODE_DAY_TRADE
-                    FROM test_option.app_alpaca_users au
-                    LEFT JOIN test_option.trading_rules tr ON au.user_uuid = tr.user_id
+                    FROM app_alpaca_users au
+                    LEFT JOIN trading_rules tr ON au.user_uuid = tr.user_id
                         AND tr.rule_name IN ('MODE_STOCK_TRADE', 'MODE_OPTION_TRADE', 'MODE_DAY_TRADE')
                     WHERE au.account_name = :account_name
                         AND au.enabled = TRUE

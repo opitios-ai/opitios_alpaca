@@ -1187,7 +1187,7 @@ class PooledAlpacaClient:
         logger.info(f"Starting bulk stock order for {len(account_stats)} accounts: {symbol} {qty} {side}")
         
         # Get database manager for strategy validation
-        db_manager = get_database_manager(settings.database['url'])
+        db_manager = get_database_manager(settings.database_url)
 
         # 为每个账户下单
         for account_id, stats in account_stats.items():
@@ -1303,7 +1303,7 @@ class PooledAlpacaClient:
         logger.info(f"🚀 Starting bulk option order for {len(account_stats)} accounts: {option_symbol} {qty} {side}")
         
         # Get database manager for strategy validation
-        db_manager = get_database_manager(settings.database['url'])
+        db_manager = get_database_manager(settings.database_url)
 
         # 为每个账户下单
         for i, (account_id, stats) in enumerate(account_stats.items()):
