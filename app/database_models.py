@@ -30,7 +30,7 @@ class AlpacaUser(Base):
     
     def to_config_dict(self) -> Dict:
         """Convert database record to config dictionary format"""
-        return {
+        config = {
             'account_id': self.account_name,
             'name': self.account_name,
             'api_key': self.api_key,
@@ -38,12 +38,22 @@ class AlpacaUser(Base):
             'paper_trading': bool(self.paper_trading),
             'enabled': bool(self.enabled),
             'region': 'us',
-            'tier': 'premium',  # Default tier, can be added to DB later
+            'tier': 'premium',
             'max_connections': 3,
             'user_uuid': self.user_uuid,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
+        
+        # Add strategy flags if they exist (set by get_user_with_strategies)
+        if hasattr(self, 'MODE_STOCK_TRADE'):
+            config['MODE_STOCK_TRADE'] = self.MODE_STOCK_TRADE
+        if hasattr(self, 'MODE_OPTION_TRADE'):
+            config['MODE_OPTION_TRADE'] = self.MODE_OPTION_TRADE
+        if hasattr(self, 'MODE_DAY_TRADE'):
+            config['MODE_DAY_TRADE'] = self.MODE_DAY_TRADE
+            
+        return config
 
 
 class DatabaseManager:
@@ -114,16 +124,60 @@ class DatabaseManager:
             raise
     
     def get_user_by_account_name(self, account_name: str) -> Optional[AlpacaUser]:
-        """Get specific user by account name"""
+        """Get specific user by account name with strategy flags"""
         if not self._initialized:
             self.initialize()
             
         try:
             with self.SessionLocal() as session:
-                user = session.query(AlpacaUser).filter(
-                    AlpacaUser.account_name == account_name,
-                    AlpacaUser.enabled == True
-                ).first()
+                # Query with JOIN to trading_rules table (similar to Tiger service)
+                query = text("""
+                    SELECT 
+                        au.id,
+                        au.user_uuid,
+                        au.account_name,
+                        au.api_key,
+                        au.secret_key,
+                        au.paper_trading,
+                        au.enabled,
+                        au.created_at,
+                        au.updated_at,
+                        MAX(CASE WHEN tr.rule_name = 'MODE_STOCK_TRADE' AND tr.is_active = 1 AND tr.created_by_admin = 1 THEN 1 ELSE 0 END) AS MODE_STOCK_TRADE,
+                        MAX(CASE WHEN tr.rule_name = 'MODE_OPTION_TRADE' AND tr.is_active = 1 AND tr.created_by_admin = 1 THEN 1 ELSE 0 END) AS MODE_OPTION_TRADE,
+                        MAX(CASE WHEN tr.rule_name = 'MODE_DAY_TRADE' AND tr.is_active = 1 AND tr.created_by_admin = 1 THEN 1 ELSE 0 END) AS MODE_DAY_TRADE
+                    FROM test_option.app_alpaca_users au
+                    LEFT JOIN test_option.trading_rules tr ON au.user_uuid = tr.user_id
+                        AND tr.rule_name IN ('MODE_STOCK_TRADE', 'MODE_OPTION_TRADE', 'MODE_DAY_TRADE')
+                    WHERE au.account_name = :account_name
+                        AND au.enabled = TRUE
+                    GROUP BY 
+                        au.id, au.user_uuid, au.account_name, au.api_key, 
+                        au.secret_key, au.paper_trading, au.enabled, 
+                        au.created_at, au.updated_at
+                """)
+                
+                result = session.execute(query, {"account_name": account_name})
+                row = result.fetchone()
+                
+                if row is None:
+                    return None
+                
+                # Create AlpacaUser object with strategy flags
+                user = AlpacaUser()
+                user.id = row.id
+                user.user_uuid = row.user_uuid
+                user.account_name = row.account_name
+                user.api_key = row.api_key
+                user.secret_key = row.secret_key
+                user.paper_trading = row.paper_trading
+                user.enabled = row.enabled
+                user.created_at = row.created_at
+                user.updated_at = row.updated_at
+                
+                # Add strategy flags as attributes
+                user.MODE_STOCK_TRADE = row.MODE_STOCK_TRADE
+                user.MODE_OPTION_TRADE = row.MODE_OPTION_TRADE
+                user.MODE_DAY_TRADE = row.MODE_DAY_TRADE
                 
                 return user
                 

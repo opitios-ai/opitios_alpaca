@@ -723,6 +723,13 @@ async def place_stock_order(
             logger.error("Stock order attempt without user identification - SECURITY RISK")
             raise HTTPException(status_code=401, detail="User identification required for order placement")
         
+        # Validate trading strategy before placing order
+        from app.utils.strategy_validator import validate_order_strategy
+        from app.database_models import get_database_manager
+        from config import settings
+        
+        strategy_name = request.strategy_name
+        
         # 检查是否为批量下单
         if request.bulk_place:
             # 批量下单仅允许管理员（内网默认允许；外网需JWT中具备admin/bulk_place权限或admin角色）
@@ -740,6 +747,7 @@ async def place_stock_order(
                 raise HTTPException(status_code=403, detail="Bulk order requires admin privileges")
             logger.info(f"Processing bulk stock order: {request.symbol} {request.qty} {request.side.value}")
             
+            # Note: Bulk orders validate strategy per account in bulk_place_stock_order method
             bulk_result = await pooled_client.bulk_place_stock_order(
                 symbol=request.symbol.upper(),
                 qty=request.qty,
@@ -748,13 +756,18 @@ async def place_stock_order(
                 limit_price=request.limit_price,
                 stop_price=request.stop_price,
                 time_in_force=request.time_in_force.value,
-                user_id=user_id
+                user_id=user_id,
+                strategy_name=strategy_name
             )
             
             return BulkOrderResponse(**bulk_result)
         
         # 单账户下单
         else:
+            # Validate strategy for single account order
+            db_manager = get_database_manager(settings.database_url)
+            validate_order_strategy(db_manager, routing_info["account_id"], strategy_name)
+            
             order_data = await pooled_client.place_stock_order(
                 symbol=request.symbol.upper(),
                 qty=request.qty,
@@ -829,6 +842,13 @@ async def place_option_order(
             logger.error("Option order attempt without user identification - SECURITY RISK")
             raise HTTPException(status_code=401, detail="User identification required for order placement")
         
+        # Validate trading strategy before placing order
+        from app.utils.strategy_validator import validate_order_strategy
+        from app.database_models import get_database_manager
+        from config import settings
+        
+        strategy_name = request.strategy_name
+        
         # 检查是否为批量下单
         if request.bulk_place:
             # 批量下单仅允许管理员（内网默认允许；外网需JWT中具备admin/bulk_place权限或admin角色）
@@ -846,6 +866,7 @@ async def place_option_order(
                 raise HTTPException(status_code=403, detail="Bulk order requires admin privileges")
             logger.info(f"Processing bulk option order: {request.option_symbol} {request.qty} {request.side.value}")
             
+            # Note: Bulk orders validate strategy per account in bulk_place_option_order method
             bulk_result = await pooled_client.bulk_place_option_order(
                 option_symbol=request.option_symbol.upper(),
                 qty=request.qty,
@@ -853,13 +874,18 @@ async def place_option_order(
                 order_type=request.type.value,
                 limit_price=request.limit_price,
                 time_in_force=request.time_in_force.value,
-                user_id=user_id
+                user_id=user_id,
+                strategy_name=strategy_name
             )
             
             return BulkOrderResponse(**bulk_result)
         
         # 单账户下单
         else:
+            # Validate strategy for single account order
+            db_manager = get_database_manager(settings.database_url)
+            validate_order_strategy(db_manager, routing_info["account_id"], strategy_name)
+            
             order_data = await pooled_client.place_option_order(
                 option_symbol=request.option_symbol.upper(),
                 qty=request.qty,

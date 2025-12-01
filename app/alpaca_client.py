@@ -1168,9 +1168,13 @@ class PooledAlpacaClient:
 
     async def bulk_place_stock_order(self, symbol: str, qty: float, side: str, order_type: str = "market",
                                      limit_price: Optional[float] = None, stop_price: Optional[float] = None,
-                                     time_in_force: str = "day", user_id: Optional[str] = None) -> Dict[str, Any]:
+                                     time_in_force: str = "day", user_id: Optional[str] = None,
+                                     strategy_name: str = "MODE_STOCK_TRADE") -> Dict[str, Any]:
         """为所有账户批量下股票订单"""
         from app.models import BulkOrderResult
+        from app.utils.strategy_validator import validate_order_strategy
+        from app.database_models import get_database_manager
+        from config import settings
 
         # 获取所有可用账户
         pool_stats = self.pool.get_pool_stats()
@@ -1181,12 +1185,29 @@ class PooledAlpacaClient:
         failed_orders = 0
 
         logger.info(f"Starting bulk stock order for {len(account_stats)} accounts: {symbol} {qty} {side}")
+        
+        # Get database manager for strategy validation
+        db_manager = get_database_manager(settings.database['url'])
 
         # 为每个账户下单
         for account_id, stats in account_stats.items():
             account_name = stats.get("account_name")
 
             try:
+                # Validate strategy for this account (similar to Tiger service)
+                try:
+                    validate_order_strategy(db_manager, account_id, strategy_name)
+                except Exception as strategy_error:
+                    failed_orders += 1
+                    results.append(BulkOrderResult(
+                        account_id=account_id,
+                        account_name=account_name,
+                        success=False,
+                        error=str(strategy_error)
+                    ))
+                    logger.warning(f"Strategy validation failed for account {account_id}: {strategy_error}")
+                    continue
+                
                 # 使用指定账户下单
                 order_result = await self.place_stock_order(
                     symbol=symbol,
@@ -1264,9 +1285,12 @@ class PooledAlpacaClient:
 
     async def bulk_place_option_order(self, option_symbol: str, qty: int, side: str, order_type: str = "market",
                                       limit_price: Optional[float] = None, time_in_force: str = "day",
-                                      user_id: Optional[str] = None) -> Dict[str, Any]:
+                                      user_id: Optional[str] = None, strategy_name: str = "MODE_OPTION_TRADE") -> Dict[str, Any]:
         """为所有账户批量下期权订单"""
         from app.models import BulkOrderResult
+        from app.utils.strategy_validator import validate_order_strategy
+        from app.database_models import get_database_manager
+        from config import settings
 
         # 获取所有可用账户
         pool_stats = self.pool.get_pool_stats()
@@ -1277,12 +1301,29 @@ class PooledAlpacaClient:
         failed_orders = 0
 
         logger.info(f"🚀 Starting bulk option order for {len(account_stats)} accounts: {option_symbol} {qty} {side}")
+        
+        # Get database manager for strategy validation
+        db_manager = get_database_manager(settings.database['url'])
 
         # 为每个账户下单
         for i, (account_id, stats) in enumerate(account_stats.items()):
             account_name = stats.get("account_name")
 
             try:
+                # Validate strategy for this account (similar to Tiger service)
+                try:
+                    validate_order_strategy(db_manager, account_id, strategy_name)
+                except Exception as strategy_error:
+                    failed_orders += 1
+                    results.append(BulkOrderResult(
+                        account_id=account_id,
+                        account_name=account_name,
+                        success=False,
+                        error=str(strategy_error)
+                    ))
+                    logger.warning(f"Strategy validation failed for account {account_id}: {strategy_error}")
+                    continue
+                
                 logger.info(f"📞 About to place option order for account {account_id}")
                 # 使用指定账户下单
                 order_result = await self.place_option_order(
