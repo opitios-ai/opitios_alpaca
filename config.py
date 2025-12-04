@@ -72,17 +72,20 @@ def load_secrets():
     final_config = yaml_config.copy()
     final_config['accounts'] = database_accounts
     
-    return final_config
+    return final_config, database_url
 
 
 # Load secrets at module level
-secrets = load_secrets()
+secrets, database_url = load_secrets()
 
 
 class Settings(BaseSettings):
     
     # Multi-Account Configuration (FROM DATABASE ONLY)
     accounts: Dict = secrets.get('accounts', {})
+    
+    # Database Configuration
+    database_url: str = database_url
     
     # FastAPI Configuration
     app_name: str = "Opitios Alpaca Trading Service"

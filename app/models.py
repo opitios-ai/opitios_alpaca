@@ -37,6 +37,11 @@ class StockOrderRequest(BaseModel):
     limit_price: Optional[float] = Field(None, gt=0, description="Limit price for limit orders")
     stop_price: Optional[float] = Field(None, gt=0, description="Stop price for stop orders")
     bulk_place: Optional[bool] = Field(default=False, description="If true, place order for all accounts")
+    strategy_name: Optional[str] = Field(
+        "MODE_STOCK_TRADE",
+        description="Trading strategy to validate (default: MODE_STOCK_TRADE)",
+        example="MODE_STOCK_TRADE"
+    )
 
 # Options Models
 class OptionType(str, Enum):
@@ -62,6 +67,11 @@ class OptionOrderRequest(BaseModel):
     time_in_force: TimeInForce = Field(default=TimeInForce.DAY, description="Time in force")
     limit_price: Optional[float] = Field(None, gt=0, description="Limit price for limit orders")
     bulk_place: Optional[bool] = Field(default=False, description="If true, place order for all accounts")
+    strategy_name: Optional[str] = Field(
+        None,
+        description="Trading strategy to validate (default: MODE_DAY_TRADE for BUY, MODE_OPTION_TRADE for SELL)",
+        example="MODE_DAY_TRADE"
+    )
 
 # Response Models
 class StockQuoteResponse(BaseModel):
