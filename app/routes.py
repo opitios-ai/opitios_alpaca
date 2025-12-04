@@ -728,7 +728,8 @@ async def place_stock_order(
         from app.database_models import get_database_manager
         from config import settings
         
-        strategy_name = request.strategy_name
+        # Default to MODE_STOCK_TRADE if not provided
+        strategy_name = request.strategy_name or "MODE_STOCK_TRADE"
         
         # 检查是否为批量下单
         if request.bulk_place:
@@ -847,7 +848,8 @@ async def place_option_order(
         from app.database_models import get_database_manager
         from config import settings
         
-        strategy_name = request.strategy_name
+        # Default to MODE_DAY_TRADE if not provided
+        strategy_name = request.strategy_name or "MODE_DAY_TRADE"
         
         # 检查是否为批量下单
         if request.bulk_place:
