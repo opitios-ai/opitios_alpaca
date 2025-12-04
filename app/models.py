@@ -68,9 +68,9 @@ class OptionOrderRequest(BaseModel):
     limit_price: Optional[float] = Field(None, gt=0, description="Limit price for limit orders")
     bulk_place: Optional[bool] = Field(default=False, description="If true, place order for all accounts")
     strategy_name: Optional[str] = Field(
-        "MODE_OPTION_TRADE",
-        description="Trading strategy to validate (default: MODE_OPTION_TRADE)",
-        example="MODE_OPTION_TRADE"
+        None,
+        description="Trading strategy to validate (default: MODE_DAY_TRADE for BUY, MODE_OPTION_TRADE for SELL)",
+        example="MODE_DAY_TRADE"
     )
 
 # Response Models
