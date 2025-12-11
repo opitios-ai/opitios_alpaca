@@ -69,7 +69,7 @@ class OptionOrderRequest(BaseModel):
     bulk_place: Optional[bool] = Field(default=False, description="If true, place order for all accounts")
     strategy_name: Optional[str] = Field(
         None,
-        description="Trading strategy to validate (default: MODE_DAY_TRADE for BUY, MODE_OPTION_TRADE for SELL)",
+        description="Trading strategy to validate. If not provided: BUY uses MODE_DAY_TRADE (day trading), SELL uses MODE_OPTION_TRADE (allows closing positions with option trading permission)",
         example="MODE_DAY_TRADE"
     )
 
