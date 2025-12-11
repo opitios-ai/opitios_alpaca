@@ -848,8 +848,15 @@ async def place_option_order(
         from app.database_models import get_database_manager
         from config import settings
         
-        # Default to MODE_DAY_TRADE if not provided
-        strategy_name = request.strategy_name or "MODE_DAY_TRADE"
+        # Set strategy based on order side if not explicitly provided
+        # BUY: requires MODE_DAY_TRADE (day trading permission)
+        # SELL: requires MODE_OPTION_TRADE (option trading permission for closing positions)
+        if request.strategy_name:
+            strategy_name = request.strategy_name
+        elif request.side.value.lower() == "buy":
+            strategy_name = "MODE_DAY_TRADE"
+        else:  # sell
+            strategy_name = "MODE_OPTION_TRADE"
         
         # 检查是否为批量下单
         if request.bulk_place:
