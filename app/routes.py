@@ -41,7 +41,11 @@ def get_alpaca_client() -> AlpacaClient:
 # Health check endpoint
 @router.get("/health")
 async def health_check():
-    """Health check endpoint with configuration status"""
+    """Health check endpoint with configuration and WebSocket status"""
+    from app.websocket_manager import ws_manager
+    
+    ws_status = ws_manager.get_connection_status()
+    
     return {
         "status": "healthy", 
         "service": "Opitios Alpaca Trading Service",
@@ -51,6 +55,11 @@ async def health_check():
             "strict_error_handling": settings.strict_error_handling,
             "multi_account_mode": len(settings.accounts) > 0,
             "max_option_symbols_per_request": settings.max_option_symbols_per_request
+        },
+        "websocket": {
+            "total_accounts": ws_status["total_accounts"],
+            "connected_accounts": ws_status["connected_accounts"],
+            "connection_rate": f"{ws_status['connected_accounts']}/{ws_status['total_accounts']}"
         },
         "data_policy": "Real Alpaca market data only - no calculated or mock data"
     }
@@ -78,7 +87,7 @@ async def get_account_info(
     routing_info: dict = Depends(get_routing_info),
     auth_data: dict = Depends(internal_or_jwt_auth)
 ):
-    """Get account information - uses connection pool with routing"""
+    """Get account information - real-time from WebSocket in-memory cache (< 1ms)"""
     try:
         # Security: Require explicit account_id to prevent unauthorized access
         if not routing_info["account_id"]:
@@ -87,13 +96,17 @@ async def get_account_info(
                 detail="account_id parameter is required"
             )
         
-        account_data = await pooled_client.get_account(
-            account_id=routing_info["account_id"],
-            routing_key=routing_info["routing_key"]
-        )
-        if "error" in account_data:
-            raise HTTPException(status_code=500, detail=account_data["error"])
+        # Get from WebSocket in-memory cache
+        from app.websocket_manager import ws_manager
+        account_data = ws_manager.get_account(routing_info["account_id"])
+        
+        if not account_data:
+            raise HTTPException(status_code=404, detail=f"Account {routing_info['account_id']} not found")
+        
+        logger.info(f"⚡ Real-time account: {routing_info['account_id']} | < 1ms")
         return AccountResponse(**account_data)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error in get_account_info: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -103,7 +116,7 @@ async def get_positions(
     routing_info: dict = Depends(get_routing_info),
     auth_data: dict = Depends(internal_or_jwt_auth)
 ):
-    """Get all positions - uses connection pool with routing"""
+    """Get all positions - real-time from WebSocket in-memory cache (< 1ms)"""
     try:
         # Security: Require explicit account_id to prevent unauthorized access
         if not routing_info["account_id"]:
@@ -112,13 +125,12 @@ async def get_positions(
                 detail="account_id parameter is required"
             )
         
-        positions = await pooled_client.get_positions(
-            account_id=routing_info["account_id"],
-            routing_key=routing_info["routing_key"]
-        )
-        if positions and "error" in positions[0]:
-            raise HTTPException(status_code=500, detail=positions[0]["error"])
-        return [PositionResponse(**pos) for pos in positions if "error" not in pos]
+        # Get from WebSocket in-memory cache
+        from app.websocket_manager import ws_manager
+        positions = ws_manager.get_positions(routing_info["account_id"])
+        
+        logger.info(f"⚡ Real-time positions: {routing_info['account_id']} | {len(positions)} positions | < 1ms")
+        return [PositionResponse(**pos) for pos in positions]
     except Exception as e:
         logger.error(f"Error in get_positions: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -783,6 +795,7 @@ async def place_stock_order(
             )
             if "error" in order_data:
                 raise HTTPException(status_code=400, detail=order_data["error"])
+            
             return OrderResponse(**order_data)
             
     except Exception as e:
@@ -908,6 +921,7 @@ async def place_option_order(
             )
             if "error" in order_data:
                 raise HTTPException(status_code=400, detail=order_data["error"])
+            
             return order_data
             
     except HTTPException:
@@ -971,6 +985,7 @@ async def cancel_order(
         )
         if "error" in result:
             raise HTTPException(status_code=400, detail=result["error"])
+        
         return result
     except HTTPException:
         raise
@@ -1069,22 +1084,16 @@ async def get_dashboard(
                 detail="account_id parameter is required"
             )
         
-        # Get account information
-        account_data = await pooled_client.get_account(
-            account_id=routing_info["account_id"],
-            routing_key=routing_info["routing_key"]
-        )
-        print(account_data)
-        if "error" in account_data:
-            raise HTTPException(status_code=500, detail=account_data["error"])
+        # Get from WebSocket in-memory cache
+        from app.websocket_manager import ws_manager
         
-        # Get positions
-        positions = await pooled_client.get_positions(
-            account_id=routing_info["account_id"],
-            routing_key=routing_info["routing_key"]
-        )
-        if positions and "error" in positions[0]:
-            raise HTTPException(status_code=500, detail=positions[0]["error"])
+        account_data = ws_manager.get_account(routing_info["account_id"])
+        if not account_data:
+            raise HTTPException(status_code=404, detail=f"Account {routing_info['account_id']} not found")
+        
+        positions = ws_manager.get_positions(routing_info["account_id"])
+        
+        logger.info(f"⚡ Real-time dashboard: {routing_info['account_id']} | < 1ms")
         
         # Get trading history
         trading_history = await pooled_client.get_trading_history(

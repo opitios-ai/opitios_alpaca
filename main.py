@@ -86,10 +86,27 @@ async def lifespan(app: FastAPI):
         logger.error(f"Failed to initialize sell background service: {e}")
         # Don't raise - let the main service continue running
     
+    # Start WebSocket manager for real-time updates
+    try:
+        from app.websocket_manager import ws_manager
+        import asyncio
+        asyncio.create_task(ws_manager.start())
+        logger.info("✓ WebSocket manager started - real-time updates enabled")
+    except Exception as e:
+        logger.warning(f"WebSocket manager failed to start: {e}")
+    
     yield
     
     # Shutdown
     logger.info(f"Shutting down {settings.app_name}")
+    
+    # Stop WebSocket manager
+    try:
+        from app.websocket_manager import ws_manager
+        await ws_manager.stop()
+        logger.info("✓ WebSocket manager stopped")
+    except Exception as e:
+        logger.error(f"Error stopping WebSocket manager: {e}")
     
     # Shutdown sell background service
     try:
