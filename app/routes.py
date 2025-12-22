@@ -1095,55 +1095,41 @@ async def get_dashboard(
         
         logger.info(f"⚡ Real-time dashboard: {routing_info['account_id']} | < 1ms")
         
-        # Get trading history
-        trading_history = await pooled_client.get_trading_history(
-            days=days,
-            account_id=routing_info["account_id"],
-            routing_key=routing_info["routing_key"]
-        )
+        # Get cached orders from WebSocket manager
+        cached_orders = ws_manager.get_orders(routing_info["account_id"])
         
-        # Get profit report
-        profit_report_data = await pooled_client.get_profit_report(
-            days=days,
-            account_id=routing_info["account_id"],
-            routing_key=routing_info["routing_key"]
-        )
+        # Calculate trading history from cached orders
+        from app.dashboard_calculator import calculate_trading_history_from_cache, calculate_profit_report_from_cache
+        trading_history = calculate_trading_history_from_cache(cached_orders, days)
         
-        # Get recent orders if requested
+        # Calculate profit report from cached orders
+        profit_report_data = calculate_profit_report_from_cache(cached_orders, days)
+        
+        # Get recent orders if requested (from cache)
         recent_orders = []
         if include_recent_orders:
             try:
-                # Use days parameter to determine how many orders to fetch
-                # Estimate: assume max 10 orders per day, so days * 10 should be sufficient
-                estimated_limit = max(days * 10, 50)  # At least 50 orders
-                orders_data = await pooled_client.get_orders(
-                    status="all",
-                    limit=estimated_limit,
-                    account_id=routing_info["account_id"],
-                    routing_key=routing_info["routing_key"]
-                )
-                if orders_data and "error" not in orders_data[0]:
-                    # Filter orders to only include those within the specified days
-                    from datetime import datetime, timedelta
-                    cutoff_date = datetime.now() - timedelta(days=days)
-                    
-                    filtered_orders = []
-                    for order in orders_data:
-                        try:
-                            # Parse the submitted_at date to check if it's within the range
-                            submitted_at_str = order.get('submitted_at', '')
-                            if submitted_at_str:
-                                # Use the same parsing logic as OrderResponse
-                                import re
-                                clean_date = re.sub(r'\s+(EDT|EST|PDT|PST|CDT|CST|MDT|MST|UTC|GMT)\s*$', '', submitted_at_str.strip())
-                                order_date = datetime.fromisoformat(clean_date.replace(' ', 'T'))
-                                if order_date >= cutoff_date:
-                                    filtered_orders.append(order)
-                        except (ValueError, TypeError):
-                            # If we can't parse the date, include the order to be safe
-                            filtered_orders.append(order)
-                    
-                    recent_orders = filtered_orders
+                # Filter cached orders to only include those within the specified days
+                from datetime import datetime, timedelta
+                cutoff_date = datetime.now() - timedelta(days=days)
+                
+                filtered_orders = []
+                for order in cached_orders:
+                    try:
+                        # Parse the submitted_at date to check if it's within the range
+                        submitted_at_str = order.get('submitted_at', '')
+                        if submitted_at_str:
+                            # Use the same parsing logic as OrderResponse
+                            import re
+                            clean_date = re.sub(r'\s+(EDT|EST|PDT|PST|CDT|CST|MDT|MST|UTC|GMT)\s*$', '', submitted_at_str.strip())
+                            order_date = datetime.fromisoformat(clean_date.replace(' ', 'T'))
+                            if order_date >= cutoff_date:
+                                filtered_orders.append(order)
+                    except (ValueError, TypeError):
+                        # If we can't parse the date, include the order to be safe
+                        filtered_orders.append(order)
+                
+                recent_orders = filtered_orders
             except Exception as e:
                 logger.warning(f"Failed to retrieve recent orders for dashboard: {e}")
                 recent_orders = []

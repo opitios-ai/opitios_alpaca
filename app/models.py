@@ -116,18 +116,44 @@ class OptionQuoteResponse(BaseModel):
 
 class OrderResponse(BaseModel):
     id: str
+    client_order_id: Optional[str] = None
     symbol: str
+    asset_id: Optional[str] = None
+    asset_class: Optional[str] = None  # 资产类型 - 用于识别期权 (us_option)
     qty: float
     side: str
     order_type: str
+    type: Optional[str] = None  # Alpaca 返回的 type 字段
     status: str
-    filled_qty: Optional[float]
-    filled_avg_price: Optional[float]
-    submitted_at: datetime
-    filled_at: Optional[datetime]
-    asset_class: Optional[str] = None  # 资产类型 - 用于识别期权 (us_option)
+    filled_qty: Optional[float] = None
+    filled_avg_price: Optional[float] = None
+    limit_price: Optional[float] = None  # 限价单价格 - 前端必需
+    stop_price: Optional[float] = None   # 止损单价格
+    time_in_force: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    submitted_at: Optional[datetime] = None
+    filled_at: Optional[datetime] = None
+    expired_at: Optional[datetime] = None
+    canceled_at: Optional[datetime] = None
+    failed_at: Optional[datetime] = None
+    replaced_at: Optional[datetime] = None
+    replaced_by: Optional[str] = None
+    replaces: Optional[str] = None
+    order_class: Optional[str] = None
+    position_intent: Optional[str] = None
+    extended_hours: Optional[bool] = None
+    legs: Optional[List[Dict[str, Any]]] = None
+    trail_percent: Optional[float] = None
+    trail_price: Optional[float] = None
+    hwm: Optional[float] = None
+    subtag: Optional[str] = None
+    source: Optional[str] = None
+    expires_at: Optional[datetime] = None
+    notional: Optional[float] = None
     
-    @field_validator('submitted_at', 'filled_at', mode='before')
+    @field_validator('submitted_at', 'filled_at', 'created_at', 'updated_at', 'expired_at', 
+                     'canceled_at', 'failed_at', 'replaced_at', 'expires_at', mode='before')
     @classmethod
     def parse_datetime_with_timezone(cls, v):
         """Parse datetime strings that may contain timezone information like 'EDT'"""
@@ -175,8 +201,8 @@ class AccountResponse(BaseModel):
     cash: float
     portfolio_value: float
     equity: float
-    last_equity: float
-    multiplier: int
+    last_equity: Optional[float] = None
+    multiplier: Optional[int] = None
     pattern_day_trader: bool
 
 class BulkOrderResult(BaseModel):

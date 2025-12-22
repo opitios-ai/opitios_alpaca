@@ -29,7 +29,52 @@ class WebSocketManager:
         self.reconnect_attempts: Dict[str, int] = {}
         self.last_error_time: Dict[str, datetime] = {}
         
+        # Track last update time for orders cache
+        self.orders_last_update: Dict[str, datetime] = {}
+        
         logger.info("✅ WebSocket Manager initialized")
+    
+    @staticmethod
+    def _convert_order_to_dict(order) -> dict:
+        """Convert Alpaca Order object to dict matching OrderResponse model"""
+        return {
+            "id": str(order.id),  # 使用 id 而不是 order_id
+            "client_order_id": str(order.client_order_id) if order.client_order_id else None,
+            "symbol": order.symbol,
+            "asset_id": str(order.asset_id) if order.asset_id else None,
+            "asset_class": order.asset_class.value if hasattr(order, 'asset_class') and order.asset_class else None,
+            "qty": float(order.qty) if order.qty else None,
+            "side": order.side.value,
+            "order_type": order.order_type.value,
+            "type": order.order_type.value if hasattr(order, 'order_type') else None,
+            "status": order.status.value,
+            "filled_qty": float(order.filled_qty) if order.filled_qty else 0,
+            "filled_avg_price": float(order.filled_avg_price) if order.filled_avg_price else None,
+            "limit_price": float(order.limit_price) if hasattr(order, 'limit_price') and order.limit_price else None,
+            "stop_price": float(order.stop_price) if hasattr(order, 'stop_price') and order.stop_price else None,
+            "time_in_force": order.time_in_force.value if hasattr(order, 'time_in_force') and order.time_in_force else None,
+            "created_at": order.created_at.isoformat() if hasattr(order, 'created_at') and order.created_at else None,
+            "updated_at": order.updated_at.isoformat() if hasattr(order, 'updated_at') and order.updated_at else None,
+            "submitted_at": order.submitted_at.isoformat() if order.submitted_at else None,
+            "filled_at": order.filled_at.isoformat() if order.filled_at else None,
+            "expired_at": order.expired_at.isoformat() if hasattr(order, 'expired_at') and order.expired_at else None,
+            "canceled_at": order.canceled_at.isoformat() if hasattr(order, 'canceled_at') and order.canceled_at else None,
+            "failed_at": order.failed_at.isoformat() if hasattr(order, 'failed_at') and order.failed_at else None,
+            "replaced_at": order.replaced_at.isoformat() if hasattr(order, 'replaced_at') and order.replaced_at else None,
+            "replaced_by": str(order.replaced_by) if hasattr(order, 'replaced_by') and order.replaced_by else None,
+            "replaces": str(order.replaces) if hasattr(order, 'replaces') and order.replaces else None,
+            "order_class": order.order_class.value if hasattr(order, 'order_class') and order.order_class else None,
+            "position_intent": order.position_intent.value if hasattr(order, 'position_intent') and order.position_intent else None,
+            "extended_hours": order.extended_hours if hasattr(order, 'extended_hours') else None,
+            "legs": None,
+            "trail_percent": float(order.trail_percent) if hasattr(order, 'trail_percent') and order.trail_percent else None,
+            "trail_price": float(order.trail_price) if hasattr(order, 'trail_price') and order.trail_price else None,
+            "hwm": float(order.hwm) if hasattr(order, 'hwm') and order.hwm else None,
+            "subtag": order.subtag if hasattr(order, 'subtag') else None,
+            "source": order.source if hasattr(order, 'source') else None,
+            "expires_at": order.expires_at.isoformat() if hasattr(order, 'expires_at') and order.expires_at else None,
+            "notional": float(order.notional) if hasattr(order, 'notional') and order.notional else None,
+        }
     
     async def _load_account_data(self, account_id: str, config: dict, delay: float = 0):
         """Load initial data for a single account"""
@@ -88,19 +133,12 @@ class WebSocketManager:
             )
             orders = client.get_orders(filter=order_request)
             self.orders_data[account_id] = [
-                {
-                    "order_id": order.id,
-                    "symbol": order.symbol,
-                    "qty": float(order.qty) if order.qty else None,
-                    "filled_qty": float(order.filled_qty) if order.filled_qty else 0,
-                    "side": order.side.value,
-                    "order_type": order.order_type.value,
-                    "status": order.status.value,
-                    "submitted_at": order.submitted_at.isoformat() if order.submitted_at else None,
-                    "filled_at": order.filled_at.isoformat() if order.filled_at else None,
-                }
+                self._convert_order_to_dict(order)
                 for order in orders
             ]
+            
+            # Track orders update time
+            self.orders_last_update[account_id] = datetime.utcnow()
             
             logger.info(f"✅ Loaded data for {account_id}: {len(self.positions_data[account_id])} positions, {len(self.orders_data[account_id])} orders")
             
@@ -127,6 +165,37 @@ class WebSocketManager:
         
         loaded_count = sum(1 for acc_id in settings.accounts.keys() if self.accounts_data.get(acc_id))
         logger.info(f"✅ Initial data loaded: {loaded_count}/{len(settings.accounts)} accounts ready")
+    
+    async def refresh_orders_cache(self, account_id: str):
+        """Refresh orders cache for a single account"""
+        try:
+            config = settings.accounts.get(account_id)
+            if not config:
+                return
+            
+            client = TradingClient(
+                api_key=config["api_key"],
+                secret_key=config["secret_key"],
+                paper=config["paper_trading"]
+            )
+            
+            from alpaca.trading.requests import GetOrdersRequest
+            from alpaca.trading.enums import QueryOrderStatus
+            order_request = GetOrdersRequest(
+                status=QueryOrderStatus.ALL,
+                limit=50
+            )
+            orders = client.get_orders(filter=order_request)
+            self.orders_data[account_id] = [
+                self._convert_order_to_dict(order)
+                for order in orders
+            ]
+            
+            self.orders_last_update[account_id] = datetime.utcnow()
+            logger.debug(f"🔄 Orders cache updated for {account_id}: {len(self.orders_data[account_id])} orders")
+            
+        except Exception as e:
+            logger.error(f"Failed to refresh orders cache for {account_id}: {e}")
     
     async def refresh_account_data(self, account_id: str):
         """Refresh account and positions after trade update"""
@@ -193,18 +262,23 @@ class WebSocketManager:
             if order_id:
                 # Find and update existing order or add new
                 orders = self.orders_data.get(account_id, [])
-                existing_order = next((o for o in orders if o["order_id"] == order_id), None)
+                existing_order = next((o for o in orders if o["id"] == str(order_id)), None)
                 
                 order_update = {
-                    "order_id": order_id,
+                    "id": str(order_id),
                     "symbol": symbol,
                     "qty": float(order_data.get("qty", 0)) if order_data.get("qty") else None,
                     "filled_qty": float(order_data.get("filled_qty", 0)) if order_data.get("filled_qty") else 0,
+                    "filled_avg_price": float(order_data.get("filled_avg_price", 0)) if order_data.get("filled_avg_price") else None,
                     "side": order_data.get("side", ""),
                     "order_type": order_data.get("order_type", ""),
                     "status": status,
                     "submitted_at": order_data.get("submitted_at"),
                     "filled_at": order_data.get("filled_at"),
+                    "asset_class": order_data.get("asset_class"),
+                    "limit_price": float(order_data.get("limit_price")) if order_data.get("limit_price") else None,
+                    "stop_price": float(order_data.get("stop_price")) if order_data.get("stop_price") else None,
+                    "time_in_force": order_data.get("time_in_force"),
                 }
                 
                 if existing_order:
@@ -346,6 +420,39 @@ class WebSocketManager:
             del self.connections[account_id]
         logger.info(f"🛑 WebSocket task stopped for {account_id}")
     
+    async def orders_cache_updater(self):
+        """Background task to update orders cache every 5 seconds with staggered updates"""
+        logger.info("🔄 Orders cache updater started (5s interval, staggered)")
+        
+        while self.running:
+            try:
+                await asyncio.sleep(5)
+                
+                if not self.running:
+                    break
+                
+                # Update orders for all accounts with staggered delays to avoid rate limits
+                # Spread updates over 4 seconds (leaving 1 second buffer before next cycle)
+                account_list = list(settings.accounts.keys())
+                if len(account_list) > 0:
+                    delay_between_accounts = min(4.0 / len(account_list), 0.5)  # Max 0.5s delay
+                    
+                    for i, account_id in enumerate(account_list):
+                        if not self.running:
+                            break
+                        
+                        # Stagger the updates
+                        if i > 0:
+                            await asyncio.sleep(delay_between_accounts)
+                        
+                        # Update in background without waiting
+                        asyncio.create_task(self.refresh_orders_cache(account_id))
+                
+            except Exception as e:
+                logger.error(f"Error in orders cache updater: {e}")
+        
+        logger.info("🛑 Orders cache updater stopped")
+    
     async def start(self):
         """Start WebSocket manager with independent account connections"""
         self.running = True
@@ -354,9 +461,13 @@ class WebSocketManager:
         # Load initial data with rate limiting
         await self.load_initial_data()
         
+        # Start orders cache updater
+        orders_updater_task = asyncio.create_task(self.orders_cache_updater())
+        logger.info("📡 Started orders cache updater task")
+        
         # Connect WebSockets for all accounts with staggered delays
         # Each account runs independently - errors in one won't affect others
-        tasks = []
+        tasks = [orders_updater_task]
         for i, account_id in enumerate(settings.accounts.keys()):
             # Add 2-second delay between connection attempts to avoid rate limits
             if i > 0:
