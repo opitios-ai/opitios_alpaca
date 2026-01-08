@@ -176,3 +176,4 @@ htmlcov/
 .coverage
 coverage.xml
 newrelic.ini
+/.kiro
