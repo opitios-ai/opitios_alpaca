@@ -1294,3 +1294,327 @@ async def get_dashboard(
     except Exception as e:
         logger.error(f"Error in get_dashboard for {account_name}: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+# ============================================================================
+# User Alpaca Account Management Endpoints
+# ============================================================================
+
+from pydantic import BaseModel, Field
+
+class AlpacaAccountRequest(BaseModel):
+    """Request model for creating/updating Alpaca account"""
+    api_key: str = Field(..., description="Alpaca API key")
+    secret_key: str = Field(..., description="Alpaca secret key")
+    paper_trading: bool = Field(..., description="True for paper trading, False for live trading")
+    enabled: bool = Field(True, description="Whether the account should be enabled")
+
+class AlpacaAccountResponse(BaseModel):
+    """Response model for Alpaca account operations"""
+    success: bool
+    message: Optional[str] = None
+    error: Optional[str] = None
+    account_id: Optional[int] = None
+    account_name: Optional[str] = None
+    is_new: Optional[bool] = None
+
+class AlpacaAccountInfo(BaseModel):
+    """Account info without sensitive credentials"""
+    id: int
+    account_name: str
+    paper_trading: bool
+    enabled: bool
+    has_credentials: bool
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+@router.post("/alpaca/accounts",
+    summary="Save Alpaca Account Credentials",
+    description="""
+    🔐 **AUTHENTICATION REQUIRED** - Save or update Alpaca API credentials
+    
+    Each user can have one Live trading account and one Paper trading account.
+    Account names are auto-generated from username:
+    - Paper account: {username}
+    - Live account: {username}_live
+    
+    When saving credentials, the account is automatically enabled.
+    When enabling one account type, the other type is automatically disabled.
+    
+    **Important:** 
+    - Frontend should validate credentials with Alpaca API before calling this endpoint
+    - Credentials are stored in plaintext (users may need to rotate keys)
+    - Frontend should NOT display existing keys, only show configuration status
+    
+    **Example Request:**
+    ```json
+    {
+        "api_key": "PKIXCQJW9OLOUN3X83J2",
+        "secret_key": "9baG8aQeMwsU1toNaSssqzgb1oEs7o7uAVDjFscR",
+        "paper_trading": true,
+        "enabled": true
+    }
+    ```
+    
+    **Success Response:**
+    ```json
+    {
+        "success": true,
+        "message": "Alpaca account created successfully",
+        "account_id": 123,
+        "account_name": "johndoe",
+        "is_new": true
+    }
+    ```
+    
+    **Error Response:**
+    ```json
+    {
+        "success": false,
+        "error": "Database error: ..."
+    }
+    ```
+    """,
+    response_model=AlpacaAccountResponse)
+async def save_alpaca_account(
+    request: AlpacaAccountRequest,
+    auth_data: dict = Depends(internal_or_jwt_auth)
+):
+    """Save or update Alpaca account credentials for the authenticated user"""
+    try:
+        # Extract user_uuid and username from JWT
+        user_uuid = None
+        username = None
+        if auth_data and auth_data.get("user"):
+            user_uuid = auth_data["user"].get("user_id")
+            username = auth_data["user"].get("username")
+        elif auth_data and auth_data.get("internal"):
+            # Internal requests need to provide user context
+            raise HTTPException(
+                status_code=400, 
+                detail="User identification required. Internal requests must include JWT with user_id and username."
+            )
+        
+        if not user_uuid or not username:
+            raise HTTPException(status_code=401, detail="User identification required (user_id and username)")
+        
+        # Validate input
+        if not request.api_key or not request.secret_key:
+            raise HTTPException(status_code=400, detail="API key and secret key are required")
+        
+        # Get database manager
+        from app.database_models import get_database_manager
+        from config import settings
+        
+        db_manager = get_database_manager(settings.database_url)
+        
+        # Create or update the account (account_name is auto-generated from username)
+        result = db_manager.create_or_update_alpaca_user(
+            user_uuid=user_uuid,
+            username=username,
+            api_key=request.api_key,
+            secret_key=request.secret_key,
+            paper_trading=request.paper_trading,
+            enabled=request.enabled
+        )
+        
+        if result.get("success"):
+            # If this account is being enabled, disable the other one
+            if request.enabled:
+                db_manager.set_alpaca_account_enabled(
+                    user_uuid=user_uuid,
+                    username=username,
+                    paper_trading=not request.paper_trading,  # The OTHER account type
+                    enabled=False
+                )
+            
+            logger.info(f"Alpaca account saved for user {username}, paper_trading={request.paper_trading}")
+            return AlpacaAccountResponse(**result)
+        else:
+            logger.error(f"Failed to save Alpaca account: {result.get('error')}")
+            raise HTTPException(status_code=500, detail=result.get("error", "Unknown error"))
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error saving Alpaca account: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.put("/alpaca/accounts/switch",
+    summary="Switch Active Alpaca Account",
+    description="""
+    🔐 **AUTHENTICATION REQUIRED** - Switch between Paper and Live trading accounts
+    
+    This endpoint allows users to switch their active trading mode without re-entering API keys.
+    The account must already be configured (have credentials saved) to be activated.
+    
+    When enabling one account type, the other type is automatically disabled.
+    
+    **Example Request:**
+    ```json
+    {
+        "paper_trading": true
+    }
+    ```
+    
+    **Success Response:**
+    ```json
+    {
+        "success": true,
+        "message": "Switched to paper trading mode",
+        "active_mode": "paper"
+    }
+    ```
+    
+    **Error Response (account not configured):**
+    ```json
+    {
+        "success": false,
+        "error": "Paper trading account not configured. Please save API keys first."
+    }
+    ```
+    """)
+async def switch_alpaca_account(
+    request: dict,
+    auth_data: dict = Depends(internal_or_jwt_auth)
+):
+    """Switch active Alpaca account between paper and live trading"""
+    try:
+        # Extract user_uuid from JWT
+        user_uuid = None
+        username = None
+        if auth_data and auth_data.get("user"):
+            user_uuid = auth_data["user"].get("user_id")
+            username = auth_data["user"].get("username")
+        elif auth_data and auth_data.get("internal"):
+            raise HTTPException(
+                status_code=400, 
+                detail="User identification required. Internal requests must include JWT."
+            )
+        
+        if not user_uuid or not username:
+            raise HTTPException(status_code=401, detail="User identification required")
+        
+        paper_trading = request.get("paper_trading")
+        if paper_trading is None:
+            raise HTTPException(status_code=400, detail="paper_trading field is required")
+        
+        # Get database manager
+        from app.database_models import get_database_manager
+        from config import settings
+        
+        db_manager = get_database_manager(settings.database_url)
+        
+        # Check if the target account exists and has credentials
+        accounts = db_manager.get_alpaca_accounts_by_user(user_uuid)
+        target_account = next((acc for acc in accounts if acc["paper_trading"] == paper_trading), None)
+        
+        if not target_account:
+            mode_name = "Paper" if paper_trading else "Live"
+            raise HTTPException(
+                status_code=400, 
+                detail=f"{mode_name} trading account not configured. Please save API keys first."
+            )
+        
+        if not target_account.get("has_credentials"):
+            mode_name = "Paper" if paper_trading else "Live"
+            raise HTTPException(
+                status_code=400, 
+                detail=f"{mode_name} trading account has no credentials. Please save API keys first."
+            )
+        
+        # Enable the target account (this will auto-disable the other one)
+        result = db_manager.set_alpaca_account_enabled(
+            user_uuid=user_uuid,
+            username=username,
+            paper_trading=paper_trading,
+            enabled=True
+        )
+        
+        if result.get("success"):
+            mode_name = "paper" if paper_trading else "live"
+            logger.info(f"User {username} switched to {mode_name} trading mode")
+            return {
+                "success": True,
+                "message": f"Switched to {mode_name} trading mode",
+                "active_mode": mode_name
+            }
+        else:
+            raise HTTPException(status_code=500, detail=result.get("error", "Unknown error"))
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error switching Alpaca account: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/alpaca/accounts",
+    summary="Get User's Alpaca Accounts",
+    description="""
+    🔐 **AUTHENTICATION REQUIRED** - Get the authenticated user's Alpaca account configuration
+    
+    Returns account info WITHOUT sensitive credentials (api_key, secret_key).
+    Use this to check if user has configured their accounts.
+    
+    **Response:**
+    ```json
+    {
+        "accounts": [
+            {
+                "id": 1,
+                "account_name": "johndoe",
+                "paper_trading": true,
+                "enabled": true,
+                "has_credentials": true,
+                "created_at": "2024-01-15T10:30:00",
+                "updated_at": "2024-01-15T10:30:00"
+            },
+            {
+                "id": 2,
+                "account_name": "johndoe_live",
+                "paper_trading": false,
+                "enabled": false,
+                "has_credentials": true,
+                "created_at": "2024-01-15T10:35:00",
+                "updated_at": "2024-01-15T10:35:00"
+            }
+        ]
+    }
+    ```
+    """)
+async def get_alpaca_accounts(
+    auth_data: dict = Depends(internal_or_jwt_auth)
+):
+    """Get the authenticated user's Alpaca account configuration"""
+    try:
+        # Extract user_uuid from JWT
+        user_uuid = None
+        if auth_data and auth_data.get("user"):
+            user_uuid = auth_data["user"].get("user_id")
+        elif auth_data and auth_data.get("internal"):
+            raise HTTPException(
+                status_code=400, 
+                detail="User identification required. Internal requests must include JWT with user_id."
+            )
+        
+        if not user_uuid:
+            raise HTTPException(status_code=401, detail="User identification required")
+        
+        # Get database manager
+        from app.database_models import get_database_manager
+        from config import settings
+        
+        db_manager = get_database_manager(settings.database_url)
+        
+        # Get accounts
+        accounts = db_manager.get_alpaca_accounts_by_user(user_uuid)
+        
+        return {"accounts": accounts}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting Alpaca accounts: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
