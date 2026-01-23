@@ -365,17 +365,13 @@ class DatabaseManager:
         """
         if not self._initialized:
             self.initialize()
-        
-        # Generate account_name from username
-        account_name = username if paper_trading else f"{username}_live"
-        other_account_name = f"{username}_live" if paper_trading else username
             
         try:
             with self.SessionLocal() as session:
-                # Find the target account
+                # Find the target account by (user_uuid, paper_trading) - the unique key
                 account = session.query(AlpacaUser).filter(
-                    AlpacaUser.account_name == account_name,
-                    AlpacaUser.user_uuid == user_uuid
+                    AlpacaUser.user_uuid == user_uuid,
+                    AlpacaUser.paper_trading == paper_trading
                 ).first()
                 
                 if not account:
@@ -387,8 +383,8 @@ class DatabaseManager:
                 # If enabling this account, disable the other one
                 if enabled:
                     other_account = session.query(AlpacaUser).filter(
-                        AlpacaUser.account_name == other_account_name,
-                        AlpacaUser.user_uuid == user_uuid
+                        AlpacaUser.user_uuid == user_uuid,
+                        AlpacaUser.paper_trading == (not paper_trading)
                     ).first()
                     
                     if other_account:
@@ -400,7 +396,7 @@ class DatabaseManager:
                 account.updated_at = datetime.utcnow()
                 session.commit()
                 
-                logger.info(f"Set Alpaca account {account_name} enabled={enabled}")
+                logger.info(f"Set Alpaca account for user {user_uuid} (paper={paper_trading}) enabled={enabled}")
                 return {
                     "success": True,
                     "message": f"Account {'enabled' if enabled else 'disabled'} successfully"
