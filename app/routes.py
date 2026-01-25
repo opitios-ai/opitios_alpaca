@@ -1451,10 +1451,17 @@ async def save_alpaca_account(
     
     When enabling one account type, the other type is automatically disabled.
     
-    **Example Request:**
+    **Example Request (switch mode):**
     ```json
     {
         "paper_trading": true
+    }
+    ```
+    
+    **Example Request (disable all accounts):**
+    ```json
+    {
+        "enabled": false
     }
     ```
     
@@ -1479,7 +1486,7 @@ async def switch_alpaca_account(
     request: dict,
     auth_data: dict = Depends(internal_or_jwt_auth)
 ):
-    """Switch active Alpaca account between paper and live trading"""
+    """Switch active Alpaca account between paper and live trading, or disable all accounts"""
     try:
         # Extract user_uuid from JWT
         user_uuid = None
@@ -1496,15 +1503,38 @@ async def switch_alpaca_account(
         if not user_uuid or not username:
             raise HTTPException(status_code=401, detail="User identification required")
         
-        paper_trading = request.get("paper_trading")
-        if paper_trading is None:
-            raise HTTPException(status_code=400, detail="paper_trading field is required")
-        
         # Get database manager
         from app.database_models import get_database_manager
         from config import settings
         
         db_manager = get_database_manager(settings.database_url)
+        
+        # Check if this is a "disable all" request
+        if "enabled" in request and request.get("enabled") is False and "paper_trading" not in request:
+            # Disable all Alpaca accounts for this user
+            accounts = db_manager.get_alpaca_accounts_by_user(user_uuid)
+            disabled_count = 0
+            for acc in accounts:
+                result = db_manager.set_alpaca_account_enabled(
+                    user_uuid=user_uuid,
+                    username=username,
+                    paper_trading=acc["paper_trading"],
+                    enabled=False
+                )
+                if result.get("success"):
+                    disabled_count += 1
+            
+            logger.info(f"User {username} disabled all Alpaca accounts ({disabled_count} accounts)")
+            return {
+                "success": True,
+                "message": f"All Alpaca accounts disabled ({disabled_count} accounts)",
+                "active_mode": "none"
+            }
+        
+        # Original logic: switch to specified mode
+        paper_trading = request.get("paper_trading")
+        if paper_trading is None:
+            raise HTTPException(status_code=400, detail="paper_trading field is required")
         
         # Check if the target account exists and has credentials
         accounts = db_manager.get_alpaca_accounts_by_user(user_uuid)
