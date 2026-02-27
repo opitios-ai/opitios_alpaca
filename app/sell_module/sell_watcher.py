@@ -12,6 +12,7 @@ from config import settings
 from app.account_pool import AccountPool
 from .api_client import AlpacaAPIClient
 from app.utils.discord_notifier import send_sell_module_notification
+from app.database_models import get_auto_sell_enabled, close_order_tracking
 from .config_manager import ConfigManager
 from .position_manager import PositionManager, Position
 from .order_manager import OrderManager
@@ -265,6 +266,15 @@ class SellWatcher:
             (should_sell, reason)
         """
         try:
+            # 检查是否允许自动卖出（订单追踪系统）
+            auto_sell_enabled = get_auto_sell_enabled(
+                symbol=position.symbol, 
+                account_name=position.account_id, 
+                broker='alpaca'
+            )
+            if not auto_sell_enabled:
+                return False, "Auto-sell disabled (manual trade or disabled in order tracking)"
+            
             # 检查必需数据
             if position.unrealized_plpc is None:
                 logger.error(f"Position [{position.account_id}] {position.symbol}: Missing unrealized_plpc field")
@@ -370,6 +380,11 @@ class SellWatcher:
                     order_id = result.get('id', 'Unknown') if isinstance(result, dict) else 'Unknown'
                     logger.info(
                         f"✅ Sell order placed successfully [{position.account_id}] {position.symbol} | Order ID: {order_id}")
+                    # 卖出成功，标记订单追踪为 closed
+                    try:
+                        close_order_tracking(position.symbol, position.account_id, 'alpaca')
+                    except Exception as e:
+                        logger.error(f"关闭订单追踪失败 [{position.account_id}] {position.symbol}: {e}")
 
             # 批次间延迟，避免API过载
             if batch_end < len(all_positions):
