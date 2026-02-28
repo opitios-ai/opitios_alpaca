@@ -909,8 +909,8 @@ async def place_option_order(
             if "error" in order_data:
                 raise HTTPException(status_code=400, detail=order_data["error"])
             
-            # 记录手动买入订单追踪（仅BUY订单）
-            if request.side.value.lower() == 'buy':
+            # 记录手动买入订单追踪（仅BUY订单，且仅前端手动下单，内部API调用由order_manager自行记录）
+            if request.side.value.lower() == 'buy' and user_id != 'internal_user':
                 try:
                     from app.database_models import save_order_details
                     symbol = request.option_symbol.upper()
