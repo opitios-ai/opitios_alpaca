@@ -887,6 +887,41 @@ async def place_option_order(
                 strategy_name=strategy_name
             )
             
+            # 记录批量买入订单追踪（仅BUY订单，遍历每个成功的账户分别记录）
+            if request.side.value.lower() == 'buy':
+                try:
+                    from app.database_models import save_order_details
+                    symbol = request.option_symbol.upper()
+                    underlying = symbol
+                    for i, char in enumerate(symbol):
+                        if char.isdigit():
+                            underlying = symbol[:i]
+                            break
+                    
+                    auto_sell = request.auto_sell_enabled if request.auto_sell_enabled is not None else False
+                    
+                    for r in bulk_result.get("results", []):
+                        if not r.success:
+                            continue
+                        order_id = str(r.order.id) if r.order and r.order.id else ''
+                        save_order_details(
+                            account_name=r.account_id,
+                            order_id=order_id,
+                            symbol=symbol,
+                            action='BUY',
+                            quantity=request.qty,
+                            limit_price=request.limit_price or 0.0,
+                            paper_trading=False,
+                            broker='alpaca',
+                            asset_type='option',
+                            underlying_symbol=underlying,
+                            trade_source='manual',
+                            auto_sell_enabled=auto_sell
+                        )
+                        logger.info(f"批量订单追踪已记录: {symbol} account={r.account_id} auto_sell={auto_sell}")
+                except Exception as e:
+                    logger.error(f"记录批量订单追踪失败: {e}")
+            
             return BulkOrderResponse(**bulk_result)
         
         # 单账户下单
@@ -909,7 +944,9 @@ async def place_option_order(
             if "error" in order_data:
                 raise HTTPException(status_code=400, detail=order_data["error"])
             
-            # 记录手动买入订单追踪（仅BUY订单，且仅前端手动下单，内部API调用由order_manager自行记录）
+            # 记录手动买入订单追踪（仅BUY订单，且仅前端/有JWT身份的用户下单）
+            # user_id='internal_user' 表示内网无JWT调用（如sell module的api_client），
+            # 这些调用由order_manager.place_buy_order()自行记录tracking，避免重复
             if request.side.value.lower() == 'buy' and user_id != 'internal_user':
                 try:
                     from app.database_models import save_order_details
