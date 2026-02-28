@@ -67,6 +67,10 @@ class OptionOrderRequest(BaseModel):
     time_in_force: TimeInForce = Field(default=TimeInForce.DAY, description="Time in force")
     limit_price: Optional[float] = Field(None, gt=0, description="Limit price for limit orders")
     bulk_place: Optional[bool] = Field(default=False, description="If true, place order for all accounts")
+    auto_sell_enabled: Optional[bool] = Field(
+        default=None,
+        description="是否允许自动卖出。前端可传入，BUY时默认False（手动下单默认不自动卖出），SELL时忽略"
+    )
     strategy_name: Optional[str] = Field(
         None,
         description="Trading strategy to validate. If not provided: BUY uses MODE_DAY_TRADE (day trading), SELL uses MODE_OPTION_TRADE (allows closing positions with option trading permission)",
