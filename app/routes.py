@@ -908,6 +908,40 @@ async def place_option_order(
             )
             if "error" in order_data:
                 raise HTTPException(status_code=400, detail=order_data["error"])
+            
+            # 记录手动买入订单追踪（仅BUY订单）
+            if request.side.value.lower() == 'buy':
+                try:
+                    from app.database_models import save_order_details
+                    symbol = request.option_symbol.upper()
+                    # 从期权代码提取标的代码 (如 NVDA260313C00195000 -> NVDA)
+                    underlying = symbol
+                    for i, char in enumerate(symbol):
+                        if char.isdigit():
+                            underlying = symbol[:i]
+                            break
+                    
+                    # auto_sell_enabled: 前端传入优先，未传入时默认 False（手动下单默认不自动卖出）
+                    auto_sell = request.auto_sell_enabled if request.auto_sell_enabled is not None else False
+                    
+                    save_order_details(
+                        account_name=routing_info["account_id"],
+                        order_id=str(order_data.get('id', '')),
+                        symbol=symbol,
+                        action='BUY',
+                        quantity=request.qty,
+                        limit_price=request.limit_price or 0.0,
+                        paper_trading=False,
+                        broker='alpaca',
+                        asset_type='option',
+                        underlying_symbol=underlying,
+                        trade_source='manual',
+                        auto_sell_enabled=auto_sell
+                    )
+                    logger.info(f"手动订单追踪已记录: {symbol} account={routing_info['account_id']} auto_sell={auto_sell}")
+                except Exception as e:
+                    logger.error(f"记录手动订单追踪失败: {e}")
+            
             return order_data
             
     except HTTPException:

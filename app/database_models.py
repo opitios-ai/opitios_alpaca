@@ -461,3 +461,190 @@ def load_accounts_from_database(database_url: str) -> Dict[str, Dict]:
     except Exception as e:
         logger.error(f"Failed to load accounts from database: {e}")
         return {}
+
+
+# ============================================================================
+# 订单追踪功能 - 用于区分自动/手动交易
+# ============================================================================
+
+def save_order_details(
+    account_name: str,
+    order_id: str,
+    symbol: str,
+    action: str,
+    quantity: int,
+    limit_price: float,
+    paper_trading: bool = True,
+    broker: str = 'alpaca',
+    asset_type: str = 'option',
+    underlying_symbol: str = None,
+    trade_source: str = 'automated',
+    auto_sell_enabled: bool = True
+) -> bool:
+    """
+    保存订单追踪信息到 order_details 表
+    
+    Args:
+        account_name: 账户名
+        order_id: 订单ID
+        symbol: 期权/股票代码
+        action: 买入或卖出 (BUY/SELL)
+        quantity: 数量
+        limit_price: 限价
+        paper_trading: 是否模拟交易
+        broker: 券商 ('tiger' 或 'alpaca')
+        asset_type: 资产类型 ('option' 或 'stock')
+        underlying_symbol: 标的代码 (如 NVDA, TSLA)
+        trade_source: 交易来源 ('manual' 或 'automated')
+        auto_sell_enabled: 是否允许自动卖出
+
+    Returns:
+        成功返回 True，失败返回 False
+    """
+    global db_manager
+    
+    try:
+        if db_manager is None or not db_manager._initialized:
+            logger.error("Database manager not initialized")
+            return False
+            
+        logger.info(f'保存订单到数据库: {broker}/{account_name}/{symbol} source={trade_source}')
+
+        query = text("""
+            INSERT INTO order_details 
+            (account_name, broker, order_id, symbol, asset_type, underlying_symbol, 
+             action, quantity, limit_price, paper_trading, trade_source, auto_sell_enabled, status) 
+            VALUES 
+            (:account_name, :broker, :order_id, :symbol, :asset_type, :underlying_symbol,
+             :action, :quantity, :limit_price, :paper_trading, :trade_source, :auto_sell_enabled, 'active')
+        """)
+        
+        with db_manager.SessionLocal() as session:
+            session.execute(query, {
+                "account_name": account_name,
+                "broker": broker,
+                "order_id": order_id,
+                "symbol": symbol,
+                "asset_type": asset_type,
+                "underlying_symbol": underlying_symbol,
+                "action": action,
+                "quantity": quantity,
+                "limit_price": limit_price,
+                "paper_trading": 1 if paper_trading else 0,
+                "trade_source": trade_source,
+                "auto_sell_enabled": 1 if auto_sell_enabled else 0
+            })
+            session.commit()
+        
+        logger.info('订单追踪保存成功')
+        return True
+
+    except Exception as e:
+        logger.error(f"保存订单追踪失败: {e}")
+        return False
+
+
+def get_auto_sell_enabled(symbol: str, account_name: str = None, broker: str = None) -> bool:
+    """
+    查询持仓是否允许自动卖出
+    
+    Args:
+        symbol: 期权/股票代码
+        account_name: 账户名（可选）
+        broker: 券商（可选）
+        
+    Returns:
+        True 允许自动卖出，False 不允许
+    """
+    global db_manager
+    
+    try:
+        if db_manager is None or not db_manager._initialized:
+            logger.warning("Database manager not initialized, defaulting to allow auto-sell")
+            return True
+            
+        conditions = ["symbol = :symbol", "action = 'BUY'", "status = 'active'"]
+        params = {"symbol": symbol}
+        
+        if account_name:
+            conditions.append("account_name = :account_name")
+            params["account_name"] = account_name
+        if broker:
+            conditions.append("broker = :broker")
+            params["broker"] = broker
+            
+        query = text(f"""
+            SELECT auto_sell_enabled, trade_source
+            FROM order_details 
+            WHERE {' AND '.join(conditions)}
+            ORDER BY order_time DESC 
+            LIMIT 1
+        """)
+        
+        with db_manager.SessionLocal() as session:
+            result = session.execute(query, params).fetchone()
+        
+        if result:
+            auto_sell_enabled = bool(result[0])
+            trade_source = result[1]
+            logger.debug(f"订单追踪查询: {symbol} -> auto_sell={auto_sell_enabled}, source={trade_source}")
+            return auto_sell_enabled
+        
+        # 没有追踪记录，默认允许自动卖出
+        logger.debug(f"订单追踪查询: {symbol} -> 无记录，默认允许自动卖出")
+        return True
+        
+    except Exception as e:
+        logger.error(f"查询自动卖出状态失败: {e}")
+        return True  # 出错时默认允许
+
+
+def close_order_tracking(symbol: str, account_name: str, broker: str = 'alpaca') -> bool:
+    """
+    卖出成功后，将对应的买入记录标记为 closed（FIFO，最早的 active 记录优先）
+    
+    Args:
+        symbol: 期权/股票代码
+        account_name: 账户名
+        broker: 券商
+        
+    Returns:
+        成功返回 True，失败返回 False
+    """
+    global db_manager
+    
+    try:
+        if db_manager is None or not db_manager._initialized:
+            logger.warning("Database manager not initialized, skip close_order_tracking")
+            return False
+            
+        query = text("""
+            UPDATE order_details 
+            SET status = 'closed'
+            WHERE symbol = :symbol 
+              AND account_name = :account_name 
+              AND broker = :broker 
+              AND action = 'BUY' 
+              AND status = 'active'
+            ORDER BY order_time ASC 
+            LIMIT 1
+        """)
+        
+        with db_manager.SessionLocal() as session:
+            result = session.execute(query, {
+                "symbol": symbol,
+                "account_name": account_name,
+                "broker": broker
+            })
+            session.commit()
+        
+        if result.rowcount > 0:
+            logger.info(f"订单追踪已关闭: {broker}/{account_name}/{symbol}")
+            return True
+        else:
+            logger.debug(f"订单追踪关闭: {symbol} 无匹配的 active 记录")
+            return False
+            
+    except Exception as e:
+        logger.error(f"关闭订单追踪失败: {e}")
+        return False

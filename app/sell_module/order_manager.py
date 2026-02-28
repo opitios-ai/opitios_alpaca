@@ -9,6 +9,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 from loguru import logger
 from app.account_pool import AccountPool
+from app.database_models import save_order_details
 from .api_client import AlpacaAPIClient
 
 
@@ -380,7 +381,8 @@ class OrderManager:
             return {"error": error_msg}
     
     async def place_buy_order(self, account_id: str, symbol: str, qty: float,
-                             order_type: str = 'market', limit_price: Optional[float] = None) -> Dict[str, Any]:
+                             order_type: str = 'market', limit_price: Optional[float] = None,
+                             trade_source: str = 'automated', auto_sell_enabled: bool = True) -> Dict[str, Any]:
         """
         🎯 CENTRALIZED BUY ORDER PLACEMENT - Single source of truth for all buy orders
         
@@ -390,6 +392,8 @@ class OrderManager:
             qty: Quantity to buy
             order_type: 'market' or 'limit' (default: 'market')
             limit_price: Required for limit orders, ignored for market orders
+            trade_source: 'automated' or 'manual' (for order tracking)
+            auto_sell_enabled: Whether auto-sell is enabled for this position
             
         Returns:
             Order result dictionary with 'id' or 'error'
@@ -434,6 +438,33 @@ class OrderManager:
                 order_id = result.get('id', 'Unknown')
                 price_info = f"@{limit_price}" if order_type == 'limit' else "@market"
                 logger.info(f"✅ Buy order placed [{account_id}] {symbol} x{abs(qty)} {price_info} | Order ID: {order_id}")
+                
+                # 记录订单追踪信息
+                try:
+                    # 从期权代码提取标的代码 (如 "TSLA250620P00310000" -> "TSLA")
+                    underlying = symbol[:4] if len(symbol) > 4 else symbol
+                    for i, char in enumerate(symbol):
+                        if char.isdigit():
+                            underlying = symbol[:i]
+                            break
+                    
+                    save_order_details(
+                        account_name=account_id,
+                        order_id=str(order_id),
+                        symbol=symbol,
+                        action='BUY',
+                        quantity=int(abs(qty)),
+                        limit_price=limit_price if limit_price else 0.0,
+                        paper_trading=True,  # TODO: 从账户配置获取
+                        broker='alpaca',
+                        asset_type='option',
+                        underlying_symbol=underlying,
+                        trade_source=trade_source,
+                        auto_sell_enabled=auto_sell_enabled
+                    )
+                    logger.info(f'订单追踪已记录: {symbol} broker=alpaca source={trade_source}')
+                except Exception as e:
+                    logger.error(f'记录订单追踪失败: {e}')
             else:
                 logger.error(f"❌ Buy order failed [{account_id}] {symbol}: {result.get('error', 'Unknown error')}")
             
