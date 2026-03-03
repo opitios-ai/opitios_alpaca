@@ -308,6 +308,11 @@ class SellWatcher:
                 return True, f"Profit target reached: {profit_loss_pct:.2%} >= {min_profit_threshold:.2%}"
             if profit_loss_pct <= stop_loss_threshold:
                 return True, f"Stop loss triggered: {profit_loss_pct:.2%} <= {stop_loss_threshold:.2%}"
+
+            # 收盘前10分钟强制平仓，与Tiger逻辑一致
+            if self.strategy_one._is_close_to_market_close():
+                return True, "Market close forced sell (15:50-16:00 ET)"
+
             return False, f"Holding: P&L {profit_loss_pct:.2%} within range"
 
         except Exception as e:
