@@ -308,6 +308,11 @@ class SellWatcher:
                 return True, f"Profit target reached: {profit_loss_pct:.2%} >= {min_profit_threshold:.2%}"
             if profit_loss_pct <= stop_loss_threshold:
                 return True, f"Stop loss triggered: {profit_loss_pct:.2%} <= {stop_loss_threshold:.2%}"
+
+            # 收盘前10分钟强制平仓，与Tiger逻辑一致
+            if self.strategy_one._is_close_to_market_close():
+                return True, "Market close forced sell (15:50-16:00 ET)"
+
             return False, f"Holding: P&L {profit_loss_pct:.2%} within range"
 
         except Exception as e:
@@ -381,10 +386,7 @@ class SellWatcher:
                     logger.info(
                         f"✅ Sell order placed successfully [{position.account_id}] {position.symbol} | Order ID: {order_id}")
                     # 卖出成功，标记订单追踪为 closed
-                    try:
-                        close_order_tracking(position.symbol, position.account_id, 'alpaca')
-                    except Exception as e:
-                        logger.error(f"关闭订单追踪失败 [{position.account_id}] {position.symbol}: {e}")
+                    close_order_tracking(position.symbol, position.account_id, 'alpaca')
 
             # 批次间延迟，避免API过载
             if batch_end < len(all_positions):
@@ -521,6 +523,8 @@ class SellWatcher:
                 order_id = result.get('id', 'Unknown') if isinstance(result, dict) else 'Unknown'
                 logger.warning(
                     f"⚠️ Zero-day option closed [{position.account_id}] {position.symbol} | Order ID: {order_id}")
+                # 零日期权平仓成功，标记订单追踪为 closed
+                close_order_tracking(position.symbol, position.account_id, 'alpaca')
 
         logger.warning(f"零日期权平仓完成: {successful_closes} 成功, {failed_closes} 失败")
 
