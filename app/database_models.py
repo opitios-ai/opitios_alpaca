@@ -617,11 +617,14 @@ def close_order_tracking(symbol: str, account_name: str, broker: str = 'alpaca')
         if db_manager is None or not db_manager._initialized:
             logger.warning("Database manager not initialized, skip close_order_tracking")
             return False
+        
+        # normalize: 去掉空格，兼容 OCC 标准格式和紧凑格式
+        symbol = symbol.replace(' ', '').strip()
             
         query = text("""
             UPDATE order_details 
             SET status = 'closed'
-            WHERE symbol = :symbol 
+            WHERE REPLACE(symbol, ' ', '') = :symbol 
               AND account_name = :account_name 
               AND broker = :broker 
               AND action = 'BUY' 
