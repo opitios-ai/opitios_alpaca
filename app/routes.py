@@ -922,6 +922,14 @@ async def place_option_order(
                 except Exception as e:
                     logger.error(f"记录批量订单追踪失败: {e}")
             
+            # 批量卖出成功时关闭订单追踪
+            if request.side.value.lower() == 'sell':
+                from app.database_models import close_order_tracking
+                for r in bulk_result.get("results", []):
+                    if r.success:
+                        close_order_tracking(request.option_symbol.upper(), r.account_id, 'alpaca')
+                logger.info(f"批量卖出订单追踪已关闭: {request.option_symbol.upper()}")
+            
             return BulkOrderResponse(**bulk_result)
         
         # 单账户下单
@@ -978,6 +986,11 @@ async def place_option_order(
                     logger.info(f"手动订单追踪已记录: {symbol} account={routing_info['account_id']} auto_sell={auto_sell}")
                 except Exception as e:
                     logger.error(f"记录手动订单追踪失败: {e}")
+            
+            # 卖出成功时关闭订单追踪
+            if request.side.value.lower() == 'sell':
+                from app.database_models import close_order_tracking
+                close_order_tracking(request.option_symbol.upper(), routing_info["account_id"], 'alpaca')
             
             return order_data
             
