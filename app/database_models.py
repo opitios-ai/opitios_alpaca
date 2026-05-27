@@ -560,8 +560,8 @@ def get_auto_sell_enabled(symbol: str, account_name: str = None, broker: str = N
     
     try:
         if db_manager is None or not db_manager._initialized:
-            logger.warning("Database manager not initialized, defaulting to allow auto-sell")
-            return True
+            logger.warning("Database manager not initialized, defaulting to disallow auto-sell")
+            return False
             
         conditions = ["symbol = :symbol", "action = 'BUY'", "status = 'active'"]
         params = {"symbol": symbol}
@@ -590,13 +590,13 @@ def get_auto_sell_enabled(symbol: str, account_name: str = None, broker: str = N
             logger.debug(f"订单追踪查询: {symbol} -> auto_sell={auto_sell_enabled}, source={trade_source}")
             return auto_sell_enabled
         
-        # 没有追踪记录，默认允许自动卖出
-        logger.debug(f"订单追踪查询: {symbol} -> 无记录，默认允许自动卖出")
-        return True
-        
+        # 没有追踪记录，默认禁止自动卖出（仓位来源不明，不动）
+        logger.warning(f"订单追踪查询: {symbol} -> 无记录，跳过自动卖出")
+        return False
+
     except Exception as e:
         logger.error(f"查询自动卖出状态失败: {e}")
-        return True  # 出错时默认允许
+        return False  # 出错时默认禁止
 
 
 def close_order_tracking(symbol: str, account_name: str, broker: str = 'alpaca') -> bool:
