@@ -560,8 +560,8 @@ def get_auto_sell_enabled(symbol: str, account_name: str = None, broker: str = N
     
     try:
         if db_manager is None or not db_manager._initialized:
-            logger.warning("Database manager not initialized, defaulting to allow auto-sell")
-            return True
+            logger.warning("Database manager not initialized, defaulting to disallow auto-sell")
+            return False
             
         conditions = ["symbol = :symbol", "action = 'BUY'", "status = 'active'"]
         params = {"symbol": symbol}
