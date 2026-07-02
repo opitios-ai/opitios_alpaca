@@ -37,26 +37,26 @@ jobs:
     
     - name: Create test secrets file
       run: |
-        cat > secrets.yml << 'EOF'
-alpaca:
-  api_key: "test_key"
-  secret_key: "test_secret"
-  paper_trading: true
-jwt:
-  secret_key: "test_jwt_secret"
-  algorithm: "HS256"
-  expiration_hours: 24
-redis:
-  host: "localhost"
-  port: 6379
-  db: 0
-database:
-  url: "sqlite:///test.db"
-app:
-  debug: true
-  log_level: "INFO"
-  allowed_origins: ["*"]
-EOF
+        cat > secrets.yml << EOF
+        alpaca:
+          api_key: "test_key"
+          secret_key: "test_secret"
+          paper_trading: true
+        jwt:
+          secret_key: "test_jwt_secret"
+          algorithm: "HS256"
+          expiration_hours: 24
+        redis:
+          host: "localhost"
+          port: 6379
+          db: 0
+        database:
+          url: "sqlite:///test.db"
+        app:
+          debug: true
+          log_level: "INFO"
+          allowed_origins: ["*"]
+        EOF
     
     - name: Critical linting (30s max)
       timeout-minutes: 5
