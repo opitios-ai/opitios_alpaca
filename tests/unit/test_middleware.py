@@ -552,13 +552,14 @@ class TestLoggingMiddleware:
         
         with patch('app.middleware.logger') as mock_logger:
             response = await middleware.dispatch(request, call_next)
-            
-            # Verify request was logged
-            assert mock_logger.info.call_count == 2  # Start and completion
-            
+
+            # Fast 200 responses are not logged (only slow >1s or error 4xx/5xx)
+            assert mock_logger.info.call_count == 0
+            assert mock_logger.warning.call_count == 0
+
             # Verify response headers were added
             assert "X-Process-Time" in response.headers
-            
+
             call_next.assert_called_once_with(request)
 
 
