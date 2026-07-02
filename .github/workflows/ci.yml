@@ -67,7 +67,7 @@ jobs:
     - name: Fast unit tests (2min max)
       timeout-minutes: 3
       env:
-        TESTING: "true"
+        ALPACA_TESTING: "true"
       run: |
         echo "Running core unit tests with fast settings..."
         python -m pytest tests/unit/test_middleware.py tests/unit/test_alpaca_client.py -v \
@@ -82,7 +82,7 @@ jobs:
     - name: Fast security tests (1min max)
       timeout-minutes: 2
       env:
-        TESTING: "true"
+        ALPACA_TESTING: "true"
       run: |
         echo "Running core security tests with fast settings..."
         python -m pytest tests/unit/test_middleware.py::TestRateLimiter -v \

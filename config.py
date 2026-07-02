@@ -3,7 +3,11 @@ import yaml
 from pathlib import Path
 from typing import Optional, List, Dict
 
-_TESTING = os.environ.get('TESTING', '').lower() in ('1', 'true', 'yes')
+# Project-namespaced test flag. Deliberately NOT the generic `TESTING`, which is
+# commonly set by CI images / Docker layers and could accidentally trigger the
+# DB-bypass on a production trading server (silently swapping to :memory: and
+# zeroing out accounts).
+_TESTING = os.environ.get('ALPACA_TESTING', '').lower() in ('1', 'true', 'yes')
 
 try:
     from pydantic_settings import BaseSettings
