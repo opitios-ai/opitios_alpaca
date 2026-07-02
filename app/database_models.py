@@ -501,8 +501,6 @@ def save_order_details(
     Returns:
         成功返回 True，失败返回 False
     """
-    global db_manager
-    
     try:
         if db_manager is None or not db_manager._initialized:
             logger.error("Database manager not initialized")
@@ -556,8 +554,6 @@ def get_auto_sell_enabled(symbol: str, account_name: str = None, broker: str = N
     Returns:
         True 允许自动卖出，False 不允许
     """
-    global db_manager
-    
     try:
         if db_manager is None or not db_manager._initialized:
             logger.warning("Database manager not initialized, defaulting to disallow auto-sell")
@@ -611,8 +607,6 @@ def close_order_tracking(symbol: str, account_name: str, broker: str = 'alpaca')
     Returns:
         成功返回 True，失败返回 False
     """
-    global db_manager
-    
     try:
         if db_manager is None or not db_manager._initialized:
             logger.warning("Database manager not initialized, skip close_order_tracking")
