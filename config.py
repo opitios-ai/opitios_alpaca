@@ -3,6 +3,8 @@ import yaml
 from pathlib import Path
 from typing import Optional, List, Dict
 
+_TESTING = os.environ.get('TESTING', '').lower() in ('1', 'true', 'yes')
+
 try:
     from pydantic_settings import BaseSettings
 except ImportError:
@@ -76,7 +78,22 @@ def load_secrets():
 
 
 # Load secrets at module level
-secrets, database_url = load_secrets()
+if _TESTING:
+    secrets = {
+        'jwt': {'secret_key': 'test_jwt_secret', 'algorithm': 'HS256', 'expiration_hours': 24},
+        'app': {'debug': True, 'log_level': 'INFO', 'allowed_origins': ['*']},
+        'redis': {'host': 'localhost', 'port': 6379, 'db': 0},
+        'rate_limit': {'default_limit': 120, 'window_seconds': 60},
+        'trading': {
+            'real_data_only': False, 'enable_mock_data': True,
+            'strict_error_handling': False, 'max_option_symbols_per_request': 20,
+            'minimum_balance': 0.0,
+        },
+        'accounts': {},
+    }
+    database_url = 'sqlite:///:memory:'
+else:
+    secrets, database_url = load_secrets()
 
 
 class Settings(BaseSettings):
