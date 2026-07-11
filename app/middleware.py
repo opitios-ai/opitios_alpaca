@@ -21,13 +21,12 @@ import redis
 from config import settings
 
 
-# JWT配置
-JWT_SECRET = (
-    settings.jwt_secret if hasattr(settings, 'jwt_secret')
-    else "your-secret-key"
-)
-JWT_ALGORITHM = "HS512"
-JWT_EXPIRATION_HOURS = 24
+# JWT配置 —— 统一从 config.settings 读取（config.py 在 secret 缺失时启动即报错）。
+# 算法必须与签发方一致：opitios_service 用 HS512 签发，settings.jwt_algorithm
+# 默认即 HS512，签发与验证两侧读同一配置。
+JWT_SECRET = settings.jwt_secret
+JWT_ALGORITHM = settings.jwt_algorithm
+JWT_EXPIRATION_HOURS = settings.jwt_expiration_hours
 
 # Redis连接 (用于分布式rate limiting)
 redis_client = None
