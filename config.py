@@ -66,6 +66,14 @@ def load_secrets():
     database_url = yaml_config.get('database', {}).get('url')
     if not database_url:
         raise ValueError("Database URL is required in secrets.yml under 'database.url'")
+
+    # JWT secret is REQUIRED - fail fast instead of silently falling back to a
+    # well-known default secret (previously "CHANGE_THIS_SECRET_KEY_IN_PRODUCTION")
+    if not yaml_config.get('jwt', {}).get('secret_key'):
+        raise ValueError(
+            "JWT secret key is required in secrets.yml under 'jwt.secret_key'. "
+            "Refusing to start without it (no insecure default fallback)."
+        )
     
     # Load accounts from database (REQUIRED)
     try:
@@ -126,8 +134,11 @@ class Settings(BaseSettings):
     log_level: str = secrets.get('app', {}).get('log_level', "INFO")
     
     # JWT Configuration
-    jwt_secret: str = secrets.get('jwt', {}).get('secret_key', "CHANGE_THIS_SECRET_KEY_IN_PRODUCTION")
-    jwt_algorithm: str = secrets.get('jwt', {}).get('algorithm', "HS256")
+    # secret_key presence is validated in load_secrets() (fail-fast, no default).
+    # Default algorithm is HS512 to match the token issuer (opitios_service
+    # signs with HS512; middleware historically verified HS512).
+    jwt_secret: str = secrets['jwt']['secret_key']
+    jwt_algorithm: str = secrets.get('jwt', {}).get('algorithm', "HS512")
     jwt_expiration_hours: int = secrets.get('jwt', {}).get('expiration_hours', 24)
     
     # Redis Configuration
