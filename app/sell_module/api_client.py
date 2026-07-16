@@ -3,6 +3,7 @@ API 客户端
 卖出模块通过 HTTP API 调用获取数据和下单，而不是直接访问连接池
 """
 
+import os
 import aiohttp
 import asyncio
 from typing import List, Dict, Any, Optional
@@ -16,8 +17,12 @@ class AlpacaAPIClient:
     Alpaca API 客户端 - 通过 HTTP 调用内部 API endpoints
     替代直接连接池访问，符合标准架构流程
     """
-    
-    def __init__(self, base_url: str = "http://localhost:8090"):
+
+    def __init__(self, base_url: Optional[str] = None):
+        # Self-call base URL: configurable via env (needed in containers where
+        # the service may not be reachable at localhost:8090)
+        if base_url is None:
+            base_url = os.environ.get("ALPACA_SELF_URL", "http://localhost:8090")
         self.base_url = base_url.rstrip('/')
         self.session = None
         self.headers = {
