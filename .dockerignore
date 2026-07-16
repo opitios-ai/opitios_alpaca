@@ -1,0 +1,50 @@
+# VCS / CI / tooling
+.git
+.github
+.claude
+.gitattributes
+.gitignore
+
+# Tests & docs
+tests
+docs
+README.md
+README.zh.md
+容器化方案分析.md
+
+# Runtime artifacts
+logs
+*.log
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# Secrets - NEVER bake into the image (bind-mount at runtime instead)
+secrets.yml
+secrets.yaml
+*.secret
+.env
+.env.*
+
+# Python environments & caches
+venv
+venv*
+.venv
+env
+__pycache__
+**/__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+htmlcov
+.coverage
+coverage.xml
+
+# Docker files themselves
+Dockerfile
+.dockerignore
+docker-compose*.yml
+
+# Deploy script (host-side)
+deploy.sh
